@@ -5,6 +5,8 @@ import { useApp } from "./App";
 import RecordDrawer from "./RecordDrawer";
 import MailCenter from "./Mail";
 import { DEPARTMENTS } from "@/config/workspace.config.mjs";
+import { HELP, l2 } from "@/config/learn";
+import Link from "next/link";
 import { t, tx } from "@/lib/i18n";
 import { Rec, store } from "@/lib/store";
 import { fmt, saveBlob, toCsv, tone } from "@/lib/format";
@@ -84,6 +86,7 @@ export default function SectionView({ section }: { section: any }) {
           <div className="eyebrow" style={{ color: section.color }}>{tx(dept?.label, lang)}</div>
           <h2>{tx(section.label, lang)}</h2>
           <div className="sub">{rows ? <><b className="mono">{rows.length}</b> {t("records", lang)}{moneyKey && sum ? <> · {t("total", lang)} <b className="mono">{fmt({ type: "money" }, sum, lang)}</b></> : null}</> : "…"}{section.controlled && <> · <Icon n="lock" className="lockico" /> {t("controlled_short", lang)}</>}</div>
+          {HELP[section.id] && <div className="sec-desc">{l2(HELP[section.id], lang).split("\n")[0]} <Link href={`/learn?s=${section.id}`} style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{t("how_to", lang)} →</Link></div>}
         </div>
         <div className="stats">
           {counts.filter((c: any) => c.n || section.statuses.length <= 5).slice(0, 6).map((c: any) => (
@@ -124,14 +127,14 @@ export default function SectionView({ section }: { section: any }) {
           <>
             <div className="tablewrap"><table className="tb"><thead><tr>
               {th("title", t("title", lang))}{th("status", t("status", lang))}
-              {section.columns.map((k: string) => th(k, tx(fieldsByKey[k]?.label, lang)))}{th("updated", t("updated", lang))}
+              {section.columns.map((k: string) => th(k, tx(fieldsByKey[k]?.label, lang)))}<th className="col-upd"><button onClick={() => setSort((s) => (s?.k === "updated" ? { k: "updated", dir: s.dir === 1 ? -1 : 1 } : { k: "updated", dir: -1 }))}>{t("updated", lang)}<Icon n="sort" /></button></th>
             </tr></thead><tbody>
               {filtered.map((r) => (
                 <tr key={r.id} className="row" tabIndex={0} onClick={() => setOpen(r)} onKeyDown={(e) => e.key === "Enter" && setOpen(r)}>
                   <td style={{ fontWeight: 600 }}>{r.controlled && <Icon n="lock" className="lockico" />} {r.title} {r.data?.sample && <span className="chip c-vio" style={{ marginInlineStart: 6 }}>{t("sample", lang)}</span>}</td>
                   <td>{r.status && <span className={`chip dot ${tone(r.status)}`}>{r.status}</span>}</td>
                   {section.columns.map((k: string) => <td key={k} className={dueCls(r, k)}>{cell(r, k)}</td>)}
-                  <td className="faint mono" style={{ fontSize: 13 }}>{(r.updated_at || "").slice(0, 10)}</td>
+                  <td className="faint mono col-upd" style={{ fontSize: 13, whiteSpace: "nowrap" }}>{(r.updated_at || "").slice(0, 10)}</td>
                 </tr>))}
             </tbody></table></div>
             {!filtered.length && <div className="empty">{t("no_match", lang)}</div>}

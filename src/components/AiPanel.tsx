@@ -1,67 +1,111 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import Icon from "./Icon";
 import { useApp, findSection } from "./App";
 import { t, tx } from "@/lib/i18n";
-import { DEMO, Rec } from "@/lib/store";
+import { DEMO, Faq, Rec, isExternal, store } from "@/lib/store";
 import { recordMarkdown } from "@/lib/format";
+import { HELP } from "@/config/learn";
 
-export type AiContext = { title: string; section?: string; record?: Rec; rows?: Rec[] };
-type Msg = { role: "user" | "assistant"; content: string };
+export type AiContext = { title: string; section?: string; record?: Rec; rows?: Rec[]; ask?: string };
+type Msg = { role: "user" | "assistant"; content: string; src?: "faq" | "cache" | "ai"; faqId?: string; saved?: boolean; q?: string };
 
 export default function AiPanel({ ctx, onClose }: { ctx: AiContext; onClose: () => void }) {
   const { lang, me, toast } = useApp();
   const [msgs, setMsgs] = useState<Msg[]>([]);
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(ctx.ask || "");
   const [tier, setTier] = useState<"quick" | "deep">(ctx.section?.startsWith("legal") ? "deep" : "quick");
   const [busy, setBusy] = useState(false);
   const [usage, setUsage] = useState("");
+  const [sugg, setSugg] = useState<Faq[]>([]);
   const ctl = useRef<AbortController | null>(null);
   const sec = ctx.section ? findSection(ctx.section) : null;
+  const canSave = !isExternal(me.role);
 
+  // Similar saved questions while typing (free, no AI call)
+  useEffect(() => {
+    const text = q.trim(); if (text.length < 6) { setSugg([]); return; }
+    const id = setTimeout(() => store.faqSearch(text, lang === "ru" ? "ru" : lang === "en" ? "en" : undefined, 3).then(setSugg).catch(() => {}), 350);
+    return () => clearTimeout(id);
+  }, [q, lang]);
+
+  const who = () => `User: ${me.full_name} (role: ${me.role}${me.company ? ", company: " + me.company : ""}). Answer language: ${lang}.`;
   const context = () => {
-    let c = `User: ${me.full_name} (role: ${me.role}${me.company ? ", company: " + me.company : ""}). Answer language: ${lang}.\nCurrent view: ${ctx.title}${sec ? ` (section ${sec.id})` : ""}.`;
+    let c = `Current view: ${ctx.title}${sec ? ` (section ${sec.id})` : ""}.`;
+    if (sec && HELP[sec.id]) c += `\nHow this section works:\n${HELP[sec.id].en}`;
     if (ctx.record && sec) c += `\n\nCurrent record:\n${recordMarkdown(sec, ctx.record, "en")}`;
     if (ctx.rows?.length && sec) c += `\n\nRecords in view (${ctx.rows.length}):\n` + ctx.rows.map((r) => `- ${r.title} [${r.status}] ${sec.columns.map((k: string) => r.data?.[k] ? `${k}=${r.data[k]}` : "").filter(Boolean).join("; ")}`).join("\n");
     return c.slice(0, 24000);
   };
 
-  const ask = async () => {
-    const text = q.trim(); if (!text || busy) return;
-    const next: Msg[] = [...msgs, { role: "user", content: text }, { role: "assistant", content: "" }];
-    setMsgs(next); setQ(""); setBusy(true); ctl.current = new AbortController();
+  const useFaq = (f: Faq, question?: string) => {
+    setMsgs((m) => [...m, { role: "user", content: question || f.question }, { role: "assistant", content: f.answer, src: "faq", faqId: f.id, q: question || f.question }]);
+    setQ(""); setSugg([]); store.faqHit(f.id).catch(() => {});
+  };
+
+  const ask = async (force = false, override?: string) => {
+    const text = (override ?? q).trim(); if (!text || busy) return;
+    // A very close saved answer is shown first, without spending tokens
+    if (!force && msgs.length === 0) {
+      const best = (await store.faqSearch(text, undefined, 1).catch(() => []))[0];
+      if (best && (best.sim || 0) >= 0.72) { useFaq(best, text); return; }
+    }
+    if (DEMO) { toast(t("ai_demo", lang), true); return; }
+    const history = msgs.filter((m) => m.src !== "faq").map(({ role, content }) => ({ role, content }));
+    const next: Msg[] = [...msgs, { role: "user", content: text }, { role: "assistant", content: "", src: "ai", q: text }];
+    setMsgs(next); setQ(""); setSugg([]); setBusy(true); ctl.current = new AbortController();
     try {
       const res = await fetch("/api/ai", { method: "POST", headers: { "Content-Type": "application/json" }, signal: ctl.current.signal,
-        body: JSON.stringify({ tier, context: context(), messages: next.slice(0, -1).slice(-10) }) });
-      if (res.status === 429) { toast(t("ai_limit", lang), true); setMsgs(next.slice(0, -1)); return; }
+        body: JSON.stringify({ tier, context: context(), who: who(), section: ctx.section || "", lang, messages: [...history, { role: "user", content: text }].slice(-10) }) });
+      if (res.status === 429) { toast(t("ai_limit", lang), true); setMsgs(next.slice(0, -2)); return; }
       if (!res.ok || !res.body) throw new Error(await res.text());
       setUsage(res.headers.get("x-ai-usage") || "");
+      const src = res.headers.get("x-ai-cache") === "hit" ? "cache" : "ai";
       const reader = res.body.getReader(); const dec = new TextDecoder(); let acc = "";
-      for (;;) { const { done, value } = await reader.read(); if (done) break; acc += dec.decode(value, { stream: true }); setMsgs([...next.slice(0, -1), { role: "assistant", content: acc }]); }
+      for (;;) { const { done, value } = await reader.read(); if (done) break; acc += dec.decode(value, { stream: true }); setMsgs([...next.slice(0, -1), { role: "assistant", content: acc, src, q: text }]); }
     } catch (e: any) { if (e.name !== "AbortError") toast(e.message || "Error", true); }
     finally { setBusy(false); }
+  };
+  const askAnyway = (m: Msg) => ask(true, m.q);
+  const send = () => ask(false);
+  const saveFaq = async (i: number) => {
+    const m = msgs[i]; if (!m.q) return;
+    try { await store.faqSave({ question: m.q, answer: m.content, lang: lang === "ru" ? "ru" : lang, section: ctx.section || null, source: "ai" }); setMsgs((x) => x.map((y, j) => (j === i ? { ...y, saved: true } : y))); toast(t("saved_faq", lang)); }
+    catch (e: any) { toast(e.message || "Error", true); }
   };
 
   return (
     <>
       <div className="scrim" style={{ zIndex: 64 }} onClick={onClose} />
       <aside className="ai" role="dialog" aria-modal="true" aria-label={t("ai_title", lang)}>
-        <div className="drawer-h"><div style={{ flex: 1, minWidth: 0 }}><div className="eyebrow">{t("ai_title", lang)}</div><h2 style={{ fontSize: 16 }}>{ctx.record ? ctx.record.title : ctx.title}</h2>
+        <div className="drawer-h"><div style={{ flex: 1, minWidth: 0 }}><div className="eyebrow">{t("ai_title", lang)}</div><h2 style={{ fontSize: 18 }}>{ctx.record ? ctx.record.title : ctx.title}</h2>
           <div className="seg" role="group"><button className={tier === "quick" ? "on" : ""} onClick={() => setTier("quick")}>{t("ai_quick", lang)}</button><button className={tier === "deep" ? "on" : ""} onClick={() => setTier("deep")}>{t("ai_deep", lang)}</button></div>
-          <div className="faint" style={{ fontSize: 11.5, marginTop: 6 }}>{t("ai_quick_hint", lang)}</div></div>
+          <div className="faint" style={{ fontSize: 13, marginTop: 6 }}>{t("ai_quick_hint", lang)}</div></div>
           <button className="iconbtn" onClick={onClose} aria-label={t("close", lang)}><Icon n="x" /></button></div>
         <div className="ai-msgs">
           {DEMO && <div className="banner"><Icon n="info" /><span>{t("ai_demo", lang)}</span></div>}
+          {!msgs.length && <div className="faint" style={{ fontSize: 14 }}><Icon n="book" className="lockico" /> {t("ai_faq_hint", lang)}</div>}
           {msgs.map((m, i) => m.role === "user" ? <div key={i} className="ai-u">{m.content}</div>
-            : <div key={i} className="ai-a md" dangerouslySetInnerHTML={{ __html: m.content ? (DOMPurify.sanitize(marked.parse(m.content) as string)) : "…" }} />)}
+            : <div key={i} className="ai-a"><div className="md" dangerouslySetInnerHTML={{ __html: m.content ? (DOMPurify.sanitize(marked.parse(m.content) as string)) : "…" }} />
+              {m.content && !(busy && i === msgs.length - 1) && <div className="ai-src">
+                {m.src === "faq" && <span className="chip c-ok"><Icon n="book" className="lockico" />{t("from_faq", lang)}</span>}
+                {m.src === "cache" && <span className="chip c-ok"><Icon n="clock" className="lockico" />{t("from_cache", lang)}</span>}
+                {m.src === "faq" && !DEMO && i === msgs.length - 1 && <button className="btn ghost sm" onClick={() => askAnyway(m)}><Icon n="spark" />{t("ask_ai_anyway", lang)}</button>}
+                {m.src !== "faq" && canSave && (m.saved ? <span className="chip c-info"><Icon n="check" className="lockico" />{t("saved_faq", lang)}</span>
+                  : <button className="btn ghost sm" onClick={() => saveFaq(i)}><Icon n="book" />{t("save_faq", lang)}</button>)}
+                <button className="btn ghost sm" onClick={() => navigator.clipboard.writeText(m.content).then(() => toast(t("copied", lang)))}><Icon n="copy" />{t("copy", lang)}</button>
+              </div>}
+            </div>)}
         </div>
         <div className="ai-compose">
-          <textarea className="input" rows={3} value={q} placeholder={t("ai_ph", lang)} disabled={DEMO} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) ask(); }} aria-label={t("ai_ph", lang)} />
-          <div className="toolbar"><span className="faint" style={{ fontSize: 11.5 }}>{usage && `${t("ai_usage", lang)}: ${usage}`}</span><span style={{ flex: 1 }} />
+          {sugg.length > 0 && <div className="faq-sugg"><div className="eyebrow">{t("similar", lang)}</div>
+            {sugg.map((f) => <button key={f.id} onClick={() => useFaq(f)}><Icon n="book" /><span>{f.question}</span>{f.verified && <span className="chip c-ok" style={{ marginInlineStart: "auto" }}>{t("verified", lang)}</span>}</button>)}</div>}
+          <textarea className="input" rows={3} value={q} placeholder={t("ai_ph", lang)} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send(); }} aria-label={t("ai_ph", lang)} />
+          <div className="toolbar"><span className="faint" style={{ fontSize: 12.5 }}>{usage && `${t("ai_usage", lang)}: ${usage}`}</span><span style={{ flex: 1 }} />
             {busy && <button className="btn" onClick={() => ctl.current?.abort()}>Stop</button>}
-            <button className="btn primary" disabled={DEMO || busy || !q.trim()} onClick={ask}><Icon n="spark" />{t("send", lang)}</button></div>
+            <button id="ai-send" className="btn primary" disabled={busy || !q.trim()} onClick={send}><Icon n="spark" />{t("send", lang)}</button></div>
         </div>
       </aside>
     </>

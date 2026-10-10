@@ -1,5 +1,5 @@
 "use client";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Icon from "./Icon";
@@ -11,6 +11,7 @@ import SectionView from "./SectionView";
 import Admin from "./Admin";
 import Roles from "./Roles";
 import MyProfile from "./MyProfile";
+import Learn from "./Learn";
 import { ComposerModal, MailInit } from "./Mail";
 import AiPanel, { AiContext } from "./AiPanel";
 
@@ -40,6 +41,7 @@ export default function App({ slug }: { slug: string[] }) {
   const [mail, setMail] = useState<MailInit | null>(null);
   const [people, setPeople] = useState<Profile[]>([]);
   const [rules, setRules] = useState<Rule[] | null>(null);
+  const navStack = useRef<string[]>([]);
 
   const route = slug.join("/");
   const sectionId = slug.length === 2 ? `${slug[0]}.${slug[1]}` : "";
@@ -62,8 +64,10 @@ export default function App({ slug }: { slug: string[] }) {
     setMe(p); setLoaded(true); setTick((x) => x + 1);
     if (!p && !DEMO) router.replace("/login");
     if (p && !isExternal(p.role)) store.profiles().then(setPeople).catch(() => {});
+    if (p && ["owner", "admin", "management", "legal"].includes(p.role)) store.faqList().catch(() => {}); // loads the starter FAQ once
   }, [router]);
   useEffect(() => { reload(); }, [reload]);
+  useEffect(() => { const st = navStack.current; if (st.length > 1 && st[st.length - 2] === route) st.pop(); else if (st[st.length - 1] !== route) st.push(route); }, [route]);
   useEffect(() => { if (section) setOpenDepts((o) => ({ ...o, [section.dept]: true })); setRailOpen(false); }, [route]); // eslint-disable-line
 
   const toast = useCallback((m: string, err?: boolean) => {
@@ -83,16 +87,18 @@ export default function App({ slug }: { slug: string[] }) {
   const depts = DEPARTMENTS.map((d: any) => ({ ...d, secs: SECTIONS.filter((s) => s.dept === d.key && access.read.has(s.id)) })).filter((d: any) => d.secs.length);
   const isAdmin = me.role === "owner" || me.role === "admin";
   const dept = section ? DEPARTMENTS.find((d: any) => d.key === section.dept) : null;
-  const special: Record<string, [string, string]> = { "admin/users": [t("admin", lang), t("users", lang)], "admin/roles": [t("admin", lang), t("roles", lang)], me: [t("workspace", lang), t("my_profile", lang)] };
+  const special: Record<string, [string, string]> = { "admin/users": [t("admin", lang), t("users", lang)], "admin/roles": [t("admin", lang), t("roles", lang)], me: [t("workspace", lang), t("my_profile", lang)], learn: [t("workspace", lang), t("learn", lang)] };
   const crumbGroup = section ? tx(dept.label, lang) : special[route]?.[0] || t("workspace", lang);
   const crumbTitle = section ? tx(section.label, lang) : special[route]?.[1] || t("overview", lang);
   const curLang = LANGS.find((l) => l.code === lang)!;
+  const goBack = () => { if (navStack.current.length > 1) router.back(); else router.push("/"); };
 
   let body: React.ReactNode;
   if (!route) body = <Dashboard depts={depts} />;
   else if (route === "admin/users") body = isAdmin ? <Admin /> : <div className="empty">{t("no_access", lang)}</div>;
   else if (route === "admin/roles") body = isAdmin ? <Roles /> : <div className="empty">{t("no_access", lang)}</div>;
   else if (route === "me") body = <MyProfile />;
+  else if (route === "learn") body = <Learn />;
   else if (section && access.read.has(section.id)) body = <SectionView key={section.id} section={section} />;
   else body = <div className="card empty">{t("no_access", lang)}</div>;
 
@@ -104,6 +110,7 @@ export default function App({ slug }: { slug: string[] }) {
             <div className="prod"><i />{t("workspace", lang)}</div></div>
           <nav>
             <Link href="/" className={`nav-item top ${!route ? "active" : ""}`} style={{ ["--dc" as any]: "#FF6A2B" }}><Icon n="home" /><span>{t("overview", lang)}</span></Link>
+            <Link href="/learn" className={`nav-item top ${route === "learn" ? "active" : ""}`} style={{ ["--dc" as any]: "#14B8A6" }}><Icon n="grad" /><span>{t("learn", lang)}</span></Link>
             <div className="nav-label">{t("departments", lang)}</div>
             {depts.map((d: any) => {
               const open = !!openDepts[d.key];
@@ -140,6 +147,7 @@ export default function App({ slug }: { slug: string[] }) {
         <div className="main">
           <header className="topbar">
             <button className="iconbtn burger" aria-label={t("menu", lang)} onClick={() => setRailOpen(!railOpen)}><Icon n="menu" /></button>
+            {route && <button className="iconbtn backbtn" title={t("back", lang)} aria-label={t("back", lang)} onClick={goBack}><Icon n="back" /></button>}
             <div className="crumb"><small>{crumbGroup}</small><h1>{crumbTitle}</h1></div>
             <div className="tb-right">
               <button className="btn sm" onClick={() => setAi({ title: crumbTitle, section: sectionId })}><Icon n="spark" />{t("ask_ai", lang)}</button>

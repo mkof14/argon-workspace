@@ -2,6 +2,7 @@
 import { createBrowserClient } from "@supabase/ssr";
 import { allSections, defaultRules, ROLES } from "@/config/workspace.config.mjs";
 import { demoSeed, DEMO_PEOPLE } from "./demo";
+import { SEED_FAQ } from "@/config/learn";
 
 export type Rec = {
   id: string; section: string; title: string; status: string | null; data: Record<string, any>;
@@ -11,6 +12,7 @@ export type Profile = { id: string; email: string; full_name: string; role: stri
 export type Rule = { section: string; role: string; can_write: boolean; external: boolean };
 export type FileItem = { name: string; path: string; size: number; type: string; created_at?: string };
 export const BUCKET = "files";
+export type Faq = { id: string; question: string; answer: string; lang: string; section: string | null; verified: boolean; hits: number; source?: string; created_by?: string | null; created_at?: string; sim?: number };
 export type Comment = { id: string; record_id: string; author: string | null; body: string; created_at: string };
 export type Activity = { id: number; record_id: string | null; section: string; actor: string | null; action: string; detail: any; created_at: string };
 export type Access = { read: Set<string>; write: Set<string> };
@@ -39,7 +41,7 @@ export function accessFor(role: string, rules?: Rule[] | null): Access {
 
 /* ---------------- Demo store (browser only) ---------------- */
 const DKEY = "agronws.demo.v1";
-type DemoDB = { records: Rec[]; comments: Comment[]; activity: Activity[]; role: string; profiles: Profile[]; rules?: Rule[]; files?: (FileItem & { data: string })[] };
+type DemoDB = { records: Rec[]; comments: Comment[]; activity: Activity[]; role: string; profiles: Profile[]; rules?: Rule[]; files?: (FileItem & { data: string })[]; faq?: Faq[] };
 function demoLoad(): DemoDB {
   try { const s = localStorage.getItem(DKEY); if (s) return JSON.parse(s); } catch {}
   const db: DemoDB = { records: demoSeed(), comments: [], activity: [], role: "owner", profiles: DEMO_PEOPLE };
@@ -58,6 +60,13 @@ function demoVisible(db: DemoDB, r: Rec) {
   if (isExternal(me.role) && !(r.company === "*" || (r.company && r.company === me.company))) return false;
   return true;
 }
+
+function demoFaq(db: DemoDB): Faq[] {
+  if (!db.faq) { db.faq = SEED_FAQ.flatMap((f, i) => (["en", "ru"] as const).map((l) => ({ id: `faq-${i}-${l}`, question: f.q[l], answer: f.a[l], lang: l, section: f.section || null, verified: true, hits: 0, source: "seed" }))); demoSave(db); }
+  return db.faq;
+}
+const words = (s: string) => new Set(s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((w) => w.length > 2));
+export function textSim(a: string, b: string) { const A = words(a), B = words(b); if (!A.size || !B.size) return 0; let n = 0; A.forEach((w) => { if ([...B].some((x) => x.startsWith(w.slice(0, 5)) || w.startsWith(x.slice(0, 5)))) n++; }); return n / Math.max(A.size, B.size); }
 
 /* ---------------- Public API ---------------- */
 export const store = {
@@ -188,6 +197,39 @@ export const store = {
   async removeFile(path: string) {
     if (DEMO) { const db = demoLoad(); db.files = (db.files || []).filter((f) => f.path !== path); demoSave(db); return; }
     const { error } = await sb().storage.from(BUCKET).remove([path]); if (error) throw error;
+  },
+  /* ----- FAQ knowledge base ----- */
+  async faqSearch(q: string, lang?: string, n = 5): Promise<Faq[]> {
+    if (!q.trim()) return [];
+    if (DEMO) return demoFaq(demoLoad()).filter((f) => !lang || f.lang === lang).map((f) => ({ ...f, sim: textSim(q, f.question) })).filter((f) => f.sim! > 0.3).sort((a, b) => b.sim! - a.sim!).slice(0, n);
+    const { data, error } = await sb().rpc("faq_search", { q, lng: lang || null, n });
+    if (error) return []; return (data || []) as Faq[];
+  },
+  async faqList(): Promise<Faq[]> {
+    if (DEMO) return demoFaq(demoLoad());
+    const get = async () => (await sb().from("faq").select("*").order("verified", { ascending: false }).order("hits", { ascending: false }).limit(500)).data || [];
+    let rows = await get();
+    if (!rows.length) { // first run: load the starter FAQ (allowed for owner, admin, management, legal)
+      const seed = SEED_FAQ.flatMap((f) => (["en", "ru"] as const).map((l) => ({ question: f.q[l], answer: f.a[l], lang: l, section: f.section || null, verified: true, source: "seed" })));
+      const { error } = await sb().from("faq").insert(seed);
+      if (!error) rows = await get();
+    }
+    return rows as Faq[];
+  },
+  async faqSave(f: Partial<Faq> & { question: string; answer: string; lang: string }) {
+    if (DEMO) { const db = demoLoad(); const list = demoFaq(db); if (f.id) db.faq = list.map((x) => (x.id === f.id ? { ...x, ...f } as Faq : x)); else db.faq = [{ id: uid(), section: null, verified: false, hits: 0, source: "manual", ...f } as Faq, ...list]; demoSave(db); return; }
+    const body: any = { question: f.question, answer: f.answer, lang: f.lang, section: f.section ?? null, source: f.source || "manual" };
+    if (f.verified !== undefined) body.verified = f.verified;
+    const { error } = f.id ? await sb().from("faq").update({ ...body, updated_at: new Date().toISOString() }).eq("id", f.id) : await sb().from("faq").insert(body);
+    if (error) throw error;
+  },
+  async faqDelete(id: string) {
+    if (DEMO) { const db = demoLoad(); db.faq = demoFaq(db).filter((x) => x.id !== id); demoSave(db); return; }
+    const { error } = await sb().from("faq").delete().eq("id", id); if (error) throw error;
+  },
+  async faqHit(id: string) {
+    if (DEMO) { const db = demoLoad(); db.faq = demoFaq(db).map((x) => (x.id === id ? { ...x, hits: x.hits + 1 } : x)); demoSave(db); return; }
+    await sb().rpc("faq_hit", { fid: id });
   },
   async firstImage(prefix: string): Promise<string> {
     try { const fs = await this.files(prefix); const img = fs.find((f) => f.type.startsWith("image/")); return img ? await this.fileUrl(img.path) : ""; } catch { return ""; }
