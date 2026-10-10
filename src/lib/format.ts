@@ -20,6 +20,7 @@ export function fmt(field: any, v: any, lang: Lang): string {
     return n.toLocaleString(lang === "ar" ? "ar-AE" : lang === "ru" ? "ru-RU" : lang === "uk" ? "uk-UA" : "en-US");
   }
   if (field?.type === "check") return v ? "✓" : "";
+  if (field?.type === "checklist") { const n = typeof v === "object" ? Object.values(v).filter(Boolean).length : 0; return `${n} ✓`; }
   if (field?.type === "date") { try { return new Date(v).toLocaleDateString(lang === "ar" ? "ar-AE" : lang); } catch { return String(v); } }
   return String(v);
 }

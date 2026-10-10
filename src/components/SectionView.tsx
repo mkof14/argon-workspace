@@ -4,6 +4,7 @@ import Icon from "./Icon";
 import { useApp } from "./App";
 import RecordDrawer from "./RecordDrawer";
 import MailCenter from "./Mail";
+import LegalHub from "./LegalHub";
 import { DEPARTMENTS } from "@/config/workspace.config.mjs";
 import { HELP, l2 } from "@/config/learn";
 import Link from "next/link";
@@ -21,7 +22,7 @@ const days = (d: string) => Math.round((new Date(d).getTime() - new Date(new Dat
 export default function SectionView({ section }: { section: any }) {
   const { lang, access, toast, openAi, openMail, tick } = useApp();
   const [rows, setRows] = useState<Rec[] | null>(null);
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(() => (typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("q") || "" : ""));
   const [st, setSt] = useState("");
   const [view, setView] = useState<"table" | "board" | "gallery">(section.view === "gallery" ? "gallery" : section.board ? "board" : "table");
   const [open, setOpen] = useState<Rec | "new" | null>(null);
@@ -94,6 +95,7 @@ export default function SectionView({ section }: { section: any }) {
         </div>
       </section>
 
+      {section.view === "desks" && <LegalHub />}
       <div className="toolbar">
         {canWrite && <button className="btn primary" onClick={() => setOpen("new")}><Icon n="plus" />{t("new", lang)}</button>}
         <div className="seg" role="group">

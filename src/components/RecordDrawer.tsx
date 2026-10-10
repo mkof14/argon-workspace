@@ -6,6 +6,17 @@ import { t, tx } from "@/lib/i18n";
 import { Activity, Comment, Rec, isExternal, store } from "@/lib/store";
 import { elementToPdf, fmt, recordMarkdown, saveBlob, slug, tone } from "@/lib/format";
 import Attachments from "./Attachments";
+import { US_CHECKLIST, UAE_CHECKLIST, deskById } from "@/config/legal";
+
+export const GROUPS: Record<string, { en: string; ru: string }> = {
+  A: { en: "A · Product identification", ru: "A · Идентификация продукта" }, B: { en: "B · U.S. export review", ru: "B · Экспорт из США" },
+  C: { en: "C · UAE import review", ru: "C · Ввоз в ОАЭ" }, D: { en: "D · UAE installation & operation", ru: "D · Установка и эксплуатация в ОАЭ" },
+  E: { en: "E · Procurement & logistics", ru: "E · Закупка и логистика" }, F: { en: "F · Risk assessment", ru: "F · Оценка риска" },
+  G: { en: "G · Evidence", ru: "G · Подтверждение" }, H: { en: "Checklists", ru: "Чек-листы" },
+};
+export const CHECKLISTS: Record<string, string[]> = { us: US_CHECKLIST, uae: UAE_CHECKLIST };
+// Where an AI answer can be saved in a record, per section
+const APPLY: Record<string, string> = { "legal.matrix": "ai_review", "legal.requests": "answer", "legal.desks": "memo", "legal.issues": "action", "legal.programs": "elements" };
 
 const PEOPLE_KEYS = ["owner", "person", "requester", "engineer", "pm_name"];
 
@@ -61,6 +72,13 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
     const v = data[f.key] ?? ""; const set = (x: any) => setData((d) => ({ ...d, [f.key]: x })); const id = `f-${f.key}`;
     const ro = !canWrite;
     let ctl;
+    if (f.type === "checklist") {
+      const items = CHECKLISTS[f.list] || []; const val = (v && typeof v === "object" ? v : {}) as Record<string, boolean>;
+      const done = items.filter((_, i) => val[i]).length;
+      return <details key={f.key} className="field wide checklist"><summary><b>{tx(f.label, lang)}</b> <span className="chip mono" style={{ marginInlineStart: 6 }}>{done}/{items.length}</span>
+        <span className="bar" style={{ display: "inline-block", width: 120, verticalAlign: "middle", marginInlineStart: 8 }}><span style={{ width: `${(done / items.length) * 100}%` }} /></span></summary>
+        <div className="cl-grid">{items.map((it, i) => <label key={i} className="check"><input type="checkbox" disabled={ro} checked={!!val[i]} onChange={(e) => set({ ...val, [i]: e.target.checked })} /><span className="mono faint" style={{ minWidth: 22 }}>{i + 1}.</span>{it}</label>)}</div></details>;
+    }
     if (f.type === "html") return v ? <div key={f.key} className="field wide"><label>{tx(f.label, lang)}</label><iframe title={tx(f.label, lang)} className="mailframe" style={{ height: 560 }} srcDoc={String(v)} sandbox="" /></div> : null;
     if (f.type === "select") ctl = <select id={id} className="input" value={v} disabled={ro} onChange={(e) => set(e.target.value)}><option value="" />{f.options.map((o: string) => <option key={o}>{o}</option>)}</select>;
     else if (f.type === "long") ctl = <textarea id={id} className="input" value={v} readOnly={ro} rows={3} onChange={(e) => set(e.target.value)} />;
@@ -90,12 +108,13 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
             <button className="btn ghost sm" onClick={() => saveBlob(`AGRON_${slug(title)}.md`, md(), "text/markdown;charset=utf-8")}><Icon n="download" />{t("download", lang)}</button>
             <button className="btn sm" onClick={() => openMail({ section: section.id, record: current })}><Icon n="mail" />{t("email_btn", lang)}</button>
             {canWrite && <button className="btn ghost sm" onClick={dup}><Icon n="dup" />{t("duplicate", lang)}</button>}
-            <button className="btn sm" onClick={() => openAi({ title, section: section.id, record: current })}><Icon n="spark" />{t("ask_ai", lang)}</button>
+            {section.id === "legal.matrix" && <button className="btn sm" style={{ borderColor: "var(--dc)", color: "var(--dc)" }} onClick={() => openAi({ title, section: section.id, record: current, desk: "export", format: "item", ask: t("ai_review_ask", lang), onApply: canWrite ? (txt: string) => setData((d) => ({ ...d, ai_review: txt })) : undefined })}><Icon n="spark" />{t("ai_review_btn", lang)}</button>}
+            <button className="btn sm" onClick={() => openAi({ title, section: section.id, record: current, desk: deskById(data.desk)?.id || (section.dept === "legal" ? "export" : undefined), onApply: canWrite && APPLY[section.id] ? (txt: string) => setData((d) => ({ ...d, [APPLY[section.id]]: txt })) : undefined })}><Icon n="spark" />{t("ask_ai", lang)}</button>
           </div>}
           <div className="fgrid">
             <div className="field wide"><label htmlFor="f-title">{t("title", lang)}</label><input id="f-title" className="input" value={title} readOnly={!canWrite} onChange={(e) => setTitle(e.target.value)} /></div>
             <div className="field"><label htmlFor="f-status">{t("status", lang)}</label><select id="f-status" className="input" value={status} disabled={!canWrite} onChange={(e) => setStatus(e.target.value)}>{section.statuses.map((s: string) => <option key={s}>{s}</option>)}</select></div>
-            {section.fields.map(field)}
+            {section.fields.map((f: any, i: number) => { const g = f.group && f.group !== section.fields[i - 1]?.group ? <div key={`g-${f.group}`} className="fgroup wide">{(GROUPS[f.group] as any)?.[lang === "ru" ? "ru" : "en"]}</div> : null; return g ? [g, field(f)] : field(f); })}
             {gateBlocked && <div className="gate-msg wide">{tx(gate.msg, lang)}</div>}
             {canWrite && section.controlled && me.us_person && <label className="check wide"><input type="checkbox" checked={controlled} onChange={(e) => setControlled(e.target.checked)} /><Icon n="lock" className="lockico" />{t("controlled", lang)}</label>}
             {canWrite && section.external?.length > 0 && <div className="field wide"><label htmlFor="f-company">{t("visibility", lang)}</label><input id="f-company" className="input" value={company} onChange={(e) => setCompany(e.target.value)} placeholder="" /><span className="hint">{t("vis_hint", lang)}</span></div>}

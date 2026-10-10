@@ -7,16 +7,19 @@ import { useApp, findSection } from "./App";
 import { t, tx } from "@/lib/i18n";
 import { DEMO, Faq, Rec, isExternal, store } from "@/lib/store";
 import { recordMarkdown } from "@/lib/format";
-import { HELP } from "@/config/learn";
+import { HELP, l2 } from "@/config/learn";
+import { deskById } from "@/config/legal";
 
-export type AiContext = { title: string; section?: string; record?: Rec; rows?: Rec[]; ask?: string };
+export type AiContext = { title: string; section?: string; record?: Rec; rows?: Rec[]; ask?: string; desk?: string; format?: "item"; onApply?: (text: string) => void };
 type Msg = { role: "user" | "assistant"; content: string; src?: "faq" | "cache" | "ai"; faqId?: string; saved?: boolean; q?: string };
 
 export default function AiPanel({ ctx, onClose }: { ctx: AiContext; onClose: () => void }) {
   const { lang, me, toast } = useApp();
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [q, setQ] = useState(ctx.ask || "");
-  const [tier, setTier] = useState<"quick" | "deep">(ctx.section?.startsWith("legal") ? "deep" : "quick");
+  const desk = deskById(ctx.desk);
+  const [tier, setTier] = useState<"quick" | "deep">(ctx.section?.startsWith("legal") || desk ? "deep" : "quick");
+  const [applied, setApplied] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [usage, setUsage] = useState("");
   const [sugg, setSugg] = useState<Faq[]>([]);
@@ -48,7 +51,7 @@ export default function AiPanel({ ctx, onClose }: { ctx: AiContext; onClose: () 
   const ask = async (force = false, override?: string) => {
     const text = (override ?? q).trim(); if (!text || busy) return;
     // A very close saved answer is shown first, without spending tokens
-    if (!force && msgs.length === 0) {
+    if (!force && msgs.length === 0 && !ctx.record && !ctx.format) { // record-specific questions always go to AI
       const best = (await store.faqSearch(text, undefined, 1).catch(() => []))[0];
       if (best && (best.sim || 0) >= 0.72) { useFaq(best, text); return; }
     }
@@ -58,7 +61,7 @@ export default function AiPanel({ ctx, onClose }: { ctx: AiContext; onClose: () 
     setMsgs(next); setQ(""); setSugg([]); setBusy(true); ctl.current = new AbortController();
     try {
       const res = await fetch("/api/ai", { method: "POST", headers: { "Content-Type": "application/json" }, signal: ctl.current.signal,
-        body: JSON.stringify({ tier, context: context(), who: who(), section: ctx.section || "", lang, messages: [...history, { role: "user", content: text }].slice(-10) }) });
+        body: JSON.stringify({ tier, context: context(), who: who(), section: ctx.section || "", lang, desk: desk?.id || "", format: ctx.format || "", messages: [...history, { role: "user", content: text }].slice(-10) }) });
       if (res.status === 429) { toast(t("ai_limit", lang), true); setMsgs(next.slice(0, -2)); return; }
       if (!res.ok || !res.body) throw new Error(await res.text());
       setUsage(res.headers.get("x-ai-usage") || "");
@@ -70,6 +73,11 @@ export default function AiPanel({ ctx, onClose }: { ctx: AiContext; onClose: () 
   };
   const askAnyway = (m: Msg) => ask(true, m.q);
   const send = () => ask(false);
+  const saveMemo = async (i: number) => {
+    const m = msgs[i]; if (!m.q || !desk) return;
+    try { await store.save({ section: "legal.desks", title: m.q.slice(0, 120), status: "Draft", controlled: !!ctx.record?.controlled, data: { desk: desk.name.en, question: m.q, memo: m.content, related: ctx.record ? `${ctx.section}:${ctx.record.id} · ${ctx.record.title}` : "" } }); toast(t("memo_saved", lang)); }
+    catch (e: any) { toast(e.message || "Error", true); }
+  };
   const saveFaq = async (i: number) => {
     const m = msgs[i]; if (!m.q) return;
     try { await store.faqSave({ question: m.q, answer: m.content, lang: lang === "ru" ? "ru" : lang, section: ctx.section || null, source: "ai" }); setMsgs((x) => x.map((y, j) => (j === i ? { ...y, saved: true } : y))); toast(t("saved_faq", lang)); }
@@ -81,6 +89,7 @@ export default function AiPanel({ ctx, onClose }: { ctx: AiContext; onClose: () 
       <div className="scrim" style={{ zIndex: 64 }} onClick={onClose} />
       <aside className="ai" role="dialog" aria-modal="true" aria-label={t("ai_title", lang)}>
         <div className="drawer-h"><div style={{ flex: 1, minWidth: 0 }}><div className="eyebrow">{t("ai_title", lang)}</div><h2 style={{ fontSize: 18 }}>{ctx.record ? ctx.record.title : ctx.title}</h2>
+          {desk && <div className="chip" style={{ color: desk.color, borderColor: desk.color, marginBottom: 8 }}><Icon n={desk.icon} className="lockico" />{l2(desk.name, lang)}</div>}
           <div className="seg" role="group"><button className={tier === "quick" ? "on" : ""} onClick={() => setTier("quick")}>{t("ai_quick", lang)}</button><button className={tier === "deep" ? "on" : ""} onClick={() => setTier("deep")}>{t("ai_deep", lang)}</button></div>
           <div className="faint" style={{ fontSize: 13, marginTop: 6 }}>{t("ai_quick_hint", lang)}</div></div>
           <button className="iconbtn" onClick={onClose} aria-label={t("close", lang)}><Icon n="x" /></button></div>
@@ -93,6 +102,8 @@ export default function AiPanel({ ctx, onClose }: { ctx: AiContext; onClose: () 
                 {m.src === "faq" && <span className="chip c-ok"><Icon n="book" className="lockico" />{t("from_faq", lang)}</span>}
                 {m.src === "cache" && <span className="chip c-ok"><Icon n="clock" className="lockico" />{t("from_cache", lang)}</span>}
                 {m.src === "faq" && !DEMO && i === msgs.length - 1 && <button className="btn ghost sm" onClick={() => askAnyway(m)}><Icon n="spark" />{t("ask_ai_anyway", lang)}</button>}
+                {ctx.onApply && m.src !== "faq" && <button className="btn sm" onClick={() => { ctx.onApply!(m.content); setApplied(i); toast(t("applied", lang)); }}><Icon n="check" />{applied === i ? t("applied", lang) : t("save_to_record", lang)}</button>}
+                {desk && m.src !== "faq" && canSave && <button className="btn ghost sm" onClick={() => saveMemo(i)}><Icon n="file" />{t("save_memo", lang)}</button>}
                 {m.src !== "faq" && canSave && (m.saved ? <span className="chip c-info"><Icon n="check" className="lockico" />{t("saved_faq", lang)}</span>
                   : <button className="btn ghost sm" onClick={() => saveFaq(i)}><Icon n="book" />{t("save_faq", lang)}</button>)}
                 <button className="btn ghost sm" onClick={() => navigator.clipboard.writeText(m.content).then(() => toast(t("copied", lang)))}><Icon n="copy" />{t("copy", lang)}</button>

@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createHash } from "node:crypto";
 import { adminClient, currentProfile, userClient } from "@/lib/server/supabase";
+import { ITEM_REVIEW_FORMAT, PROJECT_RULES, deskById } from "@/config/legal";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,7 +27,9 @@ export async function POST(req: Request) {
   if (!me || me.role === "pending") return new Response("Not signed in", { status: 401 });
   if (!process.env.ANTHROPIC_API_KEY) return new Response("AI is not configured", { status: 503 });
 
-  const { messages = [], tier = "quick", context = "", who = "", section = "", lang = "en" } = await req.json();
+  const { messages = [], tier = "quick", context = "", who = "", section = "", lang = "en", desk: deskId = "", format = "" } = await req.json();
+  const desk = deskById(String(deskId));
+  const legal = !!desk || String(section).startsWith("legal.");
   const clean = (messages as any[]).filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content)
     .slice(-10).map((m) => ({ role: m.role, content: String(m.content).slice(0, 8000) }));
   if (!clean.length || clean[clean.length - 1].role !== "user") return new Response("Bad request", { status: 400 });
@@ -41,7 +44,7 @@ export async function POST(req: Request) {
   // 1) Same first question on the same data → reuse the saved answer (no tokens)
   const first = clean.length === 1;
   const q = clean[clean.length - 1].content;
-  const key = sha([norm(q), tier, lang, section, sha(String(context))].join("|"));
+  const key = sha([norm(q), tier, lang, section, desk?.id || "", format, sha(String(context))].join("|"));
   if (first) {
     const { data: hit } = await admin.from("ai_cache").select("answer,created_at,hits").eq("key", key).maybeSingle();
     if (hit && Date.now() - new Date(hit.created_at).getTime() < CACHE_DAYS * 864e5) {
@@ -61,9 +64,10 @@ export async function POST(req: Request) {
   const model = deep ? process.env.AI_MODEL_DEEP || "claude-sonnet-5-5" : process.env.AI_MODEL_QUICK || "claude-haiku-5-5";
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   const stream = client.messages.stream({
-    model, max_tokens: deep ? 4000 : 1500,
+    model, max_tokens: format === "item" ? 6000 : deep ? 4000 : 1500,
     // The fixed system prompt is cached, so repeated questions cost less.
-    system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } } as any, { type: "text", text: [String(who).slice(0, 500), String(context).slice(0, 24000), faqText].filter(Boolean).join("\n\n") }],
+    system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } } as any,
+      ...(legal ? [{ type: "text", text: `${PROJECT_RULES}${desk ? `\n\nYOUR ROLE: ${desk.persona}\nKey law: ${desk.laws.join("; ")}. Authorities: ${desk.authorities.join(", ")}.` : ""}${format === "item" ? `\n\n${ITEM_REVIEW_FORMAT}` : ""}`, cache_control: { type: "ephemeral" } } as any] : []), { type: "text", text: [String(who).slice(0, 500), String(context).slice(0, 24000), faqText].filter(Boolean).join("\n\n") }],
     messages: clean as any,
   });
 
