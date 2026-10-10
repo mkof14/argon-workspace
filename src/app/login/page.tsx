@@ -25,6 +25,8 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [code, setCode] = useState("");
+  const [codeSent, setCodeSent] = useState<"" | "email" | "recovery">("");
   const [err, setErr] = useState("");
   const [enabled, setEnabled] = useState<Provider[]>([]);
   useEffect(() => {
@@ -43,20 +45,26 @@ export default function Login() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault(); setErr(""); setMsg(""); setBusy(true);
     try {
+      if (codeSent) { // 6-digit code from the email: works on any device, no link needed
+        const { error } = await sb().auth.verifyOtp({ email, token: code.trim(), type: codeSent });
+        if (error) throw error;
+        router.replace(codeSent === "recovery" ? "/auth/reset" : "/"); return;
+      }
       if (mode === "password") {
         const { error } = await sb().auth.signInWithPassword({ email, password });
         if (error) throw error; router.replace("/"); return;
       }
       if (mode === "link") {
         const { error } = await sb().auth.signInWithOtp({ email, options: { emailRedirectTo: `${origin}/auth/callback`, shouldCreateUser: true } });
-        if (error) throw error; setMsg(t("magic_sent", lang));
+        if (error) throw error; setMsg(t("code_sent", lang)); setCodeSent("email");
       }
       if (mode === "forgot") {
-        const { error } = await sb().auth.resetPasswordForEmail(email, { redirectTo: `${origin}/auth/callback?next=/auth/reset` });
-        if (error) throw error; setMsg(t("reset_sent", lang));
+        const { error } = await sb().auth.resetPasswordForEmail(email, { redirectTo: `${origin}/auth/reset` });
+        if (error) throw error; setMsg(t("code_sent", lang)); setCodeSent("recovery");
       }
     } catch (e: any) { setErr(friendly(e.message || "Error")); } finally { setBusy(false); }
   };
+  const switchMode = (m: Mode) => { setMode(m); setErr(""); setMsg(""); setCodeSent(""); setCode(""); };
   const oauth = async (provider: Provider) => {
     const { error } = await sb().auth.signInWithOAuth({ provider, options: { redirectTo: `${origin}/auth/callback`, scopes: provider === "azure" ? "email openid profile" : undefined } });
     if (error) setErr(error.message);
@@ -78,18 +86,20 @@ export default function Login() {
           </select>
         </div>
         {mode !== "forgot" && <div className="seg auth-seg" role="tablist">
-          <button role="tab" aria-selected={mode === "password"} className={mode === "password" ? "on" : ""} onClick={() => { setMode("password"); setMsg(""); setErr(""); }}><Icon n="key" />{t("with_password", lang)}</button>
-          <button role="tab" aria-selected={mode === "link"} className={mode === "link" ? "on" : ""} onClick={() => { setMode("link"); setMsg(""); setErr(""); }}><Icon n="mail" />{t("with_link", lang)}</button>
+          <button role="tab" aria-selected={mode === "password"} className={mode === "password" ? "on" : ""} onClick={() => switchMode("password")}><Icon n="key" />{t("with_password", lang)}</button>
+          <button role="tab" aria-selected={mode === "link"} className={mode === "link" ? "on" : ""} onClick={() => switchMode("link")}><Icon n="mail" />{t("with_link", lang)}</button>
         </div>}
         <form onSubmit={submit} className="auth-form">
           <div className="field"><label htmlFor="email">{t("email", lang)}</label>
             <input id="email" className="input" type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@agron1.com" /></div>
           {mode === "password" && <PasswordInput id="password" label={t("password", lang)} value={password} onChange={setPassword} showLabel={t("show_pw", lang)} hideLabel={t("hide_pw", lang)} />}
-          {mode === "password" && <button type="button" className="linkbtn" onClick={() => { setMode("forgot"); setErr(""); setMsg(""); }}>{t("forgot", lang)}</button>}
-          {mode === "link" && <p className="faint" style={{ margin: 0 }}>{t("link_hint", lang)}</p>}
+          {mode === "password" && <button type="button" className="linkbtn" onClick={() => switchMode("forgot")}>{t("forgot", lang)}</button>}
+          {codeSent && <div className="field"><label htmlFor="code">{t("code_label", lang)}</label>
+            <input id="code" className="input code-input" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6,8}" maxLength={8} required value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} placeholder="123456" autoFocus /></div>}
+          {mode === "link" && !codeSent && <p className="faint" style={{ margin: 0 }}>{t("link_hint", lang)}</p>}
           {mode === "forgot" && <p className="faint" style={{ margin: 0 }}>{t("forgot_hint", lang)}</p>}
-          <button className="btn primary big" type="submit" disabled={busy}>{busy ? "…" : mode === "password" ? t("sign_in", lang) : mode === "link" ? t("magic", lang) : t("send_reset", lang)}</button>
-          {mode === "forgot" && <button type="button" className="linkbtn" onClick={() => { setMode("password"); setErr(""); setMsg(""); }}>{t("back_signin", lang)}</button>}
+          <button className="btn primary big" type="submit" disabled={busy}>{busy ? "…" : codeSent ? t("sign_in", lang) : mode === "password" ? t("sign_in", lang) : mode === "link" ? t("send_code", lang) : t("send_reset", lang)}</button>
+          {mode === "forgot" && <button type="button" className="linkbtn" onClick={() => switchMode("password")}>{t("back_signin", lang)}</button>}
         </form>
         {msg && <div className="banner" role="status"><Icon n="mail" /><span>{msg}</span></div>}
         {err && <div className="gate-msg" role="alert">{err}</div>}
