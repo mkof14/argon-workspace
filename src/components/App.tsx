@@ -3,17 +3,21 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Icon from "./Icon";
-import { DEPARTMENTS, ROLES, allSections } from "@/config/workspace.config.mjs";
+import { DEPARTMENTS, DEPT_COLORS, ROLES, allSections } from "@/config/workspace.config.mjs";
 import { LANGS, Lang, t, tx } from "@/lib/i18n";
-import { DEMO, Profile, accessFor, store, Access } from "@/lib/store";
+import { DEMO, Profile, Rule, accessFor, isExternal, store, Access } from "@/lib/store";
 import Dashboard from "./Dashboard";
 import SectionView from "./SectionView";
 import Admin from "./Admin";
+import Roles from "./Roles";
+import MyProfile from "./MyProfile";
+import { ComposerModal, MailInit } from "./Mail";
 import AiPanel, { AiContext } from "./AiPanel";
 
 type Ctx = {
   lang: Lang; me: Profile; access: Access; toast: (m: string, err?: boolean) => void;
   openAi: (c: AiContext) => void; reload: () => void; tick: number;
+  openMail: (m: MailInit) => void; people: Profile[]; rules: Rule[] | null; setRules: (r: Rule[]) => void;
 };
 const AppCtx = createContext<Ctx>(null as any);
 export const useApp = () => useContext(AppCtx);
@@ -33,6 +37,9 @@ export default function App({ slug }: { slug: string[] }) {
   const [openDepts, setOpenDepts] = useState<Record<string, boolean>>({});
   const [ai, setAi] = useState<AiContext | null>(null);
   const [tick, setTick] = useState(0);
+  const [mail, setMail] = useState<MailInit | null>(null);
+  const [people, setPeople] = useState<Profile[]>([]);
+  const [rules, setRules] = useState<Rule[] | null>(null);
 
   const route = slug.join("/");
   const sectionId = slug.length === 2 ? `${slug[0]}.${slug[1]}` : "";
@@ -50,8 +57,11 @@ export default function App({ slug }: { slug: string[] }) {
   const toggleTheme = () => { const next = dark ? "light" : "dark"; document.documentElement.setAttribute("data-theme", next); try { localStorage.setItem("agronws.theme", next); } catch {} setDark(!dark); };
 
   const reload = useCallback(async () => {
-    const p = await store.me(); setMe(p); setLoaded(true); setTick((x) => x + 1);
+    const p = await store.me();
+    if (p && p.role !== "pending") { try { setRules(await store.rules()); } catch {} }
+    setMe(p); setLoaded(true); setTick((x) => x + 1);
     if (!p && !DEMO) router.replace("/login");
+    if (p && !isExternal(p.role)) store.profiles().then(setPeople).catch(() => {});
   }, [router]);
   useEffect(() => { reload(); }, [reload]);
   useEffect(() => { if (section) setOpenDepts((o) => ({ ...o, [section.dept]: true })); setRailOpen(false); }, [route]); // eslint-disable-line
@@ -60,7 +70,7 @@ export default function App({ slug }: { slug: string[] }) {
     const id = Date.now() + Math.random(); setToasts((x) => [...x, { id, m, err }]);
     setTimeout(() => setToasts((x) => x.filter((y) => y.id !== id)), err ? 5200 : 3200);
   }, []);
-  const access = useMemo(() => accessFor(me?.role || "pending"), [me?.role]);
+  const access = useMemo(() => accessFor(me?.role || "pending", rules), [me?.role, rules]);
 
   if (!loaded || !me) return <div className="login"><div className="faint">…</div></div>;
 
@@ -73,44 +83,48 @@ export default function App({ slug }: { slug: string[] }) {
   const depts = DEPARTMENTS.map((d: any) => ({ ...d, secs: SECTIONS.filter((s) => s.dept === d.key && access.read.has(s.id)) })).filter((d: any) => d.secs.length);
   const isAdmin = me.role === "owner" || me.role === "admin";
   const dept = section ? DEPARTMENTS.find((d: any) => d.key === section.dept) : null;
-  const crumbGroup = section ? tx(dept.label, lang) : route === "admin/users" ? t("admin", lang) : t("workspace", lang);
-  const crumbTitle = section ? tx(section.label, lang) : route === "admin/users" ? t("users", lang) : t("overview", lang);
+  const special: Record<string, [string, string]> = { "admin/users": [t("admin", lang), t("users", lang)], "admin/roles": [t("admin", lang), t("roles", lang)], me: [t("workspace", lang), t("my_profile", lang)] };
+  const crumbGroup = section ? tx(dept.label, lang) : special[route]?.[0] || t("workspace", lang);
+  const crumbTitle = section ? tx(section.label, lang) : special[route]?.[1] || t("overview", lang);
   const curLang = LANGS.find((l) => l.code === lang)!;
 
   let body: React.ReactNode;
   if (!route) body = <Dashboard depts={depts} />;
   else if (route === "admin/users") body = isAdmin ? <Admin /> : <div className="empty">{t("no_access", lang)}</div>;
+  else if (route === "admin/roles") body = isAdmin ? <Roles /> : <div className="empty">{t("no_access", lang)}</div>;
+  else if (route === "me") body = <MyProfile />;
   else if (section && access.read.has(section.id)) body = <SectionView key={section.id} section={section} />;
   else body = <div className="card empty">{t("no_access", lang)}</div>;
 
   return (
-    <AppCtx.Provider value={{ lang, me, access, toast, openAi: setAi, reload, tick }}>
+    <AppCtx.Provider value={{ lang, me, access, toast, openAi: setAi, reload, tick, openMail: setMail, people, rules, setRules }}>
       <div className="app" onClick={(e) => { if (langOpen && !(e.target as HTMLElement).closest(".dd")) setLangOpen(false); }}>
         <aside className={`rail ${railOpen ? "open" : ""}`} aria-label={t("menu", lang)}>
           <div className="rail-brand"><img src="/logo-full.webp" alt="AGRON — Aerial-Ground Robotics Operations Network" width={640} height={187} />
             <div className="prod"><i />{t("workspace", lang)}</div></div>
           <nav>
-            <Link href="/" className={`nav-item ${!route ? "active" : ""}`}><Icon n="home" /><span>{t("overview", lang)}</span></Link>
+            <Link href="/" className={`nav-item top ${!route ? "active" : ""}`} style={{ ["--dc" as any]: "#FF6A2B" }}><Icon n="home" /><span>{t("overview", lang)}</span></Link>
             <div className="nav-label">{t("departments", lang)}</div>
             {depts.map((d: any) => {
               const open = !!openDepts[d.key];
               return (
-                <div key={d.key} className={`nav-dept ${open ? "open" : ""}`}>
+                <div key={d.key} className={`nav-dept ${open ? "open" : ""}`} style={{ ["--dc" as any]: (DEPT_COLORS as any)[d.key] }}>
                   <button className="nav-item" aria-expanded={open} onClick={() => setOpenDepts((o) => ({ ...o, [d.key]: !open }))}>
                     <Icon n={d.icon} /><span>{tx(d.label, lang)}</span><Icon n="chev" className="chev" />
                   </button>
                   {open && <div className="nav-sub">{d.secs.map((s: any) => (
-                    <Link key={s.id} href={`/${d.key}/${s.key}`} className={`nav-item ${sectionId === s.id ? "active" : ""}`}>{tx(s.label, lang)}</Link>
+                    <Link key={s.id} href={`/${d.key}/${s.key}`} className={`nav-item ${sectionId === s.id ? "active" : ""}`}><Icon n={s.icon} /><span>{tx(s.label, lang)}</span></Link>
                   ))}</div>}
                 </div>
               );
             })}
             {isAdmin && <><div className="nav-label">{t("admin", lang)}</div>
-              <Link href="/admin/users" className={`nav-item ${route === "admin/users" ? "active" : ""}`}><Icon n="gear" /><span>{t("users", lang)}</span></Link></>}
+              <Link href="/admin/users" className={`nav-item top ${route === "admin/users" ? "active" : ""}`} style={{ ["--dc" as any]: "#94A3B8" }}><Icon n="users" /><span>{t("users", lang)}</span></Link>
+              <Link href="/admin/roles" className={`nav-item top ${route === "admin/roles" ? "active" : ""}`} style={{ ["--dc" as any]: "#94A3B8" }}><Icon n="key" /><span>{t("roles", lang)}</span></Link></>}
           </nav>
           <div className="rail-foot">
-            <div className="me"><span className="avatar">{(me.full_name || me.email || "?").slice(0, 1).toUpperCase()}</span>
-              <div style={{ minWidth: 0 }}><b>{me.full_name}</b>{tx((ROLES as any)[me.role]?.label, lang)}{me.company ? ` · ${me.company}` : ""}</div></div>
+            <Link href="/me" className="me" style={{ textDecoration: "none", color: "inherit" }}><span className="avatar">{(me.full_name || me.email || "?").slice(0, 1).toUpperCase()}</span>
+              <div style={{ minWidth: 0 }}><b>{me.full_name}</b>{tx((ROLES as any)[me.role]?.label, lang)}{me.company ? ` · ${me.company}` : ""}</div></Link>
             {DEMO ? (
               <label className="field" style={{ color: "var(--rail-dim)" }}><span style={{ fontSize: 11 }}>{t("demo", lang)} · {t("view_as", lang)}</span>
                 <select className="input" style={{ background: "var(--rail-2)", borderColor: "var(--rail-line)", color: "var(--rail-ink)", padding: "5px 8px" }} value={me.role}
@@ -151,6 +165,7 @@ export default function App({ slug }: { slug: string[] }) {
         </div>
       </div>
       {ai && <AiPanel ctx={ai} onClose={() => setAi(null)} />}
+      {mail && <ComposerModal init={mail} onClose={() => setMail(null)} />}
       <div className="toasts" aria-live="polite">{toasts.map((x) => <div key={x.id} className={`toast ${x.err ? "err" : ""}`}>{x.m}</div>)}</div>
     </AppCtx.Provider>
   );

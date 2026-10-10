@@ -86,6 +86,14 @@ export const DEPARTMENTS = [
         statuses: ["Active", "Planned", "Renewal due", "Retired"],
         fields: [f("type", "select", L("Type", "Тип", "Тип", "النوع"), { options: ["SaaS", "Hardware", "Network", "Cloud", "Domain", "License"] }), f("vendor", "text", L("Vendor", "Поставщик", "Постачальник", "المورّد")), owner, f("renewal", "date", L("Renewal date", "Дата продления", "Дата продовження", "تاريخ التجديد")), f("monthly_cost", "money", L("Monthly cost", "Стоимость в месяц", "Вартість на місяць", "التكلفة الشهرية")), notes],
         columns: ["type", "vendor", "renewal", "monthly_cost"] },
+      { key: "bom", label: L("Bill of materials", "Спецификация (BOM)", "Специфікація (BOM)", "قائمة المواد"), controlled: true,
+        statuses: ["Draft", "Approved", "Superseded"],
+        fields: [config, f("item", "text", L("Item", "Позиция", "Позиція", "البند")), f("part_no", "text", L("Part number", "Артикул", "Артикул", "رقم القطعة")), f("qty", "number", L("Quantity", "Количество", "Кількість", "الكمية")), f("unit_cost", "money", L("Unit cost", "Цена за единицу", "Ціна за одиницю", "تكلفة الوحدة")), f("supplier", "text", L("Supplier", "Поставщик", "Постачальник", "المورّد")), f("matrix_id", "text", L("Compliance matrix ID", "ID в матрице комплаенса", "ID у матриці комплаєнсу", "معرّف مصفوفة الامتثال")), notes],
+        columns: ["config", "item", "qty", "unit_cost", "supplier"] },
+      { key: "changes", label: L("Engineering changes", "Инженерные изменения (ECR/ECO)", "Інженерні зміни (ECR/ECO)", "التغييرات الهندسية"),
+        statuses: ["Requested", "Assessing", "Approved", "Implemented", "Rejected"],
+        fields: [config, f("impact", "select", L("Impact", "Влияние", "Вплив", "الأثر"), { options: ["Cost", "Schedule", "Compliance", "Safety", "Performance"] }), priority, f("reason", "long", L("Reason & description", "Причина и описание", "Причина та опис", "السبب والوصف")), owner, due],
+        columns: ["config", "impact", "priority", "owner", "due"] },
     ],
   },
   {
@@ -127,6 +135,14 @@ export const DEPARTMENTS = [
         statuses: ["Draft", "Published", "Archived"],
         fields: [f("audience", "select", L("Audience", "Аудитория", "Аудиторія", "الجمهور"), { options: ["Everyone", "Team", "Partners", "Vendors", "Investors"] }), f("body", "long", L("Message", "Сообщение", "Повідомлення", "الرسالة"))],
         columns: ["audience"] },
+      { key: "quality", label: L("Quality control & NCR", "Контроль качества и несоответствия", "Контроль якості та невідповідності", "مراقبة الجودة وعدم المطابقة"),
+        statuses: ["Planned", "Inspection", "Non-conformance", "Corrective action", "Closed"],
+        fields: [f("build", "text", L("Build / container", "Сборка / контейнер", "Збирання / контейнер", "التجميع / الحاوية")), f("check_type", "select", L("Check", "Проверка", "Перевірка", "الفحص"), { options: ["Incoming inspection", "In-process", "Factory acceptance (FAT)", "Site acceptance (SAT)"] }), f("result", "select", L("Result", "Результат", "Результат", "النتيجة"), { options: ["Pass", "Conditional", "Fail"] }), f("date", "date", L("Date", "Дата", "Дата", "التاريخ")), owner, f("findings", "long", L("Findings & corrective action", "Замечания и корректирующие действия", "Зауваження та коригувальні дії", "الملاحظات والإجراء التصحيحي")), link],
+        columns: ["build", "check_type", "result", "date", "owner"] },
+      { key: "fleet", label: L("Installed base & SLA", "Установленные системы и SLA", "Встановлені системи та SLA", "الأنظمة المركبة واتفاقيات الخدمة"),
+        statuses: ["Active", "Maintenance due", "Warranty claim", "Decommissioned"],
+        fields: [f("client", "text", L("Client", "Клиент", "Клієнт", "العميل")), f("site", "text", L("Site / vessel", "Объект / судно", "Об'єкт / судно", "الموقع / السفينة")), config, f("serial", "text", L("Container serial", "Серийный номер контейнера", "Серійний номер контейнера", "الرقم التسلسلي للحاوية")), f("commissioned", "date", L("Commissioned", "Введён в эксплуатацию", "Введено в експлуатацію", "تاريخ التشغيل")), f("warranty_end", "date", L("Warranty until", "Гарантия до", "Гарантія до", "الضمان حتى")), f("sla", "select", L("Service plan", "Сервисный план", "Сервісний план", "خطة الخدمة"), { options: ["Basic", "Standard", "Premium 24/7"] }), f("next_service", "date", L("Next service", "Следующее ТО", "Наступне ТО", "الخدمة القادمة")), notes],
+        columns: ["client", "site", "config", "sla", "next_service"] },
     ],
   },
   {
@@ -164,6 +180,14 @@ export const DEPARTMENTS = [
         statuses: ["Upcoming", "In preparation", "Filed"],
         fields: [f("jurisdiction", "select", L("Jurisdiction", "Юрисдикция", "Юрисдикція", "الولاية القضائية"), { options: ["US federal", "Delaware", "North Carolina", "UAE federal (VAT / CT)", "Abu Dhabi", "Dubai"] }), due, owner, notes],
         columns: ["jurisdiction", "due", "owner"] },
+      { key: "cashflow", label: L("Cash-flow forecast", "Прогноз движения денег", "Прогноз руху грошей", "توقعات التدفق النقدي"),
+        statuses: ["Forecast", "Actual"],
+        fields: [f("month", "text", L("Month (YYYY-MM)", "Месяц (ГГГГ-ММ)", "Місяць (РРРР-ММ)", "الشهر")), f("inflow", "money", L("Inflow", "Поступления", "Надходження", "التدفقات الداخلة")), f("outflow", "money", L("Outflow", "Выплаты", "Виплати", "التدفقات الخارجة")), currency, notes],
+        columns: ["month", "inflow", "outflow", "currency"] },
+      { key: "insurance", label: L("Insurance", "Страхование", "Страхування", "التأمين"),
+        statuses: ["Quote", "Active", "Renewal due", "Expired"],
+        fields: [f("type", "select", L("Policy type", "Вид полиса", "Вид поліса", "نوع الوثيقة"), { options: ["Product liability", "General liability", "Marine cargo", "Professional / E&O", "Cyber", "D&O", "Property", "Workers' comp"] }), f("insurer", "text", L("Insurer / broker", "Страховщик / брокер", "Страховик / брокер", "شركة التأمين / الوسيط")), f("coverage", "money", L("Coverage limit", "Лимит покрытия", "Ліміт покриття", "حد التغطية")), f("premium", "money", L("Annual premium", "Годовая премия", "Річна премія", "القسط السنوي")), f("renewal", "date", L("Renewal date", "Дата продления", "Дата продовження", "تاريخ التجديد")), link],
+        columns: ["type", "insurer", "coverage", "premium", "renewal"] },
     ],
   },
   {
@@ -188,6 +212,19 @@ export const DEPARTMENTS = [
         statuses: ["Prospect", "Onboarding", "Active", "Paused"],
         fields: [f("region", "text", L("Region", "Регион", "Регіон", "المنطقة")), contact, f("agreement", "select", L("Agreement", "Соглашение", "Угода", "الاتفاقية"), { options: ["None", "NDA", "Referral", "Distribution", "Integrator"] }), f("screening", "select", L("Screening", "Проверка", "Перевірка", "الفحص"), { options: SCREEN }), notes],
         columns: ["region", "agreement", "screening"] },
+      { key: "activities", label: L("Meetings & calls", "Встречи и звонки", "Зустрічі та дзвінки", "الاجتماعات والمكالمات"),
+        statuses: ["Planned", "Done", "Cancelled"],
+        fields: [f("client", "text", L("Client", "Клиент", "Клієнт", "العميل")), f("type", "select", L("Type", "Тип", "Тип", "النوع"), { options: ["Call", "Video call", "Meeting", "Demo", "Site visit", "Email"] }), f("date", "date", L("Date", "Дата", "Дата", "التاريخ")), owner, f("outcome", "long", L("Outcome", "Итог", "Підсумок", "النتيجة")), f("next_step", "text", L("Next step", "Следующий шаг", "Наступний крок", "الخطوة التالية"))],
+        columns: ["client", "type", "date", "owner", "next_step"] },
+      { key: "tenders", label: L("Tenders & RFPs", "Тендеры и запросы (RFP)", "Тендери та запити (RFP)", "المناقصات وطلبات العروض"), board: true,
+        statuses: ["Identified", "Preparing", "Submitted", "Shortlisted", "Awarded", "Lost"],
+        fields: [f("buyer", "text", L("Buyer / authority", "Заказчик", "Замовник", "الجهة المشترية")), country, f("value", "money", L("Estimated value", "Оценочная сумма", "Орієнтовна сума", "القيمة التقديرية")), currency, f("deadline", "date", L("Submission deadline", "Срок подачи", "Термін подання", "الموعد النهائي للتقديم")), f("portal", "url", L("Tender portal", "Портал тендера", "Портал тендера", "بوابة المناقصة")), owner],
+        columns: ["buyer", "country", "value", "deadline", "owner"] },
+      { key: "pricelist", label: L("Price list", "Прайс-лист", "Прайс-лист", "قائمة الأسعار"),
+        read: ["management", "sales", "finance"], write: ["management", "finance"], external: ["partner"],
+        statuses: ["Draft", "Active", "Retired"],
+        fields: [config, f("list_price", "money", L("List price", "Цена по прайсу", "Ціна за прайсом", "السعر المعلن")), f("lease_month", "money", L("Lease per month", "Лизинг в месяц", "Лізинг на місяць", "الإيجار الشهري")), currency, f("valid_until", "date", L("Valid until", "Действует до", "Дійсно до", "صالح حتى")), notes],
+        columns: ["config", "list_price", "lease_month", "currency", "valid_until"] },
     ],
   },
   {
@@ -195,10 +232,10 @@ export const DEPARTMENTS = [
     label: L("Marketing", "Маркетинг", "Маркетинг", "التسويق"),
     read: ["management", "marketing", "sales"], write: ["marketing"],
     sections: [
-      { key: "brand", label: L("Brand assets", "Бренд-материалы", "Бренд-матеріали", "أصول العلامة"), external: ["partner"],
-        statuses: ["Draft", "Approved", "Outdated"],
-        fields: [f("asset_type", "select", L("Type", "Тип", "Тип", "النوع"), { options: ["Logo", "Deck", "One-pager", "Video", "Photo", "Template"] }), f("languages", "text", L("Languages", "Языки", "Мови", "اللغات")), link],
-        columns: ["asset_type", "languages"] },
+      { key: "media", label: L("Media library", "Медиатека", "Медіатека", "مكتبة الوسائط"), external: ["partner"], view: "gallery",
+        statuses: ["Draft", "Approved", "Archived"],
+        fields: [f("kind", "select", L("Type", "Тип", "Тип", "النوع"), { options: ["Presentation", "Brochure", "Document", "Video", "Image", "Logo", "Link"] }), f("audience", "select", L("Audience", "Аудитория", "Аудиторія", "الجمهور"), { options: ["Clients", "Partners", "Investors", "Press", "Internal"] }), f("languages", "text", L("Languages", "Языки", "Мови", "اللغات")), f("url", "url", L("External link (YouTube, Drive, website)", "Внешняя ссылка (YouTube, Drive, сайт)", "Зовнішнє посилання (YouTube, Drive, сайт)", "رابط خارجي")), f("tags", "text", L("Tags", "Теги", "Теги", "الوسوم")), notes],
+        columns: ["kind", "audience", "languages", "tags"] },
       { key: "events", label: L("Events & exhibitions", "Выставки и события", "Виставки та події", "المعارض والفعاليات"),
         statuses: ["Considering", "Booked", "Done"],
         fields: [f("city", "text", L("City", "Город", "Місто", "المدينة")), f("date", "date", L("Date", "Дата", "Дата", "التاريخ")), f("budget", "money", L("Budget", "Бюджет", "Бюджет", "الميزانية")), owner, f("leads", "number", L("Leads collected", "Собрано лидов", "Зібрано лідів", "العملاء المحتملون")), notes],
@@ -216,6 +253,14 @@ export const DEPARTMENTS = [
         statuses: ["New", "Contacted", "Qualified", "To pipeline", "Dropped"],
         fields: [f("source", "text", L("Source", "Источник", "Джерело", "المصدر")), contact, f("segment", "text", L("Segment", "Сегмент", "Сегмент", "القطاع")), notes],
         columns: ["source", "contact", "segment"] },
+      { key: "campaigns", label: L("Email campaigns", "Email-рассылки", "Email-розсилки", "حملات البريد"),
+        statuses: ["Draft", "Scheduled", "Sent", "Analyzed"],
+        fields: [f("audience", "text", L("Audience / list", "Аудитория / список", "Аудиторія / список", "الجمهور / القائمة")), f("template", "text", L("Template", "Шаблон", "Шаблон", "القالب")), f("date", "date", L("Send date", "Дата отправки", "Дата надсилання", "تاريخ الإرسال")), f("sent_count", "number", L("Sent", "Отправлено", "Надіслано", "المرسلة")), f("replies", "number", L("Replies", "Ответов", "Відповідей", "الردود")), f("meetings", "number", L("Meetings booked", "Назначено встреч", "Призначено зустрічей", "الاجتماعات المحجوزة")), owner, notes],
+        columns: ["audience", "date", "sent_count", "replies", "meetings"] },
+      { key: "competitors", label: L("Competitors & market", "Конкуренты и рынок", "Конкуренти та ринок", "المنافسون والسوق"),
+        statuses: ["Watching", "Analyzed", "Archived"],
+        fields: [f("company", "text", L("Company", "Компания", "Компанія", "الشركة")), country, f("products", "long", L("Products & offer", "Продукты и предложение", "Продукти та пропозиція", "المنتجات والعرض")), f("pricing", "text", L("Pricing", "Цены", "Ціни", "الأسعار")), f("strengths", "long", L("Strengths / weaknesses", "Сильные / слабые стороны", "Сильні / слабкі сторони", "نقاط القوة والضعف")), f("website", "url", L("Website", "Сайт", "Сайт", "الموقع"))],
+        columns: ["company", "country", "pricing"] },
     ],
   },
   {
@@ -244,6 +289,15 @@ export const DEPARTMENTS = [
         statuses: ["Reported", "Investigating", "Resolved"],
         fields: [f("severity", "select", L("Severity", "Критичность", "Критичність", "الخطورة"), { options: PRIORITY }), f("date", "date", L("Date", "Дата", "Дата", "التاريخ")), f("description", "long", L("What happened", "Что произошло", "Що сталося", "ما الذي حدث")), owner],
         columns: ["severity", "date", "owner"] },
+      { key: "screening", label: L("Restricted-party screening", "Санкционные проверки", "Санкційні перевірки", "فحص الأطراف المحظورة"),
+        read: ["management", "security", "legal", "sales", "finance", "operations"], write: ["security", "legal", "sales"],
+        statuses: ["Pending", "Cleared", "Flagged", "Escalated"],
+        fields: [f("party", "text", L("Party name", "Наименование стороны", "Найменування сторони", "اسم الطرف")), f("party_type", "select", L("Party type", "Тип стороны", "Тип сторони", "نوع الطرف"), { options: ["Client", "Vessel", "Owner / charterer", "Financier", "Vendor", "Partner", "Employee / contractor"] }), country, f("imo", "text", L("IMO / registration no.", "IMO / рег. номер", "IMO / реєстр. номер", "رقم IMO / التسجيل")), f("lists", "text", L("Lists checked", "Проверенные списки", "Перевірені списки", "القوائم المفحوصة")), f("date", "date", L("Screening date", "Дата проверки", "Дата перевірки", "تاريخ الفحص")), f("result", "long", L("Result & evidence", "Результат и подтверждение", "Результат і підтвердження", "النتيجة والدليل")), owner],
+        columns: ["party", "party_type", "country", "date", "owner"] },
+      { key: "audits", label: L("Audits & compliance programme", "Аудиты и программа комплаенса", "Аудити та програма комплаєнсу", "التدقيق وبرنامج الامتثال"),
+        statuses: ["Planned", "In progress", "Findings open", "Closed"],
+        fields: [f("standard", "select", L("Standard", "Стандарт", "Стандарт", "المعيار"), { options: ["Export compliance (EMCP)", "ISO 27001", "NIST CSF", "SOC 2", "ISO 9001", "Internal"] }), f("area", "text", L("Area", "Область", "Область", "المجال")), f("date", "date", L("Date", "Дата", "Дата", "التاريخ")), f("findings", "long", L("Findings", "Замечания", "Зауваження", "الملاحظات")), owner],
+        columns: ["standard", "area", "date", "owner"] },
     ],
   },
   {
@@ -275,6 +329,15 @@ export const DEPARTMENTS = [
         statuses: ["Reference"],
         fields: [f("jurisdiction", "select", L("Jurisdiction", "Юрисдикция", "Юрисдикція", "الولاية القضائية"), { options: ["US", "UAE", "International"] }), f("role", "long", L("Role for AGRON", "Роль для AGRON", "Роль для AGRON", "الدور بالنسبة لـ AGRON")), f("website", "url", L("Website", "Сайт", "Сайт", "الموقع"))],
         columns: ["jurisdiction", "role", "website"] },
+      { key: "licences", label: L("Licences & permits", "Лицензии и разрешения", "Ліцензії та дозволи", "التراخيص والتصاريح"),
+        statuses: ["Not started", "Applied", "Granted", "Renewal due", "Expired", "Denied"],
+        fields: [f("type", "select", L("Type", "Тип", "Тип", "النوع"), { options: ["US export licence (BIS)", "DDTC registration", "UAE trade licence", "UAE strategic goods permit", "TDRA type approval", "Port / marina permit", "Flag / class approval", "Other"] }), f("authority", "text", L("Authority", "Орган", "Орган", "الجهة")), f("number", "text", L("Licence number", "Номер", "Номер", "رقم الترخيص")), f("expires", "date", L("Expires", "Действует до", "Діє до", "ينتهي في")), owner, link],
+        columns: ["type", "authority", "number", "expires", "owner"] },
+      { key: "claims", label: L("Disputes & claims", "Споры и претензии", "Спори та претензії", "النزاعات والمطالبات"),
+        read: ["management", "legal", "finance"], write: ["legal", "management"],
+        statuses: ["Open", "Negotiation", "Litigation", "Settled", "Closed"],
+        fields: [f("counterparty", "text", L("Counterparty", "Контрагент", "Контрагент", "الطرف المقابل")), amount, currency, f("jurisdiction", "text", L("Forum / jurisdiction", "Суд / юрисдикция", "Суд / юрисдикція", "المحكمة / الولاية")), owner, notes],
+        columns: ["counterparty", "amount", "jurisdiction", "owner"] },
     ],
   },
   {
@@ -305,6 +368,20 @@ export const DEPARTMENTS = [
         statuses: ["Draft", "Approved", "Retired"],
         fields: [f("version", "text", L("Version", "Версия", "Версія", "الإصدار")), link],
         columns: ["version"] },
+      { key: "leave", label: L("Time off", "Отпуска и отсутствия", "Відпустки та відсутності", "الإجازات"),
+        read: [...INTERNAL], write: [...INTERNAL],
+        statuses: ["Requested", "Approved", "Rejected", "Taken"],
+        fields: [f("person", "text", L("Person", "Сотрудник", "Співробітник", "الموظف")), f("type", "select", L("Type", "Тип", "Тип", "النوع"), { options: ["Vacation", "Sick leave", "Unpaid", "Public holiday", "Business trip"] }), f("from", "date", L("From", "С", "З", "من")), f("to", "date", L("To", "По", "По", "إلى")), notes],
+        columns: ["person", "type", "from", "to"] },
+      { key: "reviews", label: L("Performance & goals", "Цели и оценка", "Цілі та оцінювання", "الأداء والأهداف"),
+        statuses: ["Planned", "Self-review", "Manager review", "Done"],
+        fields: [f("person", "text", L("Person", "Сотрудник", "Співробітник", "الموظف")), f("period", "text", L("Period", "Период", "Період", "الفترة")), f("rating", "select", L("Rating", "Оценка", "Оцінка", "التقييم"), { options: ["Exceeds", "Meets", "Below"] }), f("goals", "long", L("Goals & results", "Цели и результаты", "Цілі та результати", "الأهداف والنتائج")), owner],
+        columns: ["person", "period", "rating"] },
+      { key: "assets", label: L("Company equipment issued", "Выданная техника", "Видана техніка", "المعدات المسلمة"),
+        read: ["management", "hr", "engineering", "security"], write: ["hr", "engineering"],
+        statuses: ["Issued", "Returned", "Lost"],
+        fields: [f("person", "text", L("Person", "Сотрудник", "Співробітник", "الموظف")), f("item", "text", L("Item", "Предмет", "Предмет", "البند")), f("serial", "text", L("Serial number", "Серийный номер", "Серійний номер", "الرقم التسلسلي")), f("issued", "date", L("Issued", "Выдано", "Видано", "تاريخ التسليم")), notes],
+        columns: ["person", "item", "serial", "issued"] },
     ],
   },
   {
@@ -320,16 +397,104 @@ export const DEPARTMENTS = [
         statuses: ["Active", "Archived"],
         fields: [f("organization", "text", L("Organization", "Организация", "Організація", "الجهة")), f("role", "text", L("Role", "Роль", "Роль", "الدور")), f("email", "text", L("Email", "Email", "Email", "البريد")), f("phone", "text", L("Phone", "Телефон", "Телефон", "الهاتف")), country],
         columns: ["organization", "role", "email", "country"] },
+      { key: "meetings", label: L("Meeting notes", "Протоколы встреч", "Протоколи зустрічей", "محاضر الاجتماعات"),
+        statuses: ["Scheduled", "Done"],
+        fields: [f("date", "date", L("Date", "Дата", "Дата", "التاريخ")), f("participants", "text", L("Participants", "Участники", "Учасники", "المشاركون")), f("agenda", "long", L("Agenda", "Повестка", "Порядок денний", "جدول الأعمال")), f("decisions", "long", L("Decisions", "Решения", "Рішення", "القرارات")), f("actions", "long", L("Action items", "Задачи", "Завдання", "المهام")), owner],
+        columns: ["date", "participants", "owner"] },
+      { key: "decisions", label: L("Decision log", "Журнал решений", "Журнал рішень", "سجل القرارات"),
+        read: [...INTERNAL], write: ["management"],
+        statuses: ["Proposed", "Approved", "Rejected", "Superseded"],
+        fields: [f("date", "date", L("Date", "Дата", "Дата", "التاريخ")), f("area", "text", L("Area", "Область", "Область", "المجال")), f("decision", "long", L("Decision", "Решение", "Рішення", "القرار")), f("rationale", "long", L("Rationale", "Обоснование", "Обґрунтування", "المبررات")), owner],
+        columns: ["date", "area", "owner"] },
+    ],
+  },
+  {
+    key: "mail", icon: "mail",
+    label: L("Mail center", "Почтовый центр", "Поштовий центр", "مركز البريد"),
+    read: [...INTERNAL], write: [...INTERNAL],
+    sections: [
+      { key: "templates", label: L("Email templates", "Шаблоны писем", "Шаблони листів", "قوالب البريد"), view: "mail",
+        statuses: ["Draft", "Approved"],
+        fields: [f("category", "text", L("Category", "Категория", "Категорія", "الفئة")), f("lang", "select", L("Language", "Язык", "Мова", "اللغة"), { options: ["en", "ru", "uk", "ar"] }), f("subject", "text", L("Subject", "Тема", "Тема", "الموضوع")), f("body", "long", L("Body", "Текст", "Текст", "النص")), f("cta_label", "text", L("Button text", "Текст кнопки", "Текст кнопки", "نص الزر")), f("cta_url", "text", L("Button link", "Ссылка кнопки", "Посилання кнопки", "رابط الزر"))],
+        columns: ["category", "lang", "subject"] },
+      { key: "outbox", label: L("Sent emails", "Отправленные письма", "Надіслані листи", "الرسائل المرسلة"),
+        statuses: ["Sent", "Opened in Gmail", "Failed"],
+        fields: [f("to", "text", L("To", "Кому", "Кому", "إلى")), f("cc", "text", L("Cc", "Копия", "Копія", "نسخة")), f("template", "text", L("Template", "Шаблон", "Шаблон", "القالب")), f("sender", "text", L("Sender", "Отправитель", "Відправник", "المرسل")), f("related", "text", L("Related record", "Связанная запись", "Пов'язаний запис", "السجل المرتبط")), f("html", "html", L("Letter", "Письмо", "Лист", "الرسالة"))],
+        columns: ["to", "template", "sender"] },
     ],
   },
 ];
+
+// Department colours (accent hue for navigation, headers, tiles and charts)
+export const DEPT_COLORS = {
+  technical: "#2F7DF6", operations: "#F26B1D", finance: "#12A06B", sales: "#8B5CF6", marketing: "#E0458B",
+  security: "#E5484D", legal: "#C9971C", hr: "#0FA3A3", company: "#5B6CF0", mail: "#0EA5E9",
+};
+// Section icons
+export const SECTION_ICONS = {
+  "technical.equipment": "radar", "technical.rnd": "flask", "technical.software": "code", "technical.integration": "plug", "technical.testing": "check",
+  "technical.certification": "badge", "technical.docs": "file", "technical.it": "server", "technical.bom": "layers", "technical.changes": "git",
+  "operations.builds": "container", "operations.procurement": "cart", "operations.vendors": "store", "operations.inventory": "box", "operations.logistics": "truck",
+  "operations.installation": "anchor", "operations.support": "headset", "operations.comms": "megaphone", "operations.quality": "check", "operations.fleet": "map",
+  "finance.budget": "pie", "finance.expenses": "receipt", "finance.invoices": "file", "finance.costing": "calc", "finance.leasing": "key",
+  "finance.investors": "trend", "finance.tax": "landmark", "finance.cashflow": "trend", "finance.insurance": "umbrella",
+  "sales.pipeline": "funnel", "sales.clients": "users", "sales.proposals": "file", "sales.partners": "handshake", "sales.activities": "calendar",
+  "sales.tenders": "flag", "sales.pricelist": "tag",
+  "marketing.media": "image", "marketing.events": "calendar", "marketing.content": "pen", "marketing.web": "globe", "marketing.leads": "target",
+  "marketing.campaigns": "mail", "marketing.competitors": "eye",
+  "security.tcp": "lock", "security.access": "key", "security.cyber": "shield", "security.physical": "building", "security.incidents": "alert",
+  "security.screening": "search", "security.audits": "clipboard",
+  "legal.matrix": "grid", "legal.issues": "alert", "legal.contracts": "pen", "legal.corporate": "building", "legal.trademarks": "badge",
+  "legal.regulators": "landmark", "legal.licences": "stamp", "legal.claims": "scale",
+  "hr.team": "users", "hr.hiring": "userplus", "hr.onboarding": "rocket", "hr.training": "grad", "hr.policies": "book", "hr.leave": "sun",
+  "hr.reviews": "target", "hr.assets": "laptop",
+  "company.wiki": "book", "company.contacts": "contact", "company.meetings": "calendar", "company.decisions": "check",
+  "mail.templates": "mail", "mail.outbox": "send",
+};
 
 // Flattened helpers
 export const sectionId = (d, s) => `${d}.${s}`;
 export function allSections() {
   const out = [];
   for (const d of DEPARTMENTS) for (const s of d.sections) {
-    out.push({ ...s, id: sectionId(d.key, s.key), dept: d.key, read: s.read || d.read, write: s.write || d.write, external: s.external || [] });
+    out.push({ ...s, id: sectionId(d.key, s.key), dept: d.key, color: DEPT_COLORS[d.key], icon: SECTION_ICONS[sectionId(d.key, s.key)] || d.icon, read: s.read || d.read, write: s.write || d.write, external: s.external || [] });
   }
   return out;
 }
+
+/** Default access rules derived from this config (also written to supabase/access.sql). */
+export function defaultRules() {
+  const rows = [];
+  for (const s of allSections()) {
+    const roles = new Map();
+    for (const r of s.read) roles.set(r, false);
+    for (const r of s.write) roles.set(r, true);
+    for (const [r, w] of roles) rows.push({ section: s.id, role: r, can_write: w, external: false });
+    for (const r of s.external) rows.push({ section: s.id, role: r, can_write: false, external: true });
+  }
+  return rows;
+}
+
+// Role colours (Users & roles screens)
+export const ROLE_COLORS = {
+  owner: "#F26B1D", admin: "#E5484D", management: "#5B6CF0", engineering: "#2F7DF6", operations: "#F59E0B", finance: "#12A06B",
+  sales: "#8B5CF6", marketing: "#E0458B", hr: "#0FA3A3", legal: "#C9971C", security: "#DC2626", partner: "#0EA5E9", vendor: "#64748B",
+  investor: "#16A34A", pending: "#94A3B8",
+};
+export const ROLE_DESC = {
+  owner: L("Full control of the workspace, roles and access rules.", "Полный контроль: пространство, роли и права.", "Повний контроль: простір, ролі та права.", "تحكم كامل في مساحة العمل والأدوار والصلاحيات."),
+  admin: L("Manages users and every section.", "Управляет пользователями и всеми разделами.", "Керує користувачами та всіма розділами.", "يدير المستخدمين وجميع الأقسام."),
+  management: L("Leadership: sees most departments, approves decisions.", "Руководство: видит большинство отделов, утверждает решения.", "Керівництво: бачить більшість відділів, затверджує рішення.", "القيادة: ترى معظم الأقسام وتعتمد القرارات."),
+  engineering: L("Equipment, R&D, software, integration, tests.", "Оборудование, R&D, ПО, интеграция, тесты.", "Обладнання, R&D, ПЗ, інтеграція, тести.", "المعدات والبحث والبرمجيات والتكامل والاختبارات."),
+  operations: L("Builds, procurement, logistics, installation, service.", "Сборка, закупки, логистика, монтаж, сервис.", "Збирання, закупівлі, логістика, монтаж, сервіс.", "التجميع والمشتريات واللوجستيات والتركيب والخدمة."),
+  finance: L("Budget, invoices, costing, leasing, investors, tax.", "Бюджет, счета, себестоимость, лизинг, инвесторы, налоги.", "Бюджет, рахунки, собівартість, лізинг, інвестори, податки.", "الميزانية والفواتير والتكاليف والتأجير والمستثمرون والضرائب."),
+  sales: L("Pipeline, clients, proposals, tenders, partners.", "Воронка, клиенты, КП, тендеры, партнёры.", "Воронка, клієнти, КП, тендери, партнери.", "الصفقات والعملاء والعروض والمناقصات والشركاء."),
+  marketing: L("Media library, events, content, campaigns, leads.", "Медиатека, выставки, контент, рассылки, лиды.", "Медіатека, виставки, контент, розсилки, ліди.", "مكتبة الوسائط والفعاليات والمحتوى والحملات."),
+  hr: L("Team, hiring, onboarding, training, policies.", "Команда, найм, онбординг, обучение, политики.", "Команда, найм, онбординг, навчання, політики.", "الفريق والتوظيف والتأهيل والتدريب والسياسات."),
+  legal: L("Compliance matrix, contracts, licences, entities.", "Матрица комплаенса, договоры, лицензии, юрлица.", "Матриця комплаєнсу, договори, ліцензії, юрособи.", "مصفوفة الامتثال والعقود والتراخيص والكيانات."),
+  security: L("Technology control, screening, cyber, incidents.", "Контроль технологий, проверки, кибер, инциденты.", "Контроль технологій, перевірки, кібер, інциденти.", "الرقابة التقنية والفحص والأمن السيبراني والحوادث."),
+  partner: L("External: shared proposals, media, support.", "Внешний: общие КП, медиа, поддержка.", "Зовнішній: спільні КП, медіа, підтримка.", "خارجي: العروض والوسائط والدعم المشتركة."),
+  vendor: L("External: purchase orders and vendor records.", "Внешний: заказы и карточки поставщика.", "Зовнішній: замовлення та картки постачальника.", "خارجي: أوامر الشراء وسجلات المورد."),
+  investor: L("External: investor updates and rounds.", "Внешний: отчёты и раунды для инвесторов.", "Зовнішній: звіти та раунди для інвесторів.", "خارجي: تحديثات المستثمرين والجولات."),
+  pending: L("Signed in, waiting for a role. Sees nothing.", "Вошёл, ждёт роль. Ничего не видит.", "Увійшов, чекає на роль. Нічого не бачить.", "سجّل الدخول بانتظار دور. لا يرى شيئاً."),
+};

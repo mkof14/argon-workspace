@@ -1,9 +1,9 @@
 import { Lang, tx } from "./i18n";
 import type { Rec } from "./store";
 
-const GOOD = /^(done|passed|approved|cleared|installed|commissioned|won|paid|signed|active|released|published|registered|received|resolved|certified|delivered|live|hired|counsel approved|integrated|filed|closed|verified)/i;
-const BAD = /^(failed|blocked|rejected|lost|overdue|flagged|restricted|prohibited|refused|critical|over budget|expired|cancelled)/i;
-const WARN = /^(pending|in review|under review|negotiation|renewal due|waiting|customs|high|due|mitigating|investigating|onboarding)/i;
+const GOOD = /^(done|granted|awarded|implemented|pass|actual|taken|issued|returned|settled|exceeds|meets|analyzed|passed|approved|cleared|installed|commissioned|won|paid|signed|active|released|published|registered|received|resolved|certified|delivered|live|hired|counsel approved|integrated|filed|closed|verified)/i;
+const BAD = /^(failed|fail$|denied|litigation|lost|below|non-conformance|blocked|rejected|lost|overdue|flagged|restricted|prohibited|refused|critical|over budget|expired|cancelled)/i;
+const WARN = /^(pending|requested|assessing|non-conformance|corrective|maintenance due|warranty claim|escalated|findings open|preparing|shortlisted|quote|self-review|manager review|in review|under review|negotiation|renewal due|waiting|customs|high|due|mitigating|investigating|onboarding)/i;
 export function tone(v?: string | null) {
   if (!v) return "";
   if (BAD.test(v)) return "c-bad";
@@ -25,13 +25,14 @@ export function fmt(field: any, v: any, lang: Lang): string {
 }
 
 export function recordMarkdown(section: any, r: Rec, lang: Lang) {
-  const rows = section.fields.filter((f: any) => r.data?.[f.key] !== undefined && r.data?.[f.key] !== "").map((f: any) => `| ${tx(f.label, lang)} | ${fmt(f, r.data[f.key], lang).replace(/\|/g, "/").replace(/\n/g, " ")} |`);
+  const rows = section.fields.filter((f: any) => f.type !== "html" && r.data?.[f.key] !== undefined && r.data?.[f.key] !== "").map((f: any) => `| ${tx(f.label, lang)} | ${fmt(f, r.data[f.key], lang).replace(/\|/g, "/").replace(/\n/g, " ")} |`);
   return `# ${r.title}\n\n**${tx(section.label, lang)}** · ${r.status || ""}${r.controlled ? " · CONTROLLED (US persons only)" : ""}\n\n| | |\n|---|---|\n${rows.join("\n")}\n\n---\n_AGRON Workspace · ${new Date().toISOString().slice(0, 10)} · © 2026 AGRON Inc. · Confidential_\n`;
 }
 
 export function toCsv(section: any, rows: Rec[], lang: Lang) {
-  const head = ["Title", "Status", ...section.fields.map((f: any) => tx(f.label, lang)), "Updated"];
-  const body = rows.map((r) => [r.title, r.status || "", ...section.fields.map((f: any) => r.data?.[f.key] ?? ""), r.updated_at || ""]);
+  const fields = section.fields.filter((f: any) => f.type !== "html");
+  const head = ["Title", "Status", ...fields.map((f: any) => tx(f.label, lang)), "Updated"];
+  const body = rows.map((r) => [r.title, r.status || "", ...fields.map((f: any) => r.data?.[f.key] ?? ""), r.updated_at || ""]);
   return "﻿" + [head, ...body].map((row) => row.map((v) => { const s = String(v ?? ""); return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }).join(",")).join("\r\n");
 }
 

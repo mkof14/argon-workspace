@@ -1,13 +1,16 @@
 "use client";
 import { createBrowserClient } from "@supabase/ssr";
-import { allSections, ROLES } from "@/config/workspace.config.mjs";
+import { allSections, defaultRules, ROLES } from "@/config/workspace.config.mjs";
 import { demoSeed, DEMO_PEOPLE } from "./demo";
 
 export type Rec = {
   id: string; section: string; title: string; status: string | null; data: Record<string, any>;
   company: string | null; controlled: boolean; created_by?: string | null; created_at?: string; updated_at?: string;
 };
-export type Profile = { id: string; email: string; full_name: string; role: string; company: string | null; us_person: boolean; lang: string; ai_monthly_tokens: number };
+export type Profile = { id: string; email: string; full_name: string; role: string; company: string | null; us_person: boolean; lang: string; ai_monthly_tokens: number; title?: string | null; phone?: string | null; created_at?: string };
+export type Rule = { section: string; role: string; can_write: boolean; external: boolean };
+export type FileItem = { name: string; path: string; size: number; type: string; created_at?: string };
+export const BUCKET = "files";
 export type Comment = { id: string; record_id: string; author: string | null; body: string; created_at: string };
 export type Activity = { id: number; record_id: string | null; section: string; actor: string | null; action: string; detail: any; created_at: string };
 export type Access = { read: Set<string>; write: Set<string> };
@@ -22,20 +25,21 @@ export const sb = () => (_sb ||= createBrowserClient(SUPA_URL, SUPA_KEY));
 const INTERNAL_ROLES = Object.entries(ROLES).filter(([, r]: any) => r.internal).map(([k]) => k);
 export const isExternal = (role: string) => !INTERNAL_ROLES.includes(role);
 
-/** Access computed from the same config that generates the database rules. */
-export function accessFor(role: string): Access {
+/** Access computed from the rules table (the same rules the database enforces). */
+export function accessFor(role: string, rules?: Rule[] | null): Access {
   const read = new Set<string>(), write = new Set<string>();
-  for (const s of allSections() as any[]) {
-    if (role === "owner" || role === "admin") { read.add(s.id); write.add(s.id); continue; }
-    if (s.read.includes(role) || s.write.includes(role) || s.external.includes(role)) read.add(s.id);
-    if (s.write.includes(role)) write.add(s.id);
+  if (role === "owner" || role === "admin") { for (const s of allSections() as any[]) { read.add(s.id); write.add(s.id); } return { read, write }; }
+  for (const r of rules || (defaultRules() as Rule[])) {
+    if (r.role !== role) continue;
+    read.add(r.section);
+    if (r.can_write && !isExternal(role)) write.add(r.section);
   }
   return { read, write };
 }
 
 /* ---------------- Demo store (browser only) ---------------- */
 const DKEY = "agronws.demo.v1";
-type DemoDB = { records: Rec[]; comments: Comment[]; activity: Activity[]; role: string; profiles: Profile[] };
+type DemoDB = { records: Rec[]; comments: Comment[]; activity: Activity[]; role: string; profiles: Profile[]; rules?: Rule[]; files?: (FileItem & { data: string })[] };
 function demoLoad(): DemoDB {
   try { const s = localStorage.getItem(DKEY); if (s) return JSON.parse(s); } catch {}
   const db: DemoDB = { records: demoSeed(), comments: [], activity: [], role: "owner", profiles: DEMO_PEOPLE };
@@ -48,7 +52,7 @@ function demoMe(db: DemoDB): Profile {
   return { ...p, role: db.role };
 }
 function demoVisible(db: DemoDB, r: Rec) {
-  const me = demoMe(db); const acc = accessFor(me.role);
+  const me = demoMe(db); const acc = accessFor(me.role, db.rules);
   if (!acc.read.has(r.section)) return false;
   if (r.controlled && !me.us_person) return false;
   if (isExternal(me.role) && !(r.company === "*" || (r.company && r.company === me.company))) return false;
@@ -115,7 +119,7 @@ export const store = {
     const { error } = await sb().from("comments").insert({ record_id: recordId, body, author: u?.user?.id }); if (error) throw error;
   },
   async activity(opts: { recordId?: string; limit?: number } = {}): Promise<Activity[]> {
-    if (DEMO) { const db = demoLoad(); const acc = accessFor(demoMe(db).role); return db.activity.filter((a) => (!opts.recordId || a.record_id === opts.recordId) && acc.read.has(a.section)).slice(0, opts.limit || 20); }
+    if (DEMO) { const db = demoLoad(); const acc = accessFor(demoMe(db).role, db.rules); return db.activity.filter((a) => (!opts.recordId || a.record_id === opts.recordId) && acc.read.has(a.section)).slice(0, opts.limit || 20); }
     let q = sb().from("activity").select("*").order("created_at", { ascending: false }).limit(opts.limit || 20);
     if (opts.recordId) q = q.eq("record_id", opts.recordId);
     const { data } = await q; return (data || []) as Activity[];
@@ -129,4 +133,63 @@ export const store = {
     const { error } = await sb().from("profiles").update(patch).eq("id", id); if (error) throw error;
   },
   async signOut() { if (!DEMO) await sb().auth.signOut(); },
+
+  /* ----- Access rules (editable by owner/admin in Users & roles) ----- */
+  async rules(): Promise<Rule[]> {
+    if (DEMO) return demoLoad().rules || (defaultRules() as Rule[]);
+    const { data, error } = await sb().from("section_access").select("section,role,can_write,external");
+    if (error || !data?.length) return defaultRules() as Rule[];
+    return data as Rule[];
+  },
+  async setRule(section: string, role: string, level: "none" | "read" | "write") {
+    const external = isExternal(role);
+    if (DEMO) {
+      const db = demoLoad(); const rules = (db.rules || (defaultRules() as Rule[])).filter((r) => !(r.section === section && r.role === role));
+      if (level !== "none") rules.push({ section, role, can_write: level === "write" && !external, external });
+      db.rules = rules; demoSave(db); return;
+    }
+    if (level === "none") { const { error } = await sb().from("section_access").delete().eq("section", section).eq("role", role); if (error) throw error; return; }
+    const { error } = await sb().from("section_access").upsert({ section, role, can_write: level === "write" && !external, external });
+    if (error) throw error;
+  },
+  async resetRules() {
+    const rows = defaultRules() as Rule[];
+    if (DEMO) { const db = demoLoad(); db.rules = rows; demoSave(db); return; }
+    const { error: e1 } = await sb().from("section_access").delete().neq("section", ""); if (e1) throw e1;
+    const { error } = await sb().from("section_access").insert(rows); if (error) throw error;
+  },
+
+  /* ----- Files (Supabase Storage, private bucket; path = section/recordId/file) ----- */
+  async files(prefix: string): Promise<FileItem[]> {
+    if (DEMO) return (demoLoad().files || []).filter((f) => f.path.startsWith(prefix + "/")).map(({ data, ...f }) => f);
+    const { data, error } = await sb().storage.from(BUCKET).list(prefix, { limit: 200, sortBy: { column: "created_at", order: "desc" } });
+    if (error) throw error;
+    return (data || []).filter((o: any) => o.id).map((o: any) => ({ name: o.name.replace(/^\d+_/, ""), path: `${prefix}/${o.name}`, size: o.metadata?.size || 0, type: o.metadata?.mimetype || "", created_at: o.created_at }));
+  },
+  async upload(prefix: string, file: File): Promise<FileItem> {
+    const safe = file.name.normalize("NFKD").replace(/[^\w.\-]+/g, "_").slice(-120);
+    const path = `${prefix}/${Date.now()}_${safe}`;
+    if (DEMO) {
+      if (file.size > 2_000_000) throw new Error("Demo mode keeps files up to 2 MB in this browser.");
+      const data: string = await new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(String(r.result)); r.onerror = bad; r.readAsDataURL(file); });
+      const db = demoLoad(); const item = { name: file.name, path, size: file.size, type: file.type, created_at: new Date().toISOString(), data };
+      db.files = [item, ...(db.files || [])]; demoSave(db); const { data: _, ...f } = item; return f;
+    }
+    const { error } = await sb().storage.from(BUCKET).upload(path, file, { contentType: file.type || undefined, upsert: false });
+    if (error) throw error;
+    return { name: file.name, path, size: file.size, type: file.type };
+  },
+  /** Temporary link. Default 1 hour; share links last up to 7 days. */
+  async fileUrl(path: string, seconds = 3600, download?: string): Promise<string> {
+    if (DEMO) return (demoLoad().files || []).find((f) => f.path === path)?.data || "";
+    const { data, error } = await sb().storage.from(BUCKET).createSignedUrl(path, seconds, download ? { download } : undefined);
+    if (error) throw error; return data.signedUrl;
+  },
+  async removeFile(path: string) {
+    if (DEMO) { const db = demoLoad(); db.files = (db.files || []).filter((f) => f.path !== path); demoSave(db); return; }
+    const { error } = await sb().storage.from(BUCKET).remove([path]); if (error) throw error;
+  },
+  async firstImage(prefix: string): Promise<string> {
+    try { const fs = await this.files(prefix); const img = fs.find((f) => f.type.startsWith("image/")); return img ? await this.fileUrl(img.path) : ""; } catch { return ""; }
+  },
 };

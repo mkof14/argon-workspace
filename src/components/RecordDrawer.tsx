@@ -5,9 +5,12 @@ import { useApp } from "./App";
 import { t, tx } from "@/lib/i18n";
 import { Activity, Comment, Rec, isExternal, store } from "@/lib/store";
 import { elementToPdf, fmt, recordMarkdown, saveBlob, slug, tone } from "@/lib/format";
+import Attachments from "./Attachments";
 
-export default function RecordDrawer({ section, rec, onClose, onSaved }: { section: any; rec: Rec | null; onClose: () => void; onSaved: () => void }) {
-  const { lang, me, access, toast, openAi } = useApp();
+const PEOPLE_KEYS = ["owner", "person", "requester", "engineer", "pm_name"];
+
+export default function RecordDrawer({ section, rec, onClose, onSaved, onReload }: { section: any; rec: Rec | null; onClose: () => void; onSaved: () => void; onReload?: () => void }) {
+  const { lang, me, access, toast, openAi, openMail, people } = useApp();
   const canWrite = access.write.has(section.id) && !isExternal(me.role);
   const [title, setTitle] = useState(rec?.title || "");
   const [status, setStatus] = useState(rec?.status || section.statuses[0]);
@@ -37,6 +40,10 @@ export default function RecordDrawer({ section, rec, onClose, onSaved }: { secti
     try { await store.save({ id: rec?.id, section: section.id, title: title.trim(), status, data, company: company.trim() || null, controlled }); toast(t("saved", lang)); onSaved(); }
     catch (e: any) { toast(e.message || "Error", true); } finally { setBusy(false); }
   };
+  const dup = async () => {
+    try { await store.save({ section: section.id, title: `${title} (copy)`, status: section.statuses[0], data: { ...data, sample: undefined }, company: company.trim() || null, controlled }); toast(t("duplicated", lang)); onReload ? onReload() : onSaved(); }
+    catch (e: any) { toast(e.message || "Error", true); }
+  };
   const del = async () => { if (!rec) return; try { await store.remove(rec.id); toast(t("deleted", lang)); onSaved(); } catch (e: any) { toast(e.message || "Error", true); } };
   const addCmt = async () => { if (!rec || !cmt.trim()) return; try { await store.addComment(rec.id, cmt.trim()); setCmt(""); setComments(await store.comments(rec.id)); } catch (e: any) { toast(e.message || "Error", true); } };
 
@@ -54,10 +61,11 @@ export default function RecordDrawer({ section, rec, onClose, onSaved }: { secti
     const v = data[f.key] ?? ""; const set = (x: any) => setData((d) => ({ ...d, [f.key]: x })); const id = `f-${f.key}`;
     const ro = !canWrite;
     let ctl;
+    if (f.type === "html") return v ? <div key={f.key} className="field wide"><label>{tx(f.label, lang)}</label><iframe title={tx(f.label, lang)} className="mailframe" style={{ height: 560 }} srcDoc={String(v)} sandbox="" /></div> : null;
     if (f.type === "select") ctl = <select id={id} className="input" value={v} disabled={ro} onChange={(e) => set(e.target.value)}><option value="" />{f.options.map((o: string) => <option key={o}>{o}</option>)}</select>;
     else if (f.type === "long") ctl = <textarea id={id} className="input" value={v} readOnly={ro} rows={3} onChange={(e) => set(e.target.value)} />;
     else if (f.type === "check") return <label key={f.key} className="check wide"><input id={id} type="checkbox" checked={!!v} disabled={ro} onChange={(e) => set(e.target.checked)} />{tx(f.label, lang)}</label>;
-    else ctl = <input id={id} className={`input ${f.type === "money" || f.type === "number" ? "mono" : ""}`} readOnly={ro} type={f.type === "date" ? "date" : f.type === "url" ? "url" : f.type === "money" || f.type === "number" ? "number" : "text"} value={v} onChange={(e) => set(f.type === "money" || f.type === "number" ? (e.target.value === "" ? "" : Number(e.target.value)) : e.target.value)} />;
+    else ctl = <input id={id} className={`input ${f.type === "money" || f.type === "number" ? "mono" : ""}`} readOnly={ro} list={PEOPLE_KEYS.includes(f.key) ? "people-list" : undefined} type={f.type === "date" ? "date" : f.type === "url" ? "url" : f.type === "money" || f.type === "number" ? "number" : "text"} value={v} onChange={(e) => set(f.type === "money" || f.type === "number" ? (e.target.value === "" ? "" : Number(e.target.value)) : e.target.value)} />;
     return <div key={f.key} className={`field ${f.type === "long" ? "wide" : ""}`}><label htmlFor={id}>{tx(f.label, lang)}</label>{ctl}{f.type === "url" && v ? <a href={v} target="_blank" rel="noopener" className="hint">{v}</a> : null}</div>;
   };
 
@@ -80,6 +88,8 @@ export default function RecordDrawer({ section, rec, onClose, onSaved }: { secti
             <button className="btn ghost sm" onClick={pdf}><Icon n="pdf" />{t("pdf", lang)}</button>
             <button className="btn ghost sm" onClick={share}><Icon n="share" />{t("share", lang)}</button>
             <button className="btn ghost sm" onClick={() => saveBlob(`AGRON_${slug(title)}.md`, md(), "text/markdown;charset=utf-8")}><Icon n="download" />{t("download", lang)}</button>
+            <button className="btn sm" onClick={() => openMail({ section: section.id, record: current })}><Icon n="mail" />{t("email_btn", lang)}</button>
+            {canWrite && <button className="btn ghost sm" onClick={dup}><Icon n="dup" />{t("duplicate", lang)}</button>}
             <button className="btn sm" onClick={() => openAi({ title, section: section.id, record: current })}><Icon n="spark" />{t("ask_ai", lang)}</button>
           </div>}
           <div className="fgrid">
@@ -90,6 +100,8 @@ export default function RecordDrawer({ section, rec, onClose, onSaved }: { secti
             {canWrite && section.controlled && me.us_person && <label className="check wide"><input type="checkbox" checked={controlled} onChange={(e) => setControlled(e.target.checked)} /><Icon n="lock" className="lockico" />{t("controlled", lang)}</label>}
             {canWrite && section.external?.length > 0 && <div className="field wide"><label htmlFor="f-company">{t("visibility", lang)}</label><input id="f-company" className="input" value={company} onChange={(e) => setCompany(e.target.value)} placeholder="" /><span className="hint">{t("vis_hint", lang)}</span></div>}
           </div>
+          <datalist id="people-list">{people.map((p) => <option key={p.id} value={p.full_name || p.email} />)}</datalist>
+          {section.id !== "mail.outbox" && <Attachments section={section} rec={rec} canWrite={canWrite} title={title} />}
           {rec && <div className="thread">
             <div className="eyebrow">{t("comments", lang)}</div>
             {comments.map((c) => <div key={c.id} className="cmt"><small>{(c.created_at || "").slice(0, 16).replace("T", " ")}</small><div style={{ whiteSpace: "pre-wrap" }}>{c.body}</div></div>)}
@@ -118,7 +130,7 @@ export default function RecordDrawer({ section, rec, onClose, onSaved }: { secti
           <h1 style={{ fontFamily: "Unbounded, sans-serif", fontSize: 19, margin: "4px 0 6px" }}>{title}</h1>
           <div style={{ color: "#4B5867", marginBottom: 14 }}>{status}{controlled ? " · CONTROLLED — US persons only" : ""}</div>
           <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12 }}><tbody>
-            {section.fields.filter((f: any) => data[f.key] !== undefined && data[f.key] !== "").map((f: any) => <tr key={f.key}><td style={{ border: "1px solid #D5DCE4", padding: "6px 8px", background: "#F5F7F9", width: "34%" }}>{tx(f.label, lang)}</td><td style={{ border: "1px solid #D5DCE4", padding: "6px 8px", whiteSpace: "pre-wrap" }}>{fmt(f, data[f.key], lang)}</td></tr>)}
+            {section.fields.filter((f: any) => f.type !== "html" && data[f.key] !== undefined && data[f.key] !== "").map((f: any) => <tr key={f.key}><td style={{ border: "1px solid #D5DCE4", padding: "6px 8px", background: "#F5F7F9", width: "34%" }}>{tx(f.label, lang)}</td><td style={{ border: "1px solid #D5DCE4", padding: "6px 8px", whiteSpace: "pre-wrap" }}>{fmt(f, data[f.key], lang)}</td></tr>)}
           </tbody></table>
         </div>
         <div style={{ margin: "0 36px 24px", paddingTop: 10, borderTop: "1px solid #D5DCE4", color: "#7A8796", fontSize: 10 }}>© 2026 AGRON Inc. All rights reserved. · {t("foot_conf", lang)} · www.agron1.com</div>
