@@ -237,6 +237,9 @@ const S: Record<string, Tx> = {
   set_pw: { en: "Password", ru: "Пароль", uk: "Пароль", ar: "كلمة المرور" },
   set_pw_hint: { en: "Set a password to sign in without waiting for an email link.", ru: "Задайте пароль, чтобы входить без ожидания письма.", uk: "Задайте пароль, щоб входити без очікування листа.", ar: "عيّن كلمة مرور للدخول دون انتظار رابط البريد." },
   company_sig: { en: "All emails are signed by the company: Best regards, AGRON Inc., info@agron1.com.", ru: "Все письма подписываются от компании: С уважением, AGRON Inc., info@agron1.com.", uk: "Усі листи підписуються від компанії: З повагою, AGRON Inc., info@agron1.com.", ar: "جميع الرسائل موقعة باسم الشركة: AGRON Inc.، info@agron1.com." },
+  with_apple: { en: "Continue with Apple", ru: "Войти через Apple", uk: "Увійти через Apple", ar: "المتابعة عبر Apple" },
+  or: { en: "or", ru: "или", uk: "або", ar: "أو" },
+  protected_owner: { en: "Protected owner", ru: "Защищённый владелец", uk: "Захищений власник", ar: "مالك محمي" },
   sample: { en: "Sample", ru: "Пример", uk: "Приклад", ar: "مثال" },
 };
 export const t = (key: string, lang: Lang) => tx(S[key], lang) || key;

@@ -7,7 +7,7 @@ export type Rec = {
   id: string; section: string; title: string; status: string | null; data: Record<string, any>;
   company: string | null; controlled: boolean; created_by?: string | null; created_at?: string; updated_at?: string;
 };
-export type Profile = { id: string; email: string; full_name: string; role: string; company: string | null; us_person: boolean; lang: string; ai_monthly_tokens: number; title?: string | null; phone?: string | null; created_at?: string };
+export type Profile = { id: string; email: string; full_name: string; role: string; company: string | null; us_person: boolean; lang: string; ai_monthly_tokens: number; title?: string | null; phone?: string | null; created_at?: string; super?: boolean };
 export type Rule = { section: string; role: string; can_write: boolean; external: boolean };
 export type FileItem = { name: string; path: string; size: number; type: string; created_at?: string };
 export const BUCKET = "files";

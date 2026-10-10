@@ -219,27 +219,27 @@ export const TEMPLATES: MailTemplate[] = [
     subject: { en: "Your AGRON Workspace sign-in link", ru: "Ссылка для входа в AGRON Workspace" },
     heading: { en: "Sign in to AGRON Workspace", ru: "Вход в AGRON Workspace" },
     body: { en: "Click the button below to sign in. The link works once and expires in 1 hour.\n\nIf you didn't request this, you can ignore this email.", ru: "Нажмите кнопку ниже, чтобы войти. Ссылка одноразовая и действует 1 час.\n\nЕсли вы не запрашивали вход, просто проигнорируйте письмо." },
-    cta: { label: { en: "Sign in", ru: "Войти" }, url: "{{ .ConfirmationURL }}" } }, "system"),
+    cta: { label: { en: "Sign in", ru: "Войти" }, url: "{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email" } }, "system"),
   T({ id: "sys_invite", system: true, name: { en: "Invitation", ru: "Приглашение" },
     subject: { en: "You're invited to AGRON Workspace", ru: "Приглашение в AGRON Workspace" },
     heading: { en: "You're invited", ru: "Вас пригласили" },
     body: { en: "AGRON Inc. has invited you to its operating workspace: departments, documents, projects and the AGRON assistant in one place.\n\nYou don't need a password: click the button to accept.", ru: "AGRON Inc. приглашает вас в рабочее пространство компании: отделы, документы, проекты и ассистент AGRON в одном месте.\n\nПароль не нужен — нажмите кнопку, чтобы принять приглашение." },
-    cta: { label: { en: "Accept invitation", ru: "Принять приглашение" }, url: "{{ .ConfirmationURL }}" } }, "system"),
+    cta: { label: { en: "Accept invitation", ru: "Принять приглашение" }, url: "{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=invite" } }, "system"),
   T({ id: "sys_confirm", system: true, name: { en: "Confirm sign-up", ru: "Подтверждение регистрации" },
     subject: { en: "Confirm your AGRON Workspace email", ru: "Подтвердите email для AGRON Workspace" },
     heading: { en: "Confirm your email", ru: "Подтвердите email" },
     body: { en: "Please confirm this email address to finish creating your AGRON Workspace access.", ru: "Подтвердите этот адрес, чтобы завершить создание доступа к AGRON Workspace." },
-    cta: { label: { en: "Confirm email", ru: "Подтвердить" }, url: "{{ .ConfirmationURL }}" } }, "system"),
+    cta: { label: { en: "Confirm email", ru: "Подтвердить" }, url: "{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email" } }, "system"),
   T({ id: "sys_reset", system: true, name: { en: "Reset password", ru: "Сброс пароля" },
     subject: { en: "Set a new AGRON Workspace password", ru: "Новый пароль для AGRON Workspace" },
     heading: { en: "Set a new password", ru: "Задайте новый пароль" },
     body: { en: "We received a request to reset the password for this email. Click the button to set a new one. The link works once and expires in 1 hour.\n\nIf you didn't ask for this, ignore this email: your password stays the same.", ru: "Мы получили запрос на сброс пароля для этого адреса. Нажмите кнопку, чтобы задать новый. Ссылка одноразовая и действует 1 час.\n\nЕсли вы не запрашивали сброс, просто проигнорируйте письмо — пароль не изменится." },
-    cta: { label: { en: "Set new password", ru: "Задать пароль" }, url: "{{ .ConfirmationURL }}" } }, "system"),
+    cta: { label: { en: "Set new password", ru: "Задать пароль" }, url: "{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=recovery&next=/auth/reset" } }, "system"),
   T({ id: "sys_change", system: true, name: { en: "Change email", ru: "Смена email" },
     subject: { en: "Confirm your new email address", ru: "Подтвердите новый адрес" },
     heading: { en: "Confirm email change", ru: "Подтвердите смену email" },
     body: { en: "Click below to confirm the change of your AGRON Workspace email to {{ .NewEmail }}.", ru: "Нажмите кнопку, чтобы подтвердить смену email в AGRON Workspace на {{ .NewEmail }}." },
-    cta: { label: { en: "Confirm change", ru: "Подтвердить" }, url: "{{ .ConfirmationURL }}" } }, "system"),
+    cta: { label: { en: "Confirm change", ru: "Подтвердить" }, url: "{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email_change" } }, "system"),
 ];
 
 /* ---------------- Rendering ---------------- */
@@ -287,7 +287,7 @@ export function renderEmail(o: { subject: string; pre?: string; heading?: string
 <div style="font-size:14px"><a href="mailto:info@agron1.com" style="color:#E2561A;text-decoration:none">info@agron1.com</a> &nbsp;·&nbsp; <a href="https://www.agron1.com" style="color:#E2561A;text-decoration:none">agron1.com</a></div>
 </td></tr></table>` : "";
   const cta = o.cta && o.cta.url ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:6px 0 26px"><tr><td style="border-radius:10px;background:${acc}">
-<a href="${esc(o.cta.url)}" style="display:inline-block;padding:14px 28px;font-family:${font};font-size:16px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px">${esc(o.cta.label)} &rarr;</a></td></tr></table>` : "";
+<a href="${esc(o.cta.url)}" style="display:inline-block;padding:14px 28px;font-family:${font};font-size:16px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px">${esc(o.cta.label)}</a></td></tr></table>` : "";
   return `<!doctype html>
 <html lang="${o.lang}" dir="${dir}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"><title>${esc(o.subject)}</title></head>
 <body style="margin:0;padding:0;background:#EEF1F4;font-family:${font}">

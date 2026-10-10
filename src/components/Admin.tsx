@@ -35,7 +35,7 @@ export default function Admin() {
   };
   const applyBulk = async () => {
     const ids = Object.keys(sel).filter((k) => sel[k]);
-    for (const id of ids) { const p = list.find((x) => x.id === id); if (p && p.id !== me.id) await upd(p, { role: bulk }); }
+    for (const id of ids) { const p = list.find((x) => x.id === id); if (p && p.id !== me.id && !p.super) await upd(p, { role: bulk }); }
     setSel({});
   };
   const roleOpts = Object.entries(ROLES).map(([k, v]: any) => <option key={k} value={k}>{tx(v.label, lang)}</option>);
@@ -76,12 +76,12 @@ export default function Admin() {
           <tbody>{shown.map((p) => { const c = (ROLE_COLORS as any)[p.role]; return (
             <tr key={p.id} style={p.role === "pending" ? { background: "color-mix(in srgb,var(--warn) 7%,transparent)" } : undefined}>
               <td><input type="checkbox" checked={!!sel[p.id]} onChange={(e) => setSel({ ...sel, [p.id]: e.target.checked })} aria-label={p.email} /></td>
-              <td><span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}><span className="avatar" style={{ background: `color-mix(in srgb,${c} 18%,var(--surface))`, color: c, borderColor: "transparent", width: 34, height: 34, fontSize: 14 }}>{(p.full_name || p.email || "?").slice(0, 1).toUpperCase()}</span><b style={{ fontWeight: 600 }}>{p.full_name}</b></span></td>
+              <td><span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}><span className="avatar" style={{ background: `color-mix(in srgb,${c} 18%,var(--surface))`, color: c, borderColor: "transparent", width: 34, height: 34, fontSize: 14 }}>{(p.full_name || p.email || "?").slice(0, 1).toUpperCase()}</span><b style={{ fontWeight: 600 }}>{p.full_name}</b>{p.super && <span className="chip c-ok" title={t("protected_owner", lang)}><Icon n="lock" className="lockico" />{t("protected_owner", lang)}</span>}</span></td>
               <td className="faint">{p.email}</td>
               <td className="faint">{p.title || ""}</td>
-              <td><select className="input" style={{ width: "auto", color: c, fontWeight: 600, borderColor: `color-mix(in srgb,${c} 45%,var(--line))` }} value={p.role} disabled={p.id === me.id && p.role === "owner" && owners <= 1} onChange={(e) => upd(p, { role: e.target.value })} aria-label={t("role", lang)}>{roleOpts}</select></td>
+              <td><select className="input" style={{ width: "auto", color: c, fontWeight: 600, borderColor: `color-mix(in srgb,${c} 45%,var(--line))` }} value={p.role} disabled={!!p.super || (p.id === me.id && p.role === "owner" && owners <= 1)} onChange={(e) => upd(p, { role: e.target.value })} aria-label={t("role", lang)}>{roleOpts}</select></td>
               <td><input className="input" style={{ width: 170 }} defaultValue={p.company || ""} onBlur={(e) => e.target.value !== (p.company || "") && upd(p, { company: e.target.value || null })} aria-label={t("company", lang)} /></td>
-              <td style={{ textAlign: "center" }}><input type="checkbox" style={{ width: 18, height: 18 }} checked={p.us_person} onChange={(e) => upd(p, { us_person: e.target.checked })} aria-label={t("us_person", lang)} /></td>
+              <td style={{ textAlign: "center" }}><input type="checkbox" style={{ width: 18, height: 18 }} disabled={!!p.super} checked={p.us_person} onChange={(e) => upd(p, { us_person: e.target.checked })} aria-label={t("us_person", lang)} /></td>
               <td><input className="input mono" style={{ width: 120 }} type="number" step={100000} defaultValue={p.ai_monthly_tokens} onBlur={(e) => Number(e.target.value) !== p.ai_monthly_tokens && upd(p, { ai_monthly_tokens: Number(e.target.value) })} aria-label={t("ai_limit_col", lang)} /></td></tr>); })}
           </tbody></table></div>
       </section>

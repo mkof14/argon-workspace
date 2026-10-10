@@ -485,8 +485,12 @@ table.tb th{font-size:13px;letter-spacing:0;text-transform:none;color:var(--ink-
 .linkbtn:hover{text-decoration:underline}
 .linkbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
 .btn.big{justify-content:center;padding:14px 18px;font-size:17px;border-radius:11px}
-.auth-oauth{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.auth-oauth .btn{justify-content:center}
+.auth-oauth{display:grid;gap:8px}
+.auth-oauth .btn{justify-content:center;padding:12px 16px;font-size:15.5px;gap:10px;border-radius:11px}
+.oauth-apple{background:#000;color:#fff;border-color:#000}
+.oauth-apple:hover{background:#1c1c1e;border-color:#1c1c1e}
+.auth-or{display:flex;align-items:center;gap:12px;color:var(--ink-3);font-size:14px}
+.auth-or::before,.auth-or::after{content:"";flex:1;height:1px;background:var(--line)}
 .auth-foot{font-size:13px}
 @media (max-width:900px){.auth{grid-template-columns:minmax(0,1fr);align-content:center}.auth-side{align-self:auto;padding:0}.auth-side p{display:none}}
 @media (prefers-reduced-motion:reduce){.sweepg,.contact{animation:none}.contact{opacity:.8}}

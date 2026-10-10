@@ -39,7 +39,7 @@ export async function POST(req: Request) {
   const since = new Date(); since.setUTCDate(1); since.setUTCHours(0, 0, 0, 0);
   const { data: rows } = await admin.from("ai_usage").select("input_tokens,output_tokens").eq("user_id", me.id).gte("created_at", since.toISOString());
   const used = (rows || []).reduce((a: number, r: any) => a + (r.input_tokens || 0) + (r.output_tokens || 0), 0);
-  if (used >= (me.ai_monthly_tokens || 0)) return new Response("Monthly AI limit reached", { status: 429 });
+  if (!me.super && used >= (me.ai_monthly_tokens || 0)) return new Response("Monthly AI limit reached", { status: 429 }); // protected owner has no cap
 
   // 1) Same first question on the same data → reuse the saved answer (no tokens)
   const first = clean.length === 1;
