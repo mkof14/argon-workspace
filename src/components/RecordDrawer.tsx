@@ -1,0 +1,128 @@
+"use client";
+import { useEffect, useRef, useState } from "react";
+import Icon from "./Icon";
+import { useApp } from "./App";
+import { t, tx } from "@/lib/i18n";
+import { Activity, Comment, Rec, isExternal, store } from "@/lib/store";
+import { elementToPdf, fmt, recordMarkdown, saveBlob, slug, tone } from "@/lib/format";
+
+export default function RecordDrawer({ section, rec, onClose, onSaved }: { section: any; rec: Rec | null; onClose: () => void; onSaved: () => void }) {
+  const { lang, me, access, toast, openAi } = useApp();
+  const canWrite = access.write.has(section.id) && !isExternal(me.role);
+  const [title, setTitle] = useState(rec?.title || "");
+  const [status, setStatus] = useState(rec?.status || section.statuses[0]);
+  const [data, setData] = useState<Record<string, any>>({ ...(rec?.data || {}) });
+  const [company, setCompany] = useState(rec?.company || "");
+  const [controlled, setControlled] = useState(!!rec?.controlled);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [hist, setHist] = useState<Activity[]>([]);
+  const [cmt, setCmt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
+  const printRef = useRef<HTMLDivElement>(null);
+  const gate = section.gate;
+  const gateBlocked = gate && status === gate.status && data[gate.field] !== gate.equals;
+
+  useEffect(() => {
+    if (!rec) return;
+    store.comments(rec.id).then(setComments).catch(() => {});
+    store.activity({ recordId: rec.id, limit: 15 }).then(setHist).catch(() => {});
+  }, [rec]);
+  useEffect(() => { const k = (e: KeyboardEvent) => e.key === "Escape" && onClose(); window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
+
+  const save = async () => {
+    if (!title.trim()) return;
+    if (gateBlocked) { toast(tx(gate.msg, lang), true); return; }
+    setBusy(true);
+    try { await store.save({ id: rec?.id, section: section.id, title: title.trim(), status, data, company: company.trim() || null, controlled }); toast(t("saved", lang)); onSaved(); }
+    catch (e: any) { toast(e.message || "Error", true); } finally { setBusy(false); }
+  };
+  const del = async () => { if (!rec) return; try { await store.remove(rec.id); toast(t("deleted", lang)); onSaved(); } catch (e: any) { toast(e.message || "Error", true); } };
+  const addCmt = async () => { if (!rec || !cmt.trim()) return; try { await store.addComment(rec.id, cmt.trim()); setCmt(""); setComments(await store.comments(rec.id)); } catch (e: any) { toast(e.message || "Error", true); } };
+
+  const current: Rec = { ...(rec as Rec), title, status, data, controlled };
+  const md = () => recordMarkdown(section, current, lang);
+  const copy = async () => { try { await navigator.clipboard.writeText(md()); toast(t("copied", lang)); } catch { toast("Clipboard blocked", true); } };
+  const share = async () => {
+    const url = `${location.origin}${location.pathname}?r=${rec?.id}`;
+    try { if (navigator.share) { await navigator.share({ title: `AGRON · ${title}`, url }); return; } } catch { return; }
+    try { await navigator.clipboard.writeText(url); toast(t("share_text", lang)); } catch {}
+  };
+  const pdf = async () => { if (!printRef.current) return; toast(t("pdf_wait", lang)); printRef.current.hidden = false; try { await elementToPdf(printRef.current, `AGRON_${slug(title)}.pdf`); } finally { printRef.current.hidden = true; } };
+
+  const field = (f: any) => {
+    const v = data[f.key] ?? ""; const set = (x: any) => setData((d) => ({ ...d, [f.key]: x })); const id = `f-${f.key}`;
+    const ro = !canWrite;
+    let ctl;
+    if (f.type === "select") ctl = <select id={id} className="input" value={v} disabled={ro} onChange={(e) => set(e.target.value)}><option value="" />{f.options.map((o: string) => <option key={o}>{o}</option>)}</select>;
+    else if (f.type === "long") ctl = <textarea id={id} className="input" value={v} readOnly={ro} rows={3} onChange={(e) => set(e.target.value)} />;
+    else if (f.type === "check") return <label key={f.key} className="check wide"><input id={id} type="checkbox" checked={!!v} disabled={ro} onChange={(e) => set(e.target.checked)} />{tx(f.label, lang)}</label>;
+    else ctl = <input id={id} className={`input ${f.type === "money" || f.type === "number" ? "mono" : ""}`} readOnly={ro} type={f.type === "date" ? "date" : f.type === "url" ? "url" : f.type === "money" || f.type === "number" ? "number" : "text"} value={v} onChange={(e) => set(f.type === "money" || f.type === "number" ? (e.target.value === "" ? "" : Number(e.target.value)) : e.target.value)} />;
+    return <div key={f.key} className={`field ${f.type === "long" ? "wide" : ""}`}><label htmlFor={id}>{tx(f.label, lang)}</label>{ctl}{f.type === "url" && v ? <a href={v} target="_blank" rel="noopener" className="hint">{v}</a> : null}</div>;
+  };
+
+  return (
+    <>
+      <div className="scrim" onClick={onClose} />
+      <aside className="drawer" role="dialog" aria-modal="true" aria-label={title || t("new", lang)}>
+        <div className="drawer-h">
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div className="eyebrow">{tx(section.label, lang)}</div>
+            <h2>{rec ? title : t("new", lang)}</h2>
+            <div className="toolbar">{status && <span className={`chip dot ${tone(status)}`}>{status}</span>}{controlled && <span className="chip c-warn"><Icon n="lock" className="lockico" />{t("controlled_short", lang)}</span>}{data.sample && <span className="chip c-vio">{t("sample", lang)}</span>}</div>
+          </div>
+          <button className="iconbtn" onClick={onClose} aria-label={t("close", lang)}><Icon n="x" /></button>
+        </div>
+        <div className="drawer-b">
+          {rec && <div className="toolbar">
+            <button className="btn ghost sm" onClick={copy}><Icon n="copy" />{t("copy", lang)}</button>
+            <button className="btn ghost sm" onClick={() => window.print()}><Icon n="print" />{t("print", lang)}</button>
+            <button className="btn ghost sm" onClick={pdf}><Icon n="pdf" />{t("pdf", lang)}</button>
+            <button className="btn ghost sm" onClick={share}><Icon n="share" />{t("share", lang)}</button>
+            <button className="btn ghost sm" onClick={() => saveBlob(`AGRON_${slug(title)}.md`, md(), "text/markdown;charset=utf-8")}><Icon n="download" />{t("download", lang)}</button>
+            <button className="btn sm" onClick={() => openAi({ title, section: section.id, record: current })}><Icon n="spark" />{t("ask_ai", lang)}</button>
+          </div>}
+          <div className="fgrid">
+            <div className="field wide"><label htmlFor="f-title">{t("title", lang)}</label><input id="f-title" className="input" value={title} readOnly={!canWrite} onChange={(e) => setTitle(e.target.value)} /></div>
+            <div className="field"><label htmlFor="f-status">{t("status", lang)}</label><select id="f-status" className="input" value={status} disabled={!canWrite} onChange={(e) => setStatus(e.target.value)}>{section.statuses.map((s: string) => <option key={s}>{s}</option>)}</select></div>
+            {section.fields.map(field)}
+            {gateBlocked && <div className="gate-msg wide">{tx(gate.msg, lang)}</div>}
+            {canWrite && section.controlled && me.us_person && <label className="check wide"><input type="checkbox" checked={controlled} onChange={(e) => setControlled(e.target.checked)} /><Icon n="lock" className="lockico" />{t("controlled", lang)}</label>}
+            {canWrite && section.external?.length > 0 && <div className="field wide"><label htmlFor="f-company">{t("visibility", lang)}</label><input id="f-company" className="input" value={company} onChange={(e) => setCompany(e.target.value)} placeholder="" /><span className="hint">{t("vis_hint", lang)}</span></div>}
+          </div>
+          {rec && <div className="thread">
+            <div className="eyebrow">{t("comments", lang)}</div>
+            {comments.map((c) => <div key={c.id} className="cmt"><small>{(c.created_at || "").slice(0, 16).replace("T", " ")}</small><div style={{ whiteSpace: "pre-wrap" }}>{c.body}</div></div>)}
+            <div className="toolbar" style={{ flexWrap: "nowrap" }}><input className="input" value={cmt} placeholder={t("add_comment", lang)} onChange={(e) => setCmt(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addCmt()} aria-label={t("add_comment", lang)} /><button className="btn" onClick={addCmt}>{t("send", lang)}</button></div>
+          </div>}
+          {rec && hist.length > 0 && <div className="thread">
+            <div className="eyebrow">{t("history", lang)}</div>
+            {hist.map((h) => <div key={h.id} className="faint" style={{ fontSize: 12.5 }}><span className="mono">{(h.created_at || "").slice(0, 16).replace("T", " ")}</span> · {h.action}{h.action === "status" && h.detail ? `: ${h.detail.from || "—"} → ${h.detail.to}` : ""}</div>)}
+          </div>}
+        </div>
+        <div className="drawer-f">
+          {canWrite && <button className="btn primary" disabled={busy || !title.trim()} onClick={save}>{t("save", lang)}</button>}
+          <button className="btn ghost" onClick={onClose}>{canWrite ? t("cancel", lang) : t("close", lang)}</button>
+          <span style={{ flex: 1 }} />
+          {rec && canWrite && (confirmDel
+            ? <><span className="faint" style={{ alignSelf: "center", fontSize: 12.5 }}>{t("confirm_delete", lang)}</span><button className="btn danger" onClick={del}>{t("delete", lang)}</button><button className="btn ghost" onClick={() => setConfirmDel(false)}>{t("cancel", lang)}</button></>
+            : <button className="btn ghost danger" onClick={() => setConfirmDel(true)}><Icon n="trash" />{t("delete", lang)}</button>)}
+        </div>
+      </aside>
+      {/* Branded sheet used for PDF export */}
+      <div ref={printRef} hidden style={{ position: "fixed", left: -10000, top: 0, width: 794, background: "#fff", color: "#111820", fontFamily: "IBM Plex Sans, IBM Plex Sans Arabic, sans-serif", fontSize: 13 }} dir={lang === "ar" ? "rtl" : "ltr"}>
+        <div style={{ background: "#141A21", padding: "22px 36px", borderBottom: "3px solid #FF6A2B", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <img src="/logo-mark.webp" alt="AGRON" style={{ height: 38 }} /><span style={{ color: "#C7D0DA", fontSize: 11 }}>AGRON WORKSPACE · {new Date().toISOString().slice(0, 10)}</span></div>
+        <div style={{ padding: "22px 36px" }}>
+          <div style={{ fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase", color: "#7A8796" }}>{tx(section.label, lang)}</div>
+          <h1 style={{ fontFamily: "Unbounded, sans-serif", fontSize: 19, margin: "4px 0 6px" }}>{title}</h1>
+          <div style={{ color: "#4B5867", marginBottom: 14 }}>{status}{controlled ? " · CONTROLLED — US persons only" : ""}</div>
+          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12 }}><tbody>
+            {section.fields.filter((f: any) => data[f.key] !== undefined && data[f.key] !== "").map((f: any) => <tr key={f.key}><td style={{ border: "1px solid #D5DCE4", padding: "6px 8px", background: "#F5F7F9", width: "34%" }}>{tx(f.label, lang)}</td><td style={{ border: "1px solid #D5DCE4", padding: "6px 8px", whiteSpace: "pre-wrap" }}>{fmt(f, data[f.key], lang)}</td></tr>)}
+          </tbody></table>
+        </div>
+        <div style={{ margin: "0 36px 24px", paddingTop: 10, borderTop: "1px solid #D5DCE4", color: "#7A8796", fontSize: 10 }}>© 2026 AGRON Inc. All rights reserved. · {t("foot_conf", lang)} · www.agron1.com</div>
+      </div>
+    </>
+  );
+}
