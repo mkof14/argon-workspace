@@ -19,6 +19,9 @@ export default function Learn() {
   const [q, setQ] = useState("");
   const [focus] = useState(params?.get("s") || "");
   const [faq, setFaq] = useState<Faq[]>([]);
+  const [gd, setGd] = useState<string>(() => { const f = params?.get("s"); return f ? f.split(".")[0] : "basics"; });
+  const [td, setTd] = useState<string>("all");
+  const [fd, setFd] = useState<string>("all");
   const [allLangs, setAllLangs] = useState(false);
   const [edit, setEdit] = useState<Partial<Faq> | null>(null);
   const editor = ["owner", "admin", "management", "legal"].includes(me.role);
@@ -32,8 +35,8 @@ export default function Learn() {
   const hit = (...xs: string[]) => !ql || xs.some((x) => x.toLowerCase().includes(ql));
   const depts = DEPARTMENTS.map((d: any) => ({ ...d, secs: SECTIONS.filter((s) => s.dept === d.key && access.read.has(s.id)) })).filter((d: any) => d.secs.length);
 
-  const shownFaq = useMemo(() => faq.filter((f) => (allLangs || f.lang === fl) && hit(f.question, f.answer))
-    .sort((a, b) => Number(b.verified) - Number(a.verified) || b.hits - a.hits), [faq, allLangs, fl, ql]); // eslint-disable-line
+  const shownFaq = useMemo(() => faq.filter((f) => (allLangs || f.lang === fl) && hit(f.question, f.answer) && (fd === "all" || (fd === "general" ? !f.section : !!f.section?.startsWith(fd + "."))))
+    .sort((a, b) => Number(b.verified) - Number(a.verified) || b.hits - a.hits), [faq, allLangs, fl, ql, fd]); // eslint-disable-line
 
   const saveEdit = async () => {
     if (!edit?.question?.trim() || !edit.answer?.trim()) return;
@@ -46,7 +49,7 @@ export default function Learn() {
   return (
     <div style={{ display: "grid", gap: 16, ["--dc" as any]: "#14B8A6" }}>
       <section className="sec-hero">
-        <span className="ic"><Icon n="grad" /></span>
+        <span className="ic"><Icon n="lifebuoy" /></span>
         <div style={{ position: "relative", zIndex: 1, minWidth: 0 }}><div className="eyebrow" style={{ color: "var(--dc)" }}>{t("workspace", lang)}</div><h2>{t("learn", lang)}</h2>
           <div className="sec-desc">{t("learn_sub", lang)}</div></div>
         <div className="stats">
@@ -69,36 +72,55 @@ export default function Learn() {
       </div>
 
       {tab === "guide" && <>
-        <div className="learn-grid">{GUIDES.filter((g) => hit(l2(g.title, lang), l2(g.body, lang))).map((g) => (
-          <div key={g.id} className="lcard" style={{ ["--dc" as any]: "#14B8A6" }}><h3><Icon n={g.icon} />{l2(g.title, lang)}</h3>
-            <ul>{lines("\n" + l2(g.body, lang)).bullets.map((b, i) => <li key={i}>{b}</li>)}</ul></div>))}</div>
-        {depts.map((d: any) => {
-          const secs = d.secs.filter((s: any) => hit(tx(s.label, lang), l2(HELP[s.id], lang)));
+        <div className="chipbar" role="tablist">
+          <button className={gd === "basics" ? "on" : ""} style={{ ["--dc" as any]: "#14B8A6" }} onClick={() => setGd("basics")}><Icon n="lifebuoy" />{t("basics", lang)}</button>
+          {depts.map((d: any) => <button key={d.key} className={gd === d.key ? "on" : ""} style={{ ["--dc" as any]: (DEPT_COLORS as any)[d.key] }} onClick={() => setGd(d.key)}><Icon n={d.icon} />{tx(d.label, lang)}</button>)}
+        </div>
+        {(gd === "basics" || ql) && <div className="guides">{GUIDES.filter((g) => hit(l2(g.title, lang), l2(g.body, lang))).map((g) => (
+          <details key={g.id} className="guide-row" style={{ ["--dc" as any]: "#14B8A6" }} open={!!ql}>
+            <summary><span className="flag"><Icon n={g.icon} /></span><span className="t"><b>{l2(g.title, lang)}</b></span><Icon n="down" className="lockico" /></summary>
+            <div className="body"><ol>{lines("\n" + l2(g.body, lang)).bullets.map((x, i) => <li key={i}>{x}</li>)}</ol></div>
+          </details>))}</div>}
+        {depts.filter((d: any) => ql || d.key === gd).map((d: any) => {
+          const secs = d.secs.filter((x: any) => hit(tx(x.label, lang), l2(HELP[x.id], lang)));
           if (!secs.length) return null;
-          return <div key={d.key} style={{ display: "grid", gap: 12, ["--dc" as any]: (DEPT_COLORS as any)[d.key] }}>
-            <div className="lhead"><span className="ic"><Icon n={d.icon} /></span><h2>{tx(d.label, lang)}</h2></div>
-            <div className="learn-grid">{secs.map((s: any) => { const h = lines(l2(HELP[s.id], lang)); return (
-              <div key={s.id} id={`h-${s.id}`} className={`lcard ${focus === s.id ? "hl" : ""}`}>
-                <h3><Icon n={s.icon} />{tx(s.label, lang)}</h3><p>{h.first}</p>
-                {h.bullets.length > 0 && <ul>{h.bullets.map((b, i) => <li key={i}>{b}</li>)}</ul>}
-                <div className="toolbar" style={{ marginTop: 4 }}><Link className="btn ghost sm" href={`/${s.dept}/${s.key}`}><Icon n="ext" />{t("open", lang)}</Link>
-                  {s.gate && <span className="chip c-warn"><Icon n="lock" className="lockico" />{s.gate.status}</span>}
-                  {s.controlled && <span className="chip c-warn"><Icon n="lock" className="lockico" />{t("controlled_short", lang)}</span>}</div>
-              </div>); })}</div>
+          return <div key={d.key} style={{ display: "grid", gap: 10, ["--dc" as any]: (DEPT_COLORS as any)[d.key] }}>
+            {ql && <div className="lhead"><span className="ic"><Icon n={d.icon} /></span><h2>{tx(d.label, lang)}</h2></div>}
+            <div className="guides">{secs.map((x: any) => { const h = lines(l2(HELP[x.id], lang)); return (
+              <details key={x.id} id={`h-${x.id}`} className={`guide-row ${focus === x.id ? "hl" : ""}`} open={focus === x.id || !!ql}>
+                <summary><span className="flag"><Icon n={x.icon} /></span><span className="t"><b>{tx(x.label, lang)}</b><span>{h.first}</span></span><Icon n="down" className="lockico" /></summary>
+                <div className="body">
+                  {h.bullets.length > 0 && <ol>{h.bullets.map((b, i) => <li key={i}>{b}</li>)}</ol>}
+                  <div className="toolbar"><Link className="btn sm" href={`/${x.dept}/${x.key}`}><Icon n="ext" />{t("open", lang)}</Link>
+                    {x.gate && <span className="chip c-warn"><Icon n="lock" className="lockico" />{x.gate.status}</span>}
+                    {x.controlled && <span className="chip c-warn"><Icon n="lock" className="lockico" />{t("controlled_short", lang)}</span>}</div>
+                </div>
+              </details>); })}</div>
           </div>;
         })}
       </>}
 
-      {tab === "terms" && Object.entries(GLOSSARY).map(([dk, items]) => {
-        const d: any = DEPARTMENTS.find((x: any) => x.key === dk); const list = items.filter(([term, def]) => hit(term, l2(def, lang)));
-        if (!list.length) return null;
-        return <div key={dk} style={{ display: "grid", gap: 10, ["--dc" as any]: (DEPT_COLORS as any)[dk] }}>
-          <div className="lhead"><span className="ic"><Icon n={d?.icon || "book"} /></span><h2>{d ? tx(d.label, lang) : dk}</h2></div>
-          <div className="terms">{list.map(([term, def]) => <div key={term} className="term"><b>{term}</b><span>{l2(def, lang)}</span></div>)}</div>
-        </div>;
-      })}
+      {tab === "terms" && <>
+        <div className="chipbar">
+          <button className={td === "all" ? "on" : ""} style={{ ["--dc" as any]: "#14B8A6" }} onClick={() => setTd("all")}>{t("all_depts", lang)}</button>
+          {Object.keys(GLOSSARY).map((dk) => { const d: any = DEPARTMENTS.find((x: any) => x.key === dk); return <button key={dk} className={td === dk ? "on" : ""} style={{ ["--dc" as any]: (DEPT_COLORS as any)[dk] }} onClick={() => setTd(dk)}><Icon n={d?.icon || "book"} />{d ? tx(d.label, lang) : dk} <span style={{ fontWeight: 500, opacity: .7 }}>{GLOSSARY[dk].length}</span></button>; })}
+        </div>
+        {Object.entries(GLOSSARY).filter(([dk]) => td === "all" || td === dk).map(([dk, items]) => {
+          const d: any = DEPARTMENTS.find((x: any) => x.key === dk); const list = items.filter(([term, def]) => hit(term, l2(def, lang)));
+          if (!list.length) return null;
+          return <div key={dk} style={{ display: "grid", gap: 8, ["--dc" as any]: (DEPT_COLORS as any)[dk] }}>
+            {td === "all" && <div className="lhead"><span className="ic"><Icon n={d?.icon || "book"} /></span><h2>{d ? tx(d.label, lang) : dk}</h2></div>}
+            <dl className="dict">{list.map(([term, def]) => [<dt key={term + "t"}>{term}</dt>, <dd key={term + "d"}>{l2(def, lang)}</dd>])}</dl>
+          </div>;
+        })}
+      </>}
 
       {tab === "faq" && <div style={{ display: "grid", gap: 10 }}>
+        <div className="chipbar">
+          <button className={fd === "all" ? "on" : ""} style={{ ["--dc" as any]: "#14B8A6" }} onClick={() => setFd("all")}>{t("all_depts", lang)}</button>
+          <button className={fd === "general" ? "on" : ""} style={{ ["--dc" as any]: "#14B8A6" }} onClick={() => setFd("general")}><Icon n="lifebuoy" />{t("basics", lang)}</button>
+          {Array.from(new Set(faq.map((f) => f.section?.split(".")[0]).filter(Boolean) as string[])).map((dk) => { const d: any = DEPARTMENTS.find((x: any) => x.key === dk); return d ? <button key={dk} className={fd === dk ? "on" : ""} style={{ ["--dc" as any]: (DEPT_COLORS as any)[dk] }} onClick={() => setFd(dk)}><Icon n={d.icon} />{tx(d.label, lang)}</button> : null; })}
+        </div>
         {edit && <div className="card" style={{ ["--dc" as any]: "#14B8A6" }}><div className="card-b" style={{ display: "grid", gap: 10 }}>
           <div className="field"><label htmlFor="fq">{t("question", lang)}</label><input id="fq" className="input" value={edit.question || ""} onChange={(e) => setEdit({ ...edit, question: e.target.value })} /></div>
           <div className="field"><label htmlFor="fa">{t("answer", lang)}</label><textarea id="fa" className="input" rows={5} value={edit.answer || ""} onChange={(e) => setEdit({ ...edit, answer: e.target.value })} /></div>

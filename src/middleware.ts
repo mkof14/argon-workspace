@@ -13,7 +13,8 @@ export async function middleware(req: NextRequest) {
   });
   const { data } = await sb.auth.getUser();
   const p = req.nextUrl.pathname;
-  if (!data.user && !p.startsWith("/login") && !p.startsWith("/auth") && !p.startsWith("/api")) {
+  const open = p.startsWith("/login") || p.startsWith("/auth") || p.startsWith("/api") || p === "/manifest.webmanifest" || p === "/robots.txt" || p === "/icon.png" || p === "/apple-icon.png";
+  if (!data.user && !open) {
     return NextResponse.redirect(new URL("/login", req.url));
   }
   return res;

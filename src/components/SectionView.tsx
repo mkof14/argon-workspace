@@ -3,8 +3,9 @@ import { useEffect, useMemo, useState } from "react";
 import Icon from "./Icon";
 import { useApp } from "./App";
 import RecordDrawer from "./RecordDrawer";
-import MailCenter from "./Mail";
-import LegalHub from "./LegalHub";
+import dynamic from "next/dynamic";
+const MailCenter = dynamic(() => import("./Mail"), { ssr: false });
+const LegalHub = dynamic(() => import("./LegalHub"), { ssr: false });
 import { DEPARTMENTS } from "@/config/workspace.config.mjs";
 import { HELP, l2 } from "@/config/learn";
 import Link from "next/link";
@@ -87,7 +88,7 @@ export default function SectionView({ section }: { section: any }) {
           <div className="eyebrow" style={{ color: section.color }}>{tx(dept?.label, lang)}</div>
           <h2>{tx(section.label, lang)}</h2>
           <div className="sub">{rows ? <><b className="mono">{rows.length}</b> {t("records", lang)}{moneyKey && sum ? <> · {t("total", lang)} <b className="mono">{fmt({ type: "money" }, sum, lang)}</b></> : null}</> : "…"}{section.controlled && <> · <Icon n="lock" className="lockico" /> {t("controlled_short", lang)}</>}</div>
-          {HELP[section.id] && <div className="sec-desc">{l2(HELP[section.id], lang).split("\n")[0]} <Link href={`/learn?s=${section.id}`} style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{t("how_to", lang)} →</Link></div>}
+          {HELP[section.id] && <div className="sec-desc">{l2(HELP[section.id], lang).split("\n")[0]} <Link href={`/learn?s=${section.id}`} style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{t("how_to", lang)}</Link></div>}
         </div>
         <div className="stats">
           {counts.filter((c: any) => c.n || section.statuses.length <= 5).slice(0, 6).map((c: any) => (

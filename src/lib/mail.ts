@@ -35,8 +35,8 @@ export const TEMPLATES: MailTemplate[] = [
     pre: { en: "A container-based security system, built to order and installed in days.", ru: "Контейнерная система безопасности, собирается под заказ и устанавливается за дни." },
     heading: { en: "Security that arrives ready to work", ru: "Безопасность, которая приезжает готовой к работе" },
     body: {
-      en: "Dear {{client_name}},\n\nI'm {{sender_name}} from AGRON Inc. We build **StarDome** — self-contained security containers that combine radar, cameras, sensors and the **AGRON 1** monitoring software in one unit for {{site_type}}.\n\nWhy owners and operators choose StarDome:\n- One container, one contract: equipment, integration, installation and service\n- Five configurations, from C20 Base to C40 HQ, matched to the site\n- Purchase, leasing or subscription\n- Passive detection and monitoring designed around local regulations\n\nWould a 20-minute call next week be useful? I can show how StarDome would cover {{site_name}}.",
-      ru: "Уважаемый(ая) {{client_name}},\n\nменя зовут {{sender_name}}, я представляю AGRON Inc. Мы создаём **StarDome** — автономные контейнеры безопасности: радар, камеры, датчики и программа мониторинга **AGRON 1** в одном модуле для {{site_type}}.\n\nПочему выбирают StarDome:\n- Один контейнер и один договор: оборудование, интеграция, монтаж и сервис\n- Пять конфигураций — от C20 Base до C40 HQ — под конкретный объект\n- Покупка, лизинг или подписка\n- Пассивное обнаружение и мониторинг с учётом местных правил\n\nУдобно ли созвониться на 20 минут на следующей неделе? Покажу, как StarDome закроет задачи {{site_name}}." },
+      en: "Dear {{client_name}},\n\nAGRON Inc. builds **StarDome** — self-contained security containers that combine radar, cameras, sensors and the **AGRON 1** monitoring software in one unit for {{site_type}}.\n\nWhy owners and operators choose StarDome:\n- One container, one contract: equipment, integration, installation and service\n- Five configurations, from C20 Base to C40 HQ, matched to the site\n- Purchase, leasing or subscription\n- Passive detection and monitoring designed around local regulations\n\nWould a 20-minute call next week be useful? We can show how StarDome would cover {{site_name}}.",
+      ru: "Уважаемый(ая) {{client_name}},\n\nкомпания AGRON Inc. создаёт **StarDome** — автономные контейнеры безопасности: радар, камеры, датчики и программа мониторинга **AGRON 1** в одном модуле для {{site_type}}.\n\nПочему выбирают StarDome:\n- Один контейнер и один договор: оборудование, интеграция, монтаж и сервис\n- Пять конфигураций — от C20 Base до C40 HQ — под конкретный объект\n- Покупка, лизинг или подписка\n- Пассивное обнаружение и мониторинг с учётом местных правил\n\nУдобно ли созвониться на 20 минут на следующей неделе? Покажем, как StarDome закроет задачи {{site_name}}." },
     cta: { label: { en: "Book a call", ru: "Назначить звонок" }, url: "{{meeting_link}}" } }, "sales"),
   T({ id: "after_meeting", name: { en: "Thank you after meeting", ru: "Спасибо за встречу" },
     subject: { en: "Thank you for the meeting — next steps", ru: "Спасибо за встречу — следующие шаги" },
@@ -141,8 +141,8 @@ export const TEMPLATES: MailTemplate[] = [
     subject: { en: "Welcome to the AGRON partner network", ru: "Добро пожаловать в партнёрскую сеть AGRON" },
     heading: { en: "Welcome, partner", ru: "Добро пожаловать, партнёр" },
     body: {
-      en: "Dear {{contact_name}},\n\nWe're glad to welcome **{{company}}** as an AGRON {{partner_type}} in {{region}}.\n\nYou now have access to the partner area of AGRON Workspace with:\n- Approved presentations, brochures and videos\n- Price list and proposal templates\n- Support requests for your clients\n\nYour partner manager: {{sender_name}}.",
-      ru: "Уважаемый(ая) {{contact_name}},\n\nрады приветствовать **{{company}}** в качестве {{partner_type}} AGRON в регионе {{region}}.\n\nВам открыт партнёрский раздел AGRON Workspace:\n- Утверждённые презентации, буклеты и видео\n- Прайс-лист и шаблоны предложений\n- Заявки в поддержку для ваших клиентов\n\nВаш менеджер — {{sender_name}}." },
+      en: "Dear {{contact_name}},\n\nWe're glad to welcome **{{company}}** as an AGRON {{partner_type}} in {{region}}.\n\nYou now have access to the partner area of AGRON Workspace with:\n- Approved presentations, brochures and videos\n- Price list and proposal templates\n- Support requests for your clients\n\nQuestions: info@agron1.com.",
+      ru: "Уважаемый(ая) {{contact_name}},\n\nрады приветствовать **{{company}}** в качестве {{partner_type}} AGRON в регионе {{region}}.\n\nВам открыт партнёрский раздел AGRON Workspace:\n- Утверждённые презентации, буклеты и видео\n- Прайс-лист и шаблоны предложений\n- Заявки в поддержку для ваших клиентов\n\nВопросы: info@agron1.com." },
     cta: { label: { en: "Open the workspace", ru: "Открыть кабинет" }, url: SITE } }, "partners"),
 
   // ---------------- Compliance ----------------
@@ -230,6 +230,11 @@ export const TEMPLATES: MailTemplate[] = [
     heading: { en: "Confirm your email", ru: "Подтвердите email" },
     body: { en: "Please confirm this email address to finish creating your AGRON Workspace access.", ru: "Подтвердите этот адрес, чтобы завершить создание доступа к AGRON Workspace." },
     cta: { label: { en: "Confirm email", ru: "Подтвердить" }, url: "{{ .ConfirmationURL }}" } }, "system"),
+  T({ id: "sys_reset", system: true, name: { en: "Reset password", ru: "Сброс пароля" },
+    subject: { en: "Set a new AGRON Workspace password", ru: "Новый пароль для AGRON Workspace" },
+    heading: { en: "Set a new password", ru: "Задайте новый пароль" },
+    body: { en: "We received a request to reset the password for this email. Click the button to set a new one. The link works once and expires in 1 hour.\n\nIf you didn't ask for this, ignore this email: your password stays the same.", ru: "Мы получили запрос на сброс пароля для этого адреса. Нажмите кнопку, чтобы задать новый. Ссылка одноразовая и действует 1 час.\n\nЕсли вы не запрашивали сброс, просто проигнорируйте письмо — пароль не изменится." },
+    cta: { label: { en: "Set new password", ru: "Задать пароль" }, url: "{{ .ConfirmationURL }}" } }, "system"),
   T({ id: "sys_change", system: true, name: { en: "Change email", ru: "Смена email" },
     subject: { en: "Confirm your new email address", ru: "Подтвердите новый адрес" },
     heading: { en: "Confirm email change", ru: "Подтвердите смену email" },
@@ -268,6 +273,8 @@ function bodyHtml(text: string, draft: boolean) {
 }
 
 export type Sender = { name: string; title?: string | null; email?: string; phone?: string | null };
+/** All emails are signed by the company, never by a person. */
+export const COMPANY: Sender = { name: "AGRON Inc.", email: "info@agron1.com" };
 
 export function renderEmail(o: { subject: string; pre?: string; heading?: string; body: string; cta?: { label: string; url: string } | null; lang: string; sender?: Sender | null; accent?: string; draft?: boolean }) {
   const rtl = o.lang === "ar";
@@ -275,12 +282,9 @@ export function renderEmail(o: { subject: string; pre?: string; heading?: string
   const acc = o.accent || "#FF6A2B";
   const font = rtl ? "'IBM Plex Sans Arabic',Tahoma,Arial,sans-serif" : "'IBM Plex Sans','Segoe UI',Helvetica,Arial,sans-serif";
   const L = (en: string, ru: string, uk: string, ar: string) => ({ en, ru, uk, ar } as any)[o.lang] || en;
-  const sig = o.sender ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:8px;border-${rtl ? "right" : "left"}:3px solid ${acc};padding-${rtl ? "right" : "left"}:14px">
-<tr><td style="padding-${rtl ? "right" : "left"}:14px;font-size:15px;line-height:1.5;color:#2A3440">
-<div style="font-weight:700;color:#0E141A;font-size:16px">${esc(o.sender.name)}</div>
-${o.sender.title ? `<div style="color:#5A6775">${esc(o.sender.title)}</div>` : ""}
-<div style="color:#5A6775">AGRON Inc.</div>
-<div style="margin-top:4px;font-size:14px">${[o.sender.email ? `<a href="mailto:${esc(o.sender.email)}" style="color:#E2561A;text-decoration:none">${esc(o.sender.email)}</a>` : "", o.sender.phone ? esc(o.sender.phone) : "", `<a href="https://www.agron1.com" style="color:#E2561A;text-decoration:none">agron1.com</a>`].filter(Boolean).join(" &nbsp;·&nbsp; ")}</div>
+  const sig = o.sender ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:4px"><tr><td style="font-size:15px;line-height:1.55;color:#2A3440">
+<div style="font-weight:700;color:#0E141A;font-size:16px">AGRON Inc.</div>
+<div style="font-size:14px"><a href="mailto:info@agron1.com" style="color:#E2561A;text-decoration:none">info@agron1.com</a> &nbsp;·&nbsp; <a href="https://www.agron1.com" style="color:#E2561A;text-decoration:none">agron1.com</a></div>
 </td></tr></table>` : "";
   const cta = o.cta && o.cta.url ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:6px 0 26px"><tr><td style="border-radius:10px;background:${acc}">
 <a href="${esc(o.cta.url)}" style="display:inline-block;padding:14px 28px;font-family:${font};font-size:16px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px">${esc(o.cta.label)} &rarr;</a></td></tr></table>` : "";
@@ -319,6 +323,6 @@ export function plainText(o: { body: string; cta?: { label: string; url: string 
   const sign = { en: "Best regards,", ru: "С уважением,", uk: "З повагою,", ar: "مع أطيب التحيات،" } as any;
   let s = o.body.replace(/\*\*(.+?)\*\*/g, "$1").replace(/^\s*-\s+/gm, "• ");
   if (o.cta?.url) s += `\n\n${o.cta.label}: ${o.cta.url}`;
-  if (o.sender) s += `\n\n${sign[o.lang] || sign.en}\n${o.sender.name}${o.sender.title ? `\n${o.sender.title}` : ""}\nAGRON Inc.${o.sender.phone ? `\n${o.sender.phone}` : ""}\nwww.agron1.com`;
+  if (o.sender) s += `\n\n${sign[o.lang] || sign.en}\nAGRON Inc.\ninfo@agron1.com · www.agron1.com`;
   return s;
 }

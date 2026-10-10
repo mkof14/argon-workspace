@@ -1,7 +1,6 @@
 "use client";
-import { createBrowserClient } from "@supabase/ssr";
 import { allSections, defaultRules, ROLES } from "@/config/workspace.config.mjs";
-import { demoSeed, DEMO_PEOPLE } from "./demo";
+import type * as DemoMod from "./demo";
 import { SEED_FAQ } from "@/config/learn";
 
 export type Rec = {
@@ -17,12 +16,8 @@ export type Comment = { id: string; record_id: string; author: string | null; bo
 export type Activity = { id: number; record_id: string | null; section: string; actor: string | null; action: string; detail: any; created_at: string };
 export type Access = { read: Set<string>; write: Set<string> };
 
-export const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-export const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-export const DEMO = !SUPA_URL || !SUPA_KEY;
-
-let _sb: ReturnType<typeof createBrowserClient> | null = null;
-export const sb = () => (_sb ||= createBrowserClient(SUPA_URL, SUPA_KEY));
+import { DEMO, SUPA_KEY, SUPA_URL, sb } from "./sb";
+export { DEMO, SUPA_KEY, SUPA_URL, sb };
 
 const INTERNAL_ROLES = Object.entries(ROLES).filter(([, r]: any) => r.internal).map(([k]) => k);
 export const isExternal = (role: string) => !INTERNAL_ROLES.includes(role);
@@ -39,12 +34,15 @@ export function accessFor(role: string, rules?: Rule[] | null): Access {
   return { read, write };
 }
 
-/* ---------------- Demo store (browser only) ---------------- */
+/* ---------------- Demo store (browser only; its data loads only in demo mode) ---------------- */
+let demo: typeof DemoMod | null = null;
+export async function ensureDemo() { if (DEMO && !demo) demo = await import("./demo"); }
 const DKEY = "agronws.demo.v1";
 type DemoDB = { records: Rec[]; comments: Comment[]; activity: Activity[]; role: string; profiles: Profile[]; rules?: Rule[]; files?: (FileItem & { data: string })[]; faq?: Faq[] };
 function demoLoad(): DemoDB {
   try { const s = localStorage.getItem(DKEY); if (s) return JSON.parse(s); } catch {}
-  const db: DemoDB = { records: demoSeed(), comments: [], activity: [], role: "owner", profiles: DEMO_PEOPLE };
+  if (!demo) throw new Error("Demo data not loaded");
+  const db: DemoDB = { records: demo.demoSeed(), comments: [], activity: [], role: "owner", profiles: demo.DEMO_PEOPLE };
   demoSave(db); return db;
 }
 function demoSave(db: DemoDB) { try { localStorage.setItem(DKEY, JSON.stringify(db)); } catch {} }
@@ -71,7 +69,7 @@ export function textSim(a: string, b: string) { const A = words(a), B = words(b)
 /* ---------------- Public API ---------------- */
 export const store = {
   async me(): Promise<Profile | null> {
-    if (DEMO) return demoMe(demoLoad());
+    if (DEMO) { await ensureDemo(); return demoMe(demoLoad()); }
     const { data: u } = await sb().auth.getUser();
     if (!u?.user) return null;
     const { data } = await sb().from("profiles").select("*").eq("id", u.user.id).single();

@@ -34,12 +34,12 @@ export async function POST(req: Request) {
     auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
   });
   const fromAddr = process.env.SMTP_FROM || process.env.SMTP_USER!;
-  const fromName = me.full_name ? `${me.full_name} · AGRON` : "AGRON";
+  const fromName = "AGRON Inc.";
   let status = "Sent", error = "";
   try {
     await transport.sendMail({
       from: { name: fromName, address: fromAddr }, to, cc: cc.length ? cc : undefined,
-      replyTo: me.email || undefined, subject, html, text: String(b.text || ""),
+      replyTo: fromAddr, subject, html, text: String(b.text || ""),
       headers: { "X-AGRON-Workspace": "1" },
     });
   } catch (e: any) { status = "Failed"; error = e?.message || "Send failed"; }

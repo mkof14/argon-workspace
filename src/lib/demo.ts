@@ -11,7 +11,7 @@ const r = (section: string, title: string, status: string, data: Record<string, 
 const S = (o: Record<string, any>) => ({ ...o, sample: true });
 
 export const DEMO_PEOPLE: Profile[] = [
-  { id: "p1", email: "owner@agron1.com", full_name: "Michael Kofman", role: "owner", company: null, us_person: true, lang: "ru", ai_monthly_tokens: 1000000 },
+  { id: "p1", email: "owner@agron1.com", full_name: "AGRON Owner", role: "owner", company: null, us_person: true, lang: "ru", ai_monthly_tokens: 1000000 },
   { id: "p2", email: "engineer@agron1.com", full_name: "Sample Engineer", role: "engineering", company: null, us_person: true, lang: "en", ai_monthly_tokens: 300000 },
   { id: "p3", email: "ops.uae@agron1.com", full_name: "Sample UAE Operations", role: "operations", company: null, us_person: false, lang: "ar", ai_monthly_tokens: 300000 },
   { id: "p4", email: "finance@agron1.com", full_name: "Sample Finance", role: "finance", company: null, us_person: true, lang: "en", ai_monthly_tokens: 300000 },
@@ -30,11 +30,11 @@ export function demoSeed(): Rec[] {
       { matrix_id: i.id, category: `${c.code} ${c.name}`, risk: i.risk, eccn: "Pending", itar: "Pending", us_license: "Pending", uae_type_approval: "Pending", uae_operation: "Pending", review_areas: c.areas, notes: i.note || "" }, {}, 3));
   }
   const issues: [string, string, string, string, string][] = [
-    ["Ukrainian co-owners are foreign persons under US export law", "Critical", "Releasing controlled technical data or source code to foreign persons, even inside AGRON, can be an export (deemed export).", "Keep controlled technical data US-person-only until classified; Technology Control Plan with US export counsel.", "Michael + US counsel"],
-    ["UAE entity: security is a strategic-impact activity", "Critical", "Cabinet Resolution No. 55 of 2021: security, defence and military activities need prior approval and minimum Emirati ownership.", "UAE counsel scopes each licence activity before opening an Abu Dhabi entity.", "Michael + UAE counsel"],
-    ["No counsel engaged yet", "Critical", "Binding conclusions need licensed counsel in the US and the UAE.", "Engage two firms on limited scope.", "Michael"],
+    ["Ukrainian co-owners are foreign persons under US export law", "Critical", "Releasing controlled technical data or source code to foreign persons, even inside AGRON, can be an export (deemed export).", "Keep controlled technical data US-person-only until classified; Technology Control Plan with US export counsel.", "CEO + US counsel"],
+    ["UAE entity: security is a strategic-impact activity", "Critical", "Cabinet Resolution No. 55 of 2021: security, defence and military activities need prior approval and minimum Emirati ownership.", "UAE counsel scopes each licence activity before opening an Abu Dhabi entity.", "CEO + UAE counsel"],
+    ["No counsel engaged yet", "Critical", "Binding conclusions need licensed counsel in the US and the UAE.", "Engage two firms on limited scope.", "CEO"],
     ["Strait of Hormuz and Gulf tanker work", "High", "OFAC Iran sanctions, flag-state law, ISPS and war-risk insurance apply.", "Screen every vessel, owner, manager and charterer before any deal.", "Sales"],
-    ["AGRON 1 export self-classification", "High", "Own software with encryption and sensor fusion needs classification.", "Prepare technical description; counsel or BIS request.", "Michael + CTO"],
+    ["AGRON 1 export self-classification", "High", "Own software with encryption and sensor fusion needs classification.", "Prepare technical description; counsel or BIS request.", "CEO + CTO"],
   ];
   for (const [t, p, s, a, o] of issues) out.push(r("legal.issues", t, "Open", { priority: p, summary: s, action: a, owner: o }, {}, 2));
   for (const [j, name, role, w] of [["US", "BIS — Bureau of Industry and Security", "EAR / CCL, ECCN, export licences", "https://www.bis.gov"], ["US", "DDTC", "ITAR / USML, registration", "https://www.pmddtc.state.gov"], ["US", "OFAC", "Sanctions, restricted parties", "https://ofac.treasury.gov"], ["UAE", "TDRA", "Type approval, spectrum", "https://tdra.gov.ae"], ["UAE", "GCAA", "Civil aviation, UAV", "https://www.gcaa.gov.ae"], ["International", "IMO", "SOLAS, ISPS Code", "https://www.imo.org"]])
@@ -60,7 +60,7 @@ export function demoSeed(): Rec[] {
     r("technical.testing", "Bench test · radar + EO/IR fusion", "Planned", S({ type: "Bench", config: "C20 Enhanced", equipment: "Radar + LWIR camera", date: "2026-11-20", owner: "Sample Engineer" }), { controlled: true }),
     r("technical.certification", "TDRA type approval · surveillance radar", "Not started", S({ scheme: "TDRA type approval", equipment: "Short-range surveillance radar" })),
     r("marketing.events", "Monaco Yacht Show 2026", "Done", S({ city: "Monaco", date: "2026-09-23", leads: 0 }), {}, 15),
-    r("hr.team", "Michael Kofman", "Active", { position: "CEO & President", department: "Management", location: "United States", type: "Employee", us_person: true }, {}, 20),
+    r("hr.team", "Chief Executive Officer", "Active", { position: "CEO & President", department: "Management", location: "United States", type: "Employee", us_person: true }, {}, 20),
     r("finance.costing", "C20 Enhanced · cost model (sample)", "Draft", S({ config: "C20 Enhanced" })),
     r("company.wiki", "How we work: where things live", "Published", S({ topic: "Onboarding", body: "Workspace = records, approvals, status. Teams = chat and calls. SharePoint = files. Xero = accounting." }), { company: "*" }),
   );

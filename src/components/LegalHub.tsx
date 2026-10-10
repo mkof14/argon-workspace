@@ -63,7 +63,7 @@ export default function LegalHub() {
             <p>{l2(d.scope, lang)}</p>
             <div className="chips">{d.laws.map((x) => <span key={x} className="chip">{x}</span>)}</div>
             <div className="chips">{d.authorities.map((x) => <span key={x} className="chip" style={{ color: d.color, borderColor: "transparent", background: `color-mix(in srgb,${d.color} 12%,var(--surface))` }}>{x}</span>)}</div>
-            <div style={{ display: "grid", gap: 6 }}>{d.prompts.map((p, i) => <button key={i} className="ask" onClick={() => openAi({ title: l2(d.name, lang), section: "legal.desks", desk: d.id, ask: l2(p, lang) })}>→ {l2(p, lang)}</button>)}</div>
+            <div style={{ display: "grid", gap: 6 }}>{d.prompts.map((p, i) => <button key={i} className="ask" onClick={() => openAi({ title: l2(d.name, lang), section: "legal.desks", desk: d.id, ask: l2(p, lang) })}>{l2(p, lang)}</button>)}</div>
             <div className="toolbar">
               <button className="btn sm" style={{ background: d.color, borderColor: d.color, color: "#fff" }} onClick={() => openAi({ title: l2(d.name, lang), section: "legal.desks", desk: d.id })}><Icon n="spark" />{t("ask_desk", lang)}</button>
               {d.sections.filter((s) => access.read.has(s)).map((s) => { const sec = findSection(s); return sec ? <Link key={s} href={`/${s.replace(".", "/")}`} className="btn ghost sm"><Icon n={sec.icon} />{tx(sec.label, lang)}</Link> : null; })}

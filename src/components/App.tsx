@@ -6,14 +6,18 @@ import Icon from "./Icon";
 import { DEPARTMENTS, DEPT_COLORS, ROLES, allSections } from "@/config/workspace.config.mjs";
 import { LANGS, Lang, t, tx } from "@/lib/i18n";
 import { DEMO, Profile, Rule, accessFor, isExternal, store, Access } from "@/lib/store";
+import dynamic from "next/dynamic";
 import Dashboard from "./Dashboard";
 import SectionView from "./SectionView";
-import Admin from "./Admin";
-import Roles from "./Roles";
-import MyProfile from "./MyProfile";
-import Learn from "./Learn";
-import { ComposerModal, MailInit } from "./Mail";
-import AiPanel, { AiContext } from "./AiPanel";
+import type { AiContext } from "./AiPanel";
+import type { MailInit } from "./Mail";
+// Screens that are not needed on first paint load on demand
+const Admin = dynamic(() => import("./Admin"), { ssr: false });
+const Roles = dynamic(() => import("./Roles"), { ssr: false });
+const MyProfile = dynamic(() => import("./MyProfile"), { ssr: false });
+const Learn = dynamic(() => import("./Learn"), { ssr: false });
+const AiPanel = dynamic(() => import("./AiPanel"), { ssr: false });
+const ComposerModal = dynamic(() => import("./Mail").then((m) => m.ComposerModal), { ssr: false });
 
 type Ctx = {
   lang: Lang; me: Profile; access: Access; toast: (m: string, err?: boolean) => void;
@@ -91,15 +95,30 @@ export default function App({ slug }: { slug: string[] }) {
   const crumbGroup = section ? tx(dept.label, lang) : special[route]?.[0] || t("workspace", lang);
   const crumbTitle = section ? tx(section.label, lang) : special[route]?.[1] || t("overview", lang);
   const curLang = LANGS.find((l) => l.code === lang)!;
+  if (typeof document !== "undefined") document.title = `${crumbTitle} · AGRON Workspace`;
   const goBack = () => { if (navStack.current.length > 1) router.back(); else router.push("/"); };
 
   let body: React.ReactNode;
   if (!route) body = <Dashboard depts={depts} />;
-  else if (route === "admin/users") body = isAdmin ? <Admin /> : <div className="empty">{t("no_access", lang)}</div>;
-  else if (route === "admin/roles") body = isAdmin ? <Roles /> : <div className="empty">{t("no_access", lang)}</div>;
+  else if ((route === "admin/users" || route === "admin/roles") && isAdmin) body = <>
+      <nav className="dtabs" style={{ ["--dc" as any]: "#5B6CF0" }}>
+        <Link href="/admin/users" className={route === "admin/users" ? "on" : ""}><Icon n="users" />{t("users", lang)}</Link>
+        <Link href="/admin/roles" className={route === "admin/roles" ? "on" : ""}><Icon n="key" />{t("roles", lang)}</Link>
+      </nav>
+      {route === "admin/users" ? <Admin /> : <Roles />}
+    </>;
+  else if (route.startsWith("admin/")) body = <div className="empty">{t("no_access", lang)}</div>;
   else if (route === "me") body = <MyProfile />;
   else if (route === "learn") body = <Learn />;
-  else if (section && access.read.has(section.id)) body = <SectionView key={section.id} section={section} />;
+  else if (section && access.read.has(section.id)) {
+    const secs = SECTIONS.filter((x) => x.dept === section.dept && access.read.has(x.id));
+    body = <>
+      {secs.length > 1 && <nav className="dtabs" aria-label={tx(dept.label, lang)} style={{ ["--dc" as any]: section.color }}>
+        {secs.map((x) => <Link key={x.id} href={`/${x.dept}/${x.key}`} className={x.id === section.id ? "on" : ""} aria-current={x.id === section.id ? "page" : undefined}><Icon n={x.icon} />{tx(x.label, lang)}</Link>)}
+      </nav>}
+      <SectionView key={section.id} section={section} />
+    </>;
+  }
   else body = <div className="card empty">{t("no_access", lang)}</div>;
 
   return (
@@ -109,8 +128,8 @@ export default function App({ slug }: { slug: string[] }) {
           <div className="rail-brand"><img src="/logo-full.webp" alt="AGRON — Aerial-Ground Robotics Operations Network" width={640} height={187} />
             <div className="prod"><i />{t("workspace", lang)}</div></div>
           <nav>
-            <Link href="/" className={`nav-item top ${!route ? "active" : ""}`} style={{ ["--dc" as any]: "#FF6A2B" }}><Icon n="home" /><span>{t("overview", lang)}</span></Link>
-            <Link href="/learn" className={`nav-item top ${route === "learn" ? "active" : ""}`} style={{ ["--dc" as any]: "#14B8A6" }}><Icon n="grad" /><span>{t("learn", lang)}</span></Link>
+            <Link href="/" className={`nav-item top ${!route ? "active" : ""}`} style={{ ["--dc" as any]: "#FF6A2B" }}><Icon n="stardome" /><span>{t("overview", lang)}</span></Link>
+            <Link href="/learn" className={`nav-item top ${route === "learn" ? "active" : ""}`} style={{ ["--dc" as any]: "#14B8A6" }}><Icon n="lifebuoy" /><span>{t("learn", lang)}</span></Link>
             <div className="nav-label">{t("departments", lang)}</div>
             {depts.map((d: any) => {
               const open = !!openDepts[d.key];

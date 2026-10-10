@@ -5,7 +5,7 @@ import { useApp, findSection } from "./App";
 import { t, tx, LANGS, Lang } from "@/lib/i18n";
 import { DEMO, Rec, store } from "@/lib/store";
 import { saveBlob } from "@/lib/format";
-import { MAIL_CATS, MailTemplate, TEMPLATES, fill, pick, plainText, renderEmail, varsOf } from "@/lib/mail";
+import { COMPANY, MAIL_CATS, MailTemplate, TEMPLATES, fill, pick, plainText, renderEmail, varsOf } from "@/lib/mail";
 
 export type MailInit = { template?: string; section?: string; record?: Rec; vars?: Record<string, string>; to?: string };
 
@@ -76,8 +76,8 @@ function Composer({ tpl, init, onDone, templates, setTpl }: { tpl: MailTemplate;
 
   const missingLang = !(tpl.body as any)[lang];
   const vlist = varsOf(subject, heading, body, ctaUrl);
-  const sender = tpl.system ? null : { name: me.full_name || me.email, title: me.title, email: me.email, phone: me.phone };
-  const V = { ...vars, sender_name: me.full_name || me.email, sender_title: me.title || "", sender_email: me.email, sender_phone: me.phone || "" };
+  const sender = tpl.system ? null : COMPANY;
+  const V = { ...vars, sender_name: "AGRON Inc.", sender_email: "info@agron1.com" };
   const build = (draft: boolean) => renderEmail({ subject: fill(subject, V), heading: fill(heading, V), body: fill(body, V), cta: ctaLabel ? { label: ctaLabel, url: fill(ctaUrl, V) } : null, lang, sender, draft, pre: fill(pick(tpl.pre, lang), V) });
   const html = build(true);
   const finalSubject = fill(subject, V);
@@ -137,7 +137,7 @@ function Composer({ tpl, init, onDone, templates, setTpl }: { tpl: MailTemplate;
 
   return (
     <div className="card" style={{ display: "grid", gap: 0, ["--cc" as any]: MAIL_CATS[tpl.cat]?.color }}>
-      <div className="card-h" style={{ borderTop: `4px solid ${MAIL_CATS[tpl.cat]?.color}`, borderRadius: "14px 14px 0 0" }}>
+      <div className="card-h">
         <div style={{ flex: 1, minWidth: 200 }}>
           <div className="eyebrow" style={{ color: MAIL_CATS[tpl.cat]?.color }}>{pick(MAIL_CATS[tpl.cat]?.label, uiLang)}</div>
           {onDone ? <select className="input" style={{ fontWeight: 600, marginTop: 4 }} value={tpl.id} onChange={(e) => setTpl(e.target.value)} aria-label={t("choose_template", uiLang)}>

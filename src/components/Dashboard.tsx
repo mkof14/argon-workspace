@@ -45,13 +45,11 @@ export default function Dashboard({ depts }: { depts: any[] }) {
     access.read.has("operations.procurement") && { k: "kpi_po", v: pos.filter((p) => !["Received", "Cancelled"].includes(p.status || "")).length, href: "/operations/procurement", c: DEPT_COLORS.technical, i: "cart" },
   ].filter(Boolean) as any[];
 
+  // Stages are a real sequence, so they read as a left-to-right track with large counts
   const stages = (sec: string, list: Rec[], valueOf?: (r: Rec) => number) => {
     const s = findSection(sec); if (!s) return null;
-    const vals = s.statuses.map((st: string) => { const l = list.filter((r) => r.status === st); return { st, n: valueOf ? l.reduce((a, r) => a + valueOf(r), 0) : l.length, c: l.length }; });
-    const max = Math.max(1, ...vals.map((v: any) => v.n));
-    return vals.map((v: any) => (
-      <div key={v.st} className="stage-row"><span className={`chip dot ${tone(v.st)}`} style={{ justifySelf: "start" }}>{v.st}</span>
-        <div className="bar"><span style={{ width: `${(v.n / max) * 100}%` }} /></div><span className="mono" style={{ textAlign: "end" }}>{valueOf ? v.c : v.n}</span></div>));
+    return <div className="track">{s.statuses.map((st: string) => { const l = list.filter((r) => r.status === st); const v = valueOf ? l.reduce((a, r) => a + valueOf(r), 0) : 0; return (
+      <Link key={st} href={`/${sec.replace(".", "/")}`} className={l.length ? "has" : ""}><b>{l.length}</b><span>{st}</span>{valueOf && v > 0 ? <small>{money(v)}</small> : null}</Link>); })}</div>;
   };
   const quick = [
     access.write.has("sales.pipeline") && { l: tx(findSection("sales.pipeline")?.label, lang), href: "/sales/pipeline", i: "funnel", c: DEPT_COLORS.sales },
@@ -64,7 +62,7 @@ export default function Dashboard({ depts }: { depts: any[] }) {
   return (
     <>
       <section className="hero">
-        <div className="eyebrow" style={{ color: "#8E9BA9" }}>AGRON Inc. · StarDome · AGRON 1</div>
+        <div className="eyebrow" style={{ color: "#8E9BA9" }}>AGRON Inc.</div>
         <h2>{hello}, {(me.full_name || "").split(" ")[0]}</h2>
         <p>{new Date().toLocaleDateString(lang === "ar" ? "ar-AE" : lang, { weekday: "long", day: "numeric", month: "long", year: "numeric" })} · {depts.length} {t("departments", lang).toLowerCase()}</p>
         <div className="toolbar" style={{ marginTop: 14, position: "relative", zIndex: 1 }}>
@@ -74,7 +72,7 @@ export default function Dashboard({ depts }: { depts: any[] }) {
       </section>
       {kpis.length > 0 && <section className="kpis">{kpis.map((k) => (
         <Link key={k.k} href={k.href} className="kpi" style={{ textDecoration: "none", color: "inherit", ["--dc" as any]: k.c }}>
-          <span className="stripe" /><span className="ic"><Icon n={k.i} /></span><div className="eyebrow">{t(k.k, lang)}</div><div className="v">{k.v}</div>{k.sub && <div className="faint mono" style={{ fontSize: 13 }}>{k.sub}</div>}
+          <span className="ic"><Icon n={k.i} /></span><div className="eyebrow">{t(k.k, lang)}</div><div className="v">{k.v}</div>{k.sub && <div className="faint mono" style={{ fontSize: 13 }}>{k.sub}</div>}
         </Link>))}</section>}
       <section className="grid2">
         <div className="card" style={{ ["--dc" as any]: "#E5484D" }}><div className="card-h"><h2><Icon n="clock" />{t("upcoming", lang)}</h2></div><div className="feed">
@@ -89,7 +87,7 @@ export default function Dashboard({ depts }: { depts: any[] }) {
           {news.length ? news.slice(0, 5).map((n) => <div key={n.id} className="feed-row" style={{ display: "grid" }}><b>{n.title}</b><span className="muted">{n.data?.body}</span></div>) : <div className="empty">{t("empty", lang)}</div>}
         </div></div>
       </section>
-      {(access.read.has("operations.builds") || access.read.has("sales.pipeline")) && <section className="grid2">
+      {(access.read.has("operations.builds") || access.read.has("sales.pipeline")) && <section style={{ display: "grid", gap: 16 }}>
         {access.read.has("operations.builds") && <div className="card" style={{ ["--dc" as any]: DEPT_COLORS.operations }}><div className="card-h"><h2><Icon n="container" />{t("builds_by_stage", lang)}</h2><Link className="btn ghost sm" style={{ marginInlineStart: "auto" }} href="/operations/builds">{t("open", lang)}</Link></div><div className="card-b">{stages("operations.builds", builds)}</div></div>}
         {access.read.has("sales.pipeline") && <div className="card" style={{ ["--dc" as any]: DEPT_COLORS.sales }}><div className="card-h"><h2><Icon n="funnel" />{t("pipeline_by_stage", lang)}</h2><Link className="btn ghost sm" style={{ marginInlineStart: "auto" }} href="/sales/pipeline">{t("open", lang)}</Link></div><div className="card-b">{stages("sales.pipeline", deals, (r) => Number(r.data?.value) || 0)}</div></div>}
       </section>}

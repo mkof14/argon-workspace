@@ -49,7 +49,7 @@ const INTERNAL = ["management", "engineering", "operations", "finance", "sales",
 // optional gate (a status that requires a condition), controlled (shows US-persons-only flag).
 export const DEPARTMENTS = [
   {
-    key: "technical", icon: "cpu",
+    key: "technical", icon: "d_tech",
     label: L("Technical", "Технический", "Технічний", "القسم الفني"),
     read: ["management", "engineering", "operations", "security", "legal"], write: ["engineering"],
     sections: [
@@ -97,7 +97,7 @@ export const DEPARTMENTS = [
     ],
   },
   {
-    key: "operations", icon: "factory",
+    key: "operations", icon: "d_ops",
     label: L("Operations", "Операции", "Операції", "العمليات"),
     read: INTERNAL, write: ["operations", "management"],
     sections: [
@@ -146,7 +146,7 @@ export const DEPARTMENTS = [
     ],
   },
   {
-    key: "finance", icon: "coins",
+    key: "finance", icon: "d_fin",
     label: L("Finance", "Финансы", "Фінанси", "المالية"),
     read: ["management", "finance"], write: ["finance"],
     sections: [
@@ -191,7 +191,7 @@ export const DEPARTMENTS = [
     ],
   },
   {
-    key: "sales", icon: "handshake",
+    key: "sales", icon: "d_sales",
     label: L("Sales", "Продажи", "Продажі", "المبيعات"),
     read: ["management", "sales", "finance", "legal", "operations"], write: ["sales", "management"],
     sections: [
@@ -228,7 +228,7 @@ export const DEPARTMENTS = [
     ],
   },
   {
-    key: "marketing", icon: "megaphone",
+    key: "marketing", icon: "d_mkt",
     label: L("Marketing", "Маркетинг", "Маркетинг", "التسويق"),
     read: ["management", "marketing", "sales"], write: ["marketing"],
     sections: [
@@ -264,7 +264,7 @@ export const DEPARTMENTS = [
     ],
   },
   {
-    key: "security", icon: "shield",
+    key: "security", icon: "d_sec",
     label: L("Security", "Безопасность", "Безпека", "الأمن"),
     read: ["management", "security", "legal"], write: ["security"],
     sections: [
@@ -301,7 +301,7 @@ export const DEPARTMENTS = [
     ],
   },
   {
-    key: "legal", icon: "scale",
+    key: "legal", icon: "d_legal",
     label: L("Legal & compliance", "Юридический и комплаенс", "Юридичний і комплаєнс", "الشؤون القانونية والامتثال"),
     read: ["management", "legal", "security", "finance", "engineering", "operations", "sales"], write: ["legal", "management"],
     sections: [
@@ -405,7 +405,7 @@ export const DEPARTMENTS = [
     ],
   },
   {
-    key: "hr", icon: "users",
+    key: "hr", icon: "d_hr",
     label: L("HR", "HR", "HR", "الموارد البشرية"),
     read: ["management", "hr"], write: ["hr"],
     sections: [
@@ -449,7 +449,7 @@ export const DEPARTMENTS = [
     ],
   },
   {
-    key: "company", icon: "book",
+    key: "company", icon: "d_kb",
     label: L("Knowledge base", "База знаний", "База знань", "قاعدة المعرفة"),
     read: [...INTERNAL], write: [...INTERNAL],
     sections: [
@@ -473,7 +473,7 @@ export const DEPARTMENTS = [
     ],
   },
   {
-    key: "mail", icon: "mail",
+    key: "mail", icon: "d_mail",
     label: L("Mail center", "Почтовый центр", "Поштовий центр", "مركز البريد"),
     read: [...INTERNAL], write: [...INTERNAL],
     sections: [
