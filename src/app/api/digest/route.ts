@@ -39,7 +39,7 @@ async function run(only: string | null) {
     db.from("records").select("id,section,title,status,data,company,controlled,created_by,created_at,updated_at").neq("section", "legal.matrix").neq("section", "mail.outbox").limit(5000),
   ]);
   const rr = (rules?.length ? rules : defaultRules()) as any[];
-  const transport = nodemailer.createTransport({ host: process.env.SMTP_HOST || "smtp.gmail.com", port: Number(process.env.SMTP_PORT || 465), secure: Number(process.env.SMTP_PORT || 465) === 465, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } });
+  const transport = nodemailer.createTransport({ host: process.env.SMTP_HOST || "smtp.gmail.com", port: Number(process.env.SMTP_PORT || 465), secure: Number(process.env.SMTP_PORT || 465) === 465, auth: { user: (process.env.SMTP_USER || "").trim(), pass: (process.env.SMTP_PASS || "").replace(/\s+/g, "") } /* Google app passwords are shown with spaces; Gmail needs the 16 letters only */ });
   const from = process.env.SMTP_FROM || process.env.SMTP_USER!;
   let sent = 0; const skipped: string[] = [];
 

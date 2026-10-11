@@ -31,7 +31,7 @@ export async function POST(req: Request) {
     host: process.env.SMTP_HOST || "smtp.gmail.com",
     port: Number(process.env.SMTP_PORT || 465),
     secure: Number(process.env.SMTP_PORT || 465) === 465,
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    auth: { user: (process.env.SMTP_USER || "").trim(), pass: (process.env.SMTP_PASS || "").replace(/\s+/g, "") } /* Google app passwords are shown with spaces; Gmail needs the 16 letters only */,
   });
   const fromAddr = process.env.SMTP_FROM || process.env.SMTP_USER!;
   const fromName = "AGRON Inc.";
@@ -42,7 +42,7 @@ export async function POST(req: Request) {
       replyTo: fromAddr, subject, html, text: String(b.text || ""),
       headers: { "X-AGRON-Workspace": "1" },
     });
-  } catch (e: any) { status = "Failed"; error = e?.message || "Send failed"; }
+  } catch (e: any) { status = "Failed"; error = /535|BadCredentials|Invalid login/i.test(String(e?.message)) ? `Gmail rejected the login for ${process.env.SMTP_USER}: SMTP_PASS in Vercel must be a 16-letter Google app password created while signed in as ${process.env.SMTP_USER} (myaccount.google.com/apppasswords), then redeploy.` : e?.message || "Send failed"; }
 
   // Log with the user's own session (row-level security applies)
   try {
