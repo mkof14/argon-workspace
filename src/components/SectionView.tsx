@@ -25,7 +25,7 @@ export default function SectionView({ section }: { section: any }) {
   const { lang, access, toast, openAi, openMail, tick } = useApp();
   const [rows, setRows] = useState<Rec[] | null>(null);
   const [q, setQ] = useState(() => (typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("q") || "" : ""));
-  const [st, setSt] = useState("");
+  const [st, setSt] = useState(() => (typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("st") || "" : ""));
   const [view, setView] = useState<"table" | "board" | "gallery">(section.view === "gallery" ? "gallery" : section.board ? "board" : "table");
   const [open, setOpen] = useState<Rec | "new" | null>(null);
   const [dragOver, setDragOver] = useState("");

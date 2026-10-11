@@ -8,6 +8,7 @@ import { t, tx } from "@/lib/i18n";
 import { Activity, Rec, store } from "@/lib/store";
 import { tone } from "@/lib/format";
 import { DUE_KEYS } from "./SectionView";
+import StageBoard from "./StageBoard";
 
 const KEYS = ["operations.builds", "sales.pipeline", "legal.issues", "operations.procurement", "operations.comms", "sales.tenders", "operations.support"];
 const DONE = /(done|paid|closed|resolved|installed|signed|filed|delivered|received|cancelled|passed|approved|granted|retired|won|lost|awarded|commissioned|taken|returned|settled|released|registered)/i;
@@ -45,12 +46,6 @@ export default function Dashboard({ depts }: { depts: any[] }) {
     access.read.has("operations.procurement") && { k: "kpi_po", v: pos.filter((p) => !["Received", "Cancelled"].includes(p.status || "")).length, href: "/operations/procurement", c: DEPT_COLORS.technical, i: "cart" },
   ].filter(Boolean) as any[];
 
-  // Stages are a real sequence, so they read as a left-to-right track with large counts
-  const stages = (sec: string, list: Rec[], valueOf?: (r: Rec) => number) => {
-    const s = findSection(sec); if (!s) return null;
-    return <div className="track">{s.statuses.map((st: string) => { const l = list.filter((r) => r.status === st); const v = valueOf ? l.reduce((a, r) => a + valueOf(r), 0) : 0; return (
-      <Link key={st} href={`/${sec.replace(".", "/")}`} className={l.length ? "has" : ""}><b>{l.length}</b><span>{st}</span>{valueOf && v > 0 ? <small>{money(v)}</small> : null}</Link>); })}</div>;
-  };
   const quick = [
     access.write.has("sales.pipeline") && { l: tx(findSection("sales.pipeline")?.label, lang), href: "/sales/pipeline", i: "funnel", c: DEPT_COLORS.sales },
     access.write.has("finance.expenses") && { l: tx(findSection("finance.expenses")?.label, lang), href: "/finance/expenses", i: "receipt", c: DEPT_COLORS.finance },
@@ -67,6 +62,7 @@ export default function Dashboard({ depts }: { depts: any[] }) {
         <p>{new Date().toLocaleDateString(lang === "ar" ? "ar-AE" : lang, { weekday: "long", day: "numeric", month: "long", year: "numeric" })} · {depts.length} {t("departments", lang).toLowerCase()}</p>
         <div className="toolbar" style={{ marginTop: 14, position: "relative", zIndex: 1 }}>
           {!!access.read.has("mail.templates") && <button className="btn sm" style={{ background: "#FF6A2B", color: "#140A05", borderColor: "#FF6A2B" }} onClick={() => openMail({})}><Icon n="mail" />{t("write_email", lang)}</button>}
+          <Link href="/reports" className="btn sm" style={{ background: "rgba(255,255,255,.06)", color: "#E9EEF3", borderColor: "rgba(255,255,255,.14)" }}><Icon n="pie" />{t("get_report", lang)}</Link>
           {quick.map((q) => <Link key={q.href} href={q.href} className="btn sm" style={{ background: "rgba(255,255,255,.06)", color: "#E9EEF3", borderColor: "rgba(255,255,255,.14)" }}><Icon n={q.i} />{q.l}</Link>)}
         </div>
       </section>
@@ -88,8 +84,8 @@ export default function Dashboard({ depts }: { depts: any[] }) {
         </div></div>
       </section>
       {(access.read.has("operations.builds") || access.read.has("sales.pipeline")) && <section style={{ display: "grid", gap: 16 }}>
-        {access.read.has("operations.builds") && <div className="card" style={{ ["--dc" as any]: DEPT_COLORS.operations }}><div className="card-h"><h2><Icon n="container" />{t("builds_by_stage", lang)}</h2><Link className="btn ghost sm" style={{ marginInlineStart: "auto" }} href="/operations/builds">{t("open", lang)}</Link></div><div className="card-b">{stages("operations.builds", builds)}</div></div>}
-        {access.read.has("sales.pipeline") && <div className="card" style={{ ["--dc" as any]: DEPT_COLORS.sales }}><div className="card-h"><h2><Icon n="funnel" />{t("pipeline_by_stage", lang)}</h2><Link className="btn ghost sm" style={{ marginInlineStart: "auto" }} href="/sales/pipeline">{t("open", lang)}</Link></div><div className="card-b">{stages("sales.pipeline", deals, (r) => Number(r.data?.value) || 0)}</div></div>}
+        {access.read.has("operations.builds") && <StageBoard sec="operations.builds" rows={builds} sub={(r) => [r.data?.client, r.data?.config && `StarDome ${r.data.config}`, r.data?.site, r.data?.owner].filter(Boolean).join(" · ")} />}
+        {access.read.has("sales.pipeline") && <StageBoard sec="sales.pipeline" rows={deals} value={(r) => Number(r.data?.value) || 0} sub={(r) => [r.data?.client, r.data?.config && `StarDome ${r.data.config}`, r.data?.country, r.data?.owner].filter(Boolean).join(" · ")} />}
       </section>}
       <section><div className="eyebrow" style={{ marginBottom: 10 }}>{t("departments", lang)}</div>
         <div className="depts">{depts.map((d) => (

@@ -580,3 +580,46 @@ table.tb tr.sel td{background:var(--surface-2)}
 .foot-bar{display:flex;flex-wrap:wrap;gap:6px 18px;padding:12px 28px 16px;border-top:1px solid var(--line-2);font-size:13px;color:var(--ink-3)}
 .foot-keys{margin-inline-start:auto}
 @media print{.foot,.search,.inbox,.searchbtn,.bell{display:none!important}}
+
+/* ---------- v0.8: stage boards, report builder ---------- */
+.stageboard .card-h{flex-wrap:wrap;gap:10px 16px}
+.sb-sum{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:14px;color:var(--ink-2)}
+.sb-sum b{font-size:16px;color:var(--ink)}
+.sb-bar{display:flex;height:14px;border-radius:8px;overflow:hidden;gap:2px;background:var(--surface-2)}
+.sb-bar button{border:0;padding:0;cursor:pointer;min-width:8px}
+.sb-stages{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
+.sb-stage{display:grid;grid-template-columns:auto 1fr;grid-template-areas:"dot num" "name name" "pct pct";gap:2px 8px;align-items:center;text-align:start;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);font:inherit;color:var(--ink-3);cursor:pointer}
+.sb-stage .sb-dot{grid-area:dot;width:10px;height:10px;border-radius:3px}
+.sb-stage b{grid-area:num;font:700 26px/1.1 var(--f-mono)}
+.sb-stage .sb-name{grid-area:name;font-size:15px;font-weight:600}
+.sb-stage small{grid-area:pct;font-size:12.5px}
+.sb-stage.has{color:var(--ink)}
+.sb-stage.has small{color:var(--ink-2)}
+.sb-stage:hover{border-color:var(--dc)}
+.sb-stage.on{border-color:var(--dc);background:color-mix(in srgb,var(--dc) 8%,var(--surface));box-shadow:inset 0 0 0 1px var(--dc)}
+.sb-detail{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.sb-detail-h{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--surface-2);font-size:15px}
+.sb-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:12px;align-items:center;padding:10px 14px;border-top:1px solid var(--line-2);text-decoration:none;color:inherit}
+.sb-row:hover{background:var(--surface-2)}
+.sb-row b{display:block;font-weight:600;font-size:15px}.sb-row small{display:block;color:var(--ink-3);font-size:13px}
+.sb-empty{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border:1px dashed var(--line);border-radius:12px;color:var(--ink-2);font-size:15px}
+.rb-steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.rb-step{display:grid;gap:8px;align-content:start;padding:16px;border:1px solid var(--line);border-radius:14px;background:var(--surface)}
+.rb-step h3{margin:0;font-size:15.5px;display:flex;gap:8px;align-items:center}
+.rb-step h3 .n{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font:700 13px var(--f-mono)}
+.rb-types{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.rb-type{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;text-align:start;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);font:inherit;color:inherit;cursor:pointer}
+.rb-type .tpl-ic{grid-row:span 2}
+.rb-type b{font-size:15px}.rb-type small{color:var(--ink-3);font-size:13px;line-height:1.4}
+.rb-type:hover{border-color:var(--dc)}
+.rb-type.on{border-color:var(--dc);box-shadow:inset 0 0 0 1px var(--dc);background:color-mix(in srgb,var(--dc) 6%,var(--surface))}
+.rb-doc{background:#fff;color:#111;border:1px solid var(--line);border-radius:8px;padding:36px 44px;font-size:14.5px;line-height:1.55}
+.rb-doc h1{font-size:22px;margin:0 0 4px}.rb-doc h2{font-size:16.5px;margin:22px 0 8px}
+.rb-doc table{border-collapse:collapse;width:100%;margin:6px 0}.rb-doc td,.rb-doc th{border:1px solid #d5dce4;padding:6px 8px;text-align:start;font-size:13.5px}.rb-doc th{background:#f5f7f9}
+.rb-doc .rb-head{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:1px solid #d5dce4;padding-bottom:12px;margin-bottom:16px}
+.rb-doc .rb-head img{height:34px}
+.rb-doc .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:8px 0}
+.rb-doc .kv div{border:1px solid #d5dce4;border-radius:6px;padding:8px 10px}.rb-doc .kv b{display:block;font-size:18px}.rb-doc .kv span{font-size:12px;color:#4b5867}
+@media (max-width:700px){.rb-doc{padding:20px}}
+.sec-title{display:flex;align-items:center;gap:10px;margin:8px 0 0;font-size:19px}
+.sec-title svg{width:20px;height:20px;color:var(--accent)}

@@ -22,7 +22,7 @@ const Reports = dynamic(() => import("./Reports"), { ssr: false });
 const Templates = dynamic(() => import("./Templates"), { ssr: false });
 const Search = dynamic(() => import("./Search"), { ssr: false });
 const Bell = dynamic(() => import("./Inbox").then((m) => m.Bell), { ssr: false });
-export const VERSION = "0.7";
+export const VERSION = "0.8";
 
 type Ctx = {
   lang: Lang; me: Profile; access: Access; toast: (m: string, err?: boolean) => void;

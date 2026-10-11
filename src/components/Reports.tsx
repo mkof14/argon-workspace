@@ -8,6 +8,7 @@ import { t, tx } from "@/lib/i18n";
 import { Activity, Rec, store } from "@/lib/store";
 import { DONE, OPEN, dueItems, isMine, money } from "@/lib/insights";
 import { elementToPdf, saveBlob, tone } from "@/lib/format";
+import ReportBuilder from "./ReportBuilder";
 
 const num = (v: any) => Number(v) || 0;
 
@@ -64,7 +65,10 @@ export default function Reports() {
 
   if (!recs) return <div className="empty">…</div>;
   return (
-    <div style={{ display: "grid", gap: 16 }} ref={ref}>
+    <div style={{ display: "grid", gap: 16 }}>
+      <ReportBuilder recs={recs} />
+      <h2 className="sec-title"><Icon n="pie" />{t("live_overview", lang)}</h2>
+      <div ref={ref} style={{ display: "grid", gap: 16 }}>
       <div className="toolbar">
         <button className="btn primary sm" onClick={() => openAi({ title: t("exec_brief", lang), section: "", ask: (lang === "ru" ? "Напиши краткую сводку для CEO на одну страницу: 3 главных вывода, риски, что решить на этой неделе. Данные:\n\n" : "Write a one-page CEO brief: 3 key takeaways, risks, and what to decide this week. Data:\n\n") + brief() })}><Icon n="spark" />{t("ai_brief", lang)}</button>
         <button className="btn sm" onClick={() => ref.current && elementToPdf(ref.current, `AGRON_report_${new Date().toISOString().slice(0, 10)}.pdf`)}><Icon n="pdf" />PDF</button>
@@ -100,6 +104,7 @@ export default function Reports() {
 
       <section className="card"><div className="card-h"><h2><Icon n="clock" />{t("activity_7d", lang)}</h2><span className="faint" style={{ fontSize: 13.5 }}>{act.filter((a) => a.created_at >= new Date(Date.now() - 7 * 864e5).toISOString()).length}</span></div>
         <div className="feed">{act.slice(0, 15).map((a) => { const s = findSection(a.section); return <div key={a.id} className="feed-row"><span className="mono faint" style={{ fontSize: 13, whiteSpace: "nowrap" }}>{(a.created_at || "").slice(5, 16).replace("T", " ")}</span><span style={{ minWidth: 0 }}><b style={{ fontWeight: 600 }}>{a.detail?.title}</b> <span className="faint">· {s ? tx(s.label, lang) : a.section} · {a.action}{a.action === "status" ? ` → ${a.detail?.to}` : ""}</span></span></div>; })}</div></section>
+      </div>
     </div>
   );
 }
