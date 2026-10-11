@@ -60,3 +60,11 @@ export async function elementToPdf(el: HTMLElement, filename: string) {
   }
   pdf.save(filename);
 }
+
+/** Opens a clean print window with the document only. */
+export function printHtml(title: string, html: string) {
+  const w = window.open("", "_blank", "noopener,width=900,height=1100"); if (!w) return;
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${title.replace(/</g, "")}</title><style>body{font:15px/1.6 'IBM Plex Sans',Segoe UI,Helvetica,Arial,sans-serif;color:#111;max-width:760px;margin:40px auto;padding:0 24px}h1{font-size:24px;margin:0 0 12px}h2{font-size:17px;margin:22px 0 6px}table{border-collapse:collapse;width:100%;margin:10px 0}td,th{border:1px solid #ccc;padding:6px 8px;text-align:left}hr{border:0;border-top:1px solid #ddd;margin:24px 0}.brand{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #ddd;padding-bottom:12px;margin-bottom:24px;font-size:12px;color:#555}</style></head><body><div class="brand"><b style="font-size:16px;color:#111">AGRON Inc.</b><span>agron1.com · info@agron1.com</span></div>${html}</body></html>`);
+  w.document.close(); w.focus(); setTimeout(() => w.print(), 300);
+}
+

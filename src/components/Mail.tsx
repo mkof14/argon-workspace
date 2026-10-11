@@ -127,7 +127,7 @@ function Composer({ tpl, init, onDone, templates, setTpl }: { tpl: MailTemplate;
     setBusy("tr");
     try {
       const name = LANGS.find((l) => l.code === lang)?.name;
-      const r = await fetch("/api/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tier: "quick", context: "Task: translate a business email for AGRON Inc. Professional, warm, concise.", messages: [{ role: "user", content: `Translate this email JSON into ${name}. Keep every {{variable}}, **bold** marker, "- " bullet and line break exactly. Keep product names (AGRON, StarDome, AGRON 1, StarWall) and codes in English. Return only the JSON object with the same keys.\n\n${JSON.stringify(src)}` }] }) });
+      const r = await fetch("/api/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tier: "quick", context: "Task: translate a business email for AGRON Inc. Professional, warm, concise.", messages: [{ role: "user", content: `Translate this email JSON into ${name}. Keep every {{variable}}, **bold** marker, "- " bullet and line break exactly. Keep product names (AGRON, StarDome, AGRON 1) and codes in English. Return only the JSON object with the same keys.\n\n${JSON.stringify(src)}` }] }) });
       if (!r.ok) throw new Error(await r.text());
       const raw = await r.text(); const j = JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1));
       setSubject(j.subject || ""); setHeading(j.heading || ""); setBody(j.body || ""); if (j.cta) setCtaLabel(j.cta);

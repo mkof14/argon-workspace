@@ -8,6 +8,7 @@ import { l2 } from "@/config/learn";
 import { t, tx } from "@/lib/i18n";
 import { Rec, store } from "@/lib/store";
 import catalog from "@/config/legal-catalog.json";
+import { TEMPLATES } from "@/config/templates";
 
 const RISKS = ["Prohibited", "Restricted", "High", "Medium", "Low"];
 const RC: Record<string, string> = { Prohibited: "#B4232F", Restricted: "#E5484D", High: "#F59E0B", Medium: "#2F7DF6", Low: "#12A06B" };
@@ -35,7 +36,7 @@ export default function LegalHub() {
   const [other, setOther] = useState<Rec[]>([]);
   useEffect(() => {
     if (access.read.has("legal.matrix")) store.list("legal.matrix").then(setM).catch(() => {});
-    store.listMany(["legal.requests", "legal.obligations", "legal.licences", "legal.hse", "legal.desks"].filter((s) => access.read.has(s))).then(setOther).catch(() => {});
+    store.listMany(["legal.requests", "legal.obligations", "legal.licences", "legal.hse", "legal.desks", "legal.board", "legal.governance", "legal.authority", "legal.registers"].filter((s) => access.read.has(s))).then(setOther).catch(() => {});
   }, [access, tick]);
 
   const days = (d?: string) => (d ? Math.round((new Date(d).getTime() - Date.now()) / 864e5) : 999);
@@ -54,6 +55,28 @@ export default function LegalHub() {
     <div style={{ display: "grid", gap: 16 }}>
       <section className="kpis" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(180px,1fr))" }}>{kpis.map((k) => (
         <Link key={k.l} href={k.href} className="kpi" style={{ textDecoration: "none", color: "inherit", ["--dc" as any]: k.c }}><span className="stripe" /><div className="eyebrow" style={{ paddingInlineEnd: 0 }}>{k.l}</div><div className="v">{k.v}</div></Link>))}</section>
+
+      {access.read.has("legal.board") && (() => {
+        const today = new Date().toISOString().slice(0, 10);
+        const next = of("legal.board").filter((r) => (r.data?.due || "") >= today && !["Minutes signed"].includes(r.status || "")).sort((a, b) => a.data.due.localeCompare(b.data.due))[0];
+        const toSign = [...of("legal.governance").filter((r) => ["Draft", "Circulated"].includes(r.status || "")), ...of("legal.board").filter((r) => r.status === "Minutes drafted")];
+        const poa = of("legal.authority").filter((r) => r.status !== "Revoked" && days(r.data?.expires) <= 60);
+        const dirs = of("legal.registers").filter((r) => r.status === "Active" && r.data?.role === "Director");
+        const tiles = [
+          { l: t("next_board", lang), v: next ? next.data.due : "—", sub: next?.title, href: next ? `/legal/board?r=${next.id}` : "/legal/board" },
+          { l: t("to_sign", lang), v: String(toSign.length), sub: toSign[0]?.title, href: "/legal/governance" },
+          { l: t("poa_expiring", lang), v: String(poa.length), sub: poa[0]?.title, href: "/legal/authority" },
+          { l: t("directors", lang), v: String(dirs.length), sub: dirs.map((d) => d.title).slice(0, 3).join(", "), href: "/legal/registers" },
+        ];
+        return <section className="card" style={{ ["--dc" as any]: "#5B6CF0" }}>
+          <div className="card-h"><h2><Icon n="users" />{t("board_gov", lang)}</h2></div>
+          <div className="card-b" style={{ display: "grid", gap: 14 }}>
+            <div className="gov-tiles">{tiles.map((x) => <Link key={x.l} href={x.href} className="gov-tile"><span>{x.l}</span><b>{x.v}</b>{x.sub ? <small>{x.sub}</small> : null}</Link>)}</div>
+            <div className="toolbar">{[["board_notice", "calendar"], ["board_minutes", "file"], ["written_consent", "stamp"], ["officer_appointment", "userplus"], ["stockholder_consent", "users"], ["poa", "key"], ["counsel_brief", "headset"], ["nda", "lock"], ["end_user", "flag"]].map(([id, ic]) => <Link key={id} href={`/templates?t=${id}`} className="btn ghost sm"><Icon n={ic} />{l2(TEMPLATES.find((x) => x.id === id)!.name, lang)}</Link>)}
+              <Link href="/templates?dept=legal" className="btn sm"><Icon n="file" />{t("all_templates", lang)}</Link></div>
+          </div>
+        </section>;
+      })()}
 
       <section><div className="lhead"><span className="ic" style={{ ["--dc" as any]: "#C9971C" }}><Icon n="spark" /></span><h2>{t("desks_title", lang)}</h2></div>
         <p className="faint" style={{ margin: "4px 0 12px", fontSize: 14.5 }}>{t("desks_sub", lang)}</p>

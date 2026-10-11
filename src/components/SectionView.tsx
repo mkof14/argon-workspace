@@ -6,6 +6,7 @@ import RecordDrawer from "./RecordDrawer";
 import dynamic from "next/dynamic";
 const MailCenter = dynamic(() => import("./Mail"), { ssr: false });
 const LegalHub = dynamic(() => import("./LegalHub"), { ssr: false });
+import { SectionTemplates } from "./Templates";
 import { DEPARTMENTS } from "@/config/workspace.config.mjs";
 import { HELP, l2 } from "@/config/learn";
 import Link from "next/link";
@@ -40,6 +41,7 @@ export default function SectionView({ section }: { section: any }) {
   useEffect(() => { // deep link ?r=<id>
     if (!rows) return; const id = new URLSearchParams(window.location.search).get("r");
     if (id) { const r = rows.find((x) => x.id === id); if (r) setOpen(r); }
+    else if (new URLSearchParams(window.location.search).get("new") === "1" && canWrite) setOpen("new");
   }, [rows]);
   useEffect(() => { // gallery thumbnails = first image attached to each record
     if (view !== "gallery" || !rows) return;
@@ -97,6 +99,7 @@ export default function SectionView({ section }: { section: any }) {
       </section>
 
       {section.view === "desks" && <LegalHub />}
+      {canWrite && <SectionTemplates sectionId={section.id} />}
       <div className="toolbar">
         {canWrite && <button className="btn primary" onClick={() => setOpen("new")}><Icon n="plus" />{t("new", lang)}</button>}
         <div className="seg" role="group">

@@ -4,7 +4,9 @@ import Icon from "./Icon";
 import { useApp } from "./App";
 import { t, tx } from "@/lib/i18n";
 import { Activity, Comment, Rec, isExternal, store } from "@/lib/store";
-import { elementToPdf, fmt, recordMarkdown, saveBlob, slug, tone } from "@/lib/format";
+import { elementToPdf, fmt, printHtml, recordMarkdown, saveBlob, slug, tone } from "@/lib/format";
+import { marked } from "marked";
+import DOMPurify from "dompurify";
 import Attachments from "./Attachments";
 import { US_CHECKLIST, UAE_CHECKLIST, deskById } from "@/config/legal";
 
@@ -119,12 +121,20 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
             {canWrite && section.controlled && me.us_person && <label className="check wide"><input type="checkbox" checked={controlled} onChange={(e) => setControlled(e.target.checked)} /><Icon n="lock" className="lockico" />{t("controlled", lang)}</label>}
             {canWrite && section.external?.length > 0 && <div className="field wide"><label htmlFor="f-company">{t("visibility", lang)}</label><input id="f-company" className="input" value={company} onChange={(e) => setCompany(e.target.value)} placeholder="" /><span className="hint">{t("vis_hint", lang)}</span></div>}
           </div>
+          {typeof data.document === "string" && data.document && <details className="card doc-block" open>
+            <summary><Icon n="file" /> <b>{t("document", lang)}</b>
+              <span className="toolbar" style={{ marginInlineStart: "auto" }} onClick={(e) => e.preventDefault()}>
+                <button className="btn ghost sm" onClick={async () => { await navigator.clipboard.writeText(data.document); toast(t("copied", lang)); }}><Icon n="copy" />{t("copy", lang)}</button>
+                <button className="btn ghost sm" onClick={() => printHtml(title, DOMPurify.sanitize(marked.parse(data.document) as string))}><Icon n="print" />{t("print", lang)}</button>
+              </span></summary>
+            <div className="md tpl-paper" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(data.document) as string) }} />
+          </details>}
           <datalist id="people-list">{people.map((p) => <option key={p.id} value={p.full_name || p.email} />)}</datalist>
           {section.id !== "mail.outbox" && <Attachments section={section} rec={rec} canWrite={canWrite} title={title} />}
           {rec && <div className="thread">
             <div className="eyebrow">{t("comments", lang)}</div>
             {comments.map((c) => <div key={c.id} className="cmt"><small>{(c.created_at || "").slice(0, 16).replace("T", " ")}</small><div style={{ whiteSpace: "pre-wrap" }}>{c.body}</div></div>)}
-            <div className="toolbar" style={{ flexWrap: "nowrap" }}><input className="input" value={cmt} placeholder={t("add_comment", lang)} onChange={(e) => setCmt(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addCmt()} aria-label={t("add_comment", lang)} /><button className="btn" onClick={addCmt}>{t("send", lang)}</button></div>
+            <div className="toolbar" style={{ flexWrap: "nowrap" }}><input className="input" value={cmt} placeholder={t("add_comment_at", lang)} onChange={(e) => setCmt(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addCmt()} aria-label={t("add_comment", lang)} /><button className="btn" onClick={addCmt}>{t("send", lang)}</button></div>
           </div>}
           {rec && hist.length > 0 && <div className="thread">
             <div className="eyebrow">{t("history", lang)}</div>

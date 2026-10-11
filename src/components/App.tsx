@@ -18,6 +18,11 @@ const MyProfile = dynamic(() => import("./MyProfile"), { ssr: false });
 const Learn = dynamic(() => import("./Learn"), { ssr: false });
 const AiPanel = dynamic(() => import("./AiPanel"), { ssr: false });
 const ComposerModal = dynamic(() => import("./Mail").then((m) => m.ComposerModal), { ssr: false });
+const Reports = dynamic(() => import("./Reports"), { ssr: false });
+const Templates = dynamic(() => import("./Templates"), { ssr: false });
+const Search = dynamic(() => import("./Search"), { ssr: false });
+const Bell = dynamic(() => import("./Inbox").then((m) => m.Bell), { ssr: false });
+export const VERSION = "0.7";
 
 type Ctx = {
   lang: Lang; me: Profile; access: Access; toast: (m: string, err?: boolean) => void;
@@ -46,6 +51,15 @@ export default function App({ slug }: { slug: string[] }) {
   const [people, setPeople] = useState<Profile[]>([]);
   const [rules, setRules] = useState<Rule[] | null>(null);
   const navStack = useRef<string[]>([]);
+  const [search, setSearch] = useState<null | { voice?: boolean }>(null);
+  useEffect(() => { // Ctrl/⌘+K or "/" opens search anywhere
+    const k = (e: KeyboardEvent) => {
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target as HTMLElement)?.tagName) || (e.target as HTMLElement)?.isContentEditable;
+      if ((e.key === "k" || e.key === "K") && (e.metaKey || e.ctrlKey)) { e.preventDefault(); setSearch({}); }
+      else if (e.key === "/" && !typing) { e.preventDefault(); setSearch({}); }
+    };
+    window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k);
+  }, []);
 
   const route = slug.join("/");
   const sectionId = slug.length === 2 ? `${slug[0]}.${slug[1]}` : "";
@@ -91,7 +105,7 @@ export default function App({ slug }: { slug: string[] }) {
   const depts = DEPARTMENTS.map((d: any) => ({ ...d, secs: SECTIONS.filter((s) => s.dept === d.key && access.read.has(s.id)) })).filter((d: any) => d.secs.length);
   const isAdmin = me.role === "owner" || me.role === "admin";
   const dept = section ? DEPARTMENTS.find((d: any) => d.key === section.dept) : null;
-  const special: Record<string, [string, string]> = { "admin/users": [t("admin", lang), t("users", lang)], "admin/roles": [t("admin", lang), t("roles", lang)], me: [t("workspace", lang), t("my_profile", lang)], learn: [t("workspace", lang), t("learn", lang)] };
+  const special: Record<string, [string, string]> = { "admin/users": [t("admin", lang), t("users", lang)], "admin/roles": [t("admin", lang), t("roles", lang)], me: [t("workspace", lang), t("my_profile", lang)], learn: [t("workspace", lang), t("learn", lang)], reports: [t("workspace", lang), t("reports", lang)], templates: [t("workspace", lang), t("templates", lang)] };
   const crumbGroup = section ? tx(dept.label, lang) : special[route]?.[0] || t("workspace", lang);
   const crumbTitle = section ? tx(section.label, lang) : special[route]?.[1] || t("overview", lang);
   const curLang = LANGS.find((l) => l.code === lang)!;
@@ -110,6 +124,8 @@ export default function App({ slug }: { slug: string[] }) {
   else if (route.startsWith("admin/")) body = <div className="empty">{t("no_access", lang)}</div>;
   else if (route === "me") body = <MyProfile />;
   else if (route === "learn") body = <Learn />;
+  else if (route === "reports") body = <Reports />;
+  else if (route === "templates") body = <Templates />;
   else if (section && access.read.has(section.id)) {
     const secs = SECTIONS.filter((x) => x.dept === section.dept && access.read.has(x.id));
     body = <>
@@ -129,6 +145,9 @@ export default function App({ slug }: { slug: string[] }) {
             <div className="prod"><i />{t("workspace", lang)}</div></div>
           <nav>
             <Link href="/" className={`nav-item top ${!route ? "active" : ""}`} style={{ ["--dc" as any]: "#FF6A2B" }}><Icon n="stardome" /><span>{t("overview", lang)}</span></Link>
+            <Link href="/reports" className={`nav-item top ${route === "reports" ? "active" : ""}`} style={{ ["--dc" as any]: "#E5484D" }}><Icon n="pie" /><span>{t("reports", lang)}</span></Link>
+            <Link href="/templates" className={`nav-item top ${route === "templates" ? "active" : ""}`} style={{ ["--dc" as any]: "#C9971C" }}><Icon n="file" /><span>{t("templates", lang)}</span></Link>
+            {access.read.has("company.tasks") && <Link href="/company/tasks" className={`nav-item top ${route === "company/tasks" ? "active" : ""}`} style={{ ["--dc" as any]: "#5B6CF0" }}><Icon n="bell" /><span>{tx(findSection("company.tasks")?.label, lang)}</span></Link>}
             <Link href="/learn" className={`nav-item top ${route === "learn" ? "active" : ""}`} style={{ ["--dc" as any]: "#14B8A6" }}><Icon n="lifebuoy" /><span>{t("learn", lang)}</span></Link>
             <div className="nav-label">{t("departments", lang)}</div>
             {depts.map((d: any) => {
@@ -169,6 +188,9 @@ export default function App({ slug }: { slug: string[] }) {
             {route && <button className="iconbtn backbtn" title={t("back", lang)} aria-label={t("back", lang)} onClick={goBack}><Icon n="back" /></button>}
             <div className="crumb"><small>{crumbGroup}</small><h1>{crumbTitle}</h1></div>
             <div className="tb-right">
+              <button className="searchbtn" onClick={() => setSearch({})} aria-label={t("search_all", lang)}><Icon n="search" /><span>{t("search_short", lang)}</span><kbd>⌘K</kbd></button>
+              <button className="iconbtn" onClick={() => setSearch({ voice: true })} title={t("voice", lang)} aria-label={t("voice", lang)}><Icon n="mic" /></button>
+              <Bell />
               <button className="btn sm" onClick={() => setAi({ title: crumbTitle, section: sectionId })}><Icon n="spark" />{t("ask_ai", lang)}</button>
               <div className="dd">
                 <button className="dd-btn" aria-haspopup="menu" aria-expanded={langOpen} aria-label={t("language", lang)} onClick={() => setLangOpen(!langOpen)}>
@@ -187,12 +209,50 @@ export default function App({ slug }: { slug: string[] }) {
                 <button className="btn ghost sm" style={{ marginInlineStart: "auto" }} onClick={() => { store.resetDemo(); reload(); }}>Reset</button></div>}
               {body}
             </main>
-            <footer className="footer"><b>© 2026 AGRON Inc.</b><span>{t("foot_conf", lang)}</span><span>AGRON™ · StarDome™ · StarWall™ · AGRON 1™</span><a href="https://www.agron1.com" target="_blank" rel="noopener">agron1.com</a></footer>
+            <footer className="foot">
+              <div className="foot-grid">
+                <div className="foot-brand">
+                  <img src="/logo-full.webp" alt="AGRON" width={640} height={187} />
+                  <p>{t("foot_about", lang)}</p>
+                  <div className="foot-me"><span className="avatar">{(me.full_name || me.email || "?").slice(0, 1).toUpperCase()}</span><span><b>{me.full_name || me.email}</b><br /><small>{tx((ROLES as any)[me.role]?.label, lang)}{me.us_person ? " · US person" : ""}</small></span></div>
+                  <div className="toolbar">
+                    <button className="btn ghost sm" onClick={() => setSearch({})}><Icon n="search" />{t("search_short", lang)}</button>
+                    <button className="btn ghost sm" onClick={() => setSearch({ voice: true })}><Icon n="mic" />{t("voice", lang)}</button>
+                    <button className="btn ghost sm" onClick={toggleTheme}><Icon n={dark ? "sun" : "moon"} />{dark ? t("theme_light", lang) : t("theme_dark", lang)}</button>
+                  </div>
+                </div>
+                <nav aria-label={t("workspace", lang)}><h3>{t("workspace", lang)}</h3>
+                  <Link href="/">{t("overview", lang)}</Link><Link href="/reports">{t("reports", lang)}</Link><Link href="/templates">{t("templates", lang)}</Link>
+                  {access.read.has("company.tasks") && <Link href="/company/tasks">{tx(findSection("company.tasks")?.label, lang)}</Link>}
+                  {access.read.has("mail.templates") && <button className="linkish" onClick={() => setMail({})}>{t("write_email", lang)}</button>}
+                  <button className="linkish" onClick={() => setAi({ title: crumbTitle, section: sectionId })}>{t("ask_ai", lang)}</button>
+                  <Link href="/learn">{t("learn", lang)}</Link></nav>
+                <nav aria-label={t("departments", lang)}><h3>{t("departments", lang)}</h3>
+                  {depts.map((d: any) => <Link key={d.key} href={`/${d.key}/${d.secs[0].key}`}>{tx(d.label, lang)}</Link>)}</nav>
+                <nav aria-label={t("management", lang)}><h3>{t("management", lang)}</h3>
+                  {access.read.has("legal.board") && <Link href="/legal/board">{tx(findSection("legal.board")?.label, lang)}</Link>}
+                  {access.read.has("legal.governance") && <Link href="/legal/governance">{tx(findSection("legal.governance")?.label, lang)}</Link>}
+                  {access.read.has("company.decisions") && <Link href="/company/decisions">{tx(findSection("company.decisions")?.label, lang)}</Link>}
+                  {isAdmin && <><Link href="/admin/users">{t("users", lang)}</Link><Link href="/admin/roles">{t("roles", lang)}</Link></>}
+                  <Link href="/me">{t("my_profile", lang)}</Link>
+                  {!DEMO && <button className="linkish" onClick={async () => { await store.signOut(); router.replace("/login"); }}>{t("sign_out", lang)}</button>}</nav>
+                <nav aria-label="AGRON Inc."><h3>AGRON Inc.</h3>
+                  <a href="https://www.agron1.com" target="_blank" rel="noopener">agron1.com</a>
+                  <a href="https://stardome.life" target="_blank" rel="noopener">stardome.life</a>
+                  <a href="mailto:info@agron1.com">info@agron1.com</a>
+                  <a href="mailto:info@agron1.com?subject=AGRON%20Workspace%20support">{t("support", lang)}</a></nav>
+              </div>
+              <div className="foot-bar">
+                <span>© 2026 AGRON Inc.</span><span>{t("foot_tm", lang)}</span><span>{t("foot_conf", lang)}</span>
+                <span className="foot-keys"><kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> {t("search_short", lang)} · <kbd>/</kbd></span><span className="mono">v{VERSION}</span>
+              </div>
+            </footer>
           </div>
         </div>
       </div>
       {ai && <AiPanel ctx={ai} onClose={() => setAi(null)} />}
       {mail && <ComposerModal init={mail} onClose={() => setMail(null)} />}
+      {search && <Search voice={search.voice} onClose={() => setSearch(null)} />}
       <div className="toasts" aria-live="polite">{toasts.map((x) => <div key={x.id} className={`toast ${x.err ? "err" : ""}`}>{x.m}</div>)}</div>
     </AppCtx.Provider>
   );

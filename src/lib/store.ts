@@ -131,6 +131,22 @@ export const store = {
     if (opts.recordId) q = q.eq("record_id", opts.recordId);
     const { data } = await q; return (data || []) as Activity[];
   },
+  /** Comments that mention a person with @Name (last 30 days). */
+  async mentions(name: string): Promise<(Comment & { section?: string; title?: string })[]> {
+    const first = (name || "").trim().split(/\s+/)[0]; if (first.length < 2) return [];
+    const since = new Date(Date.now() - 30 * 864e5).toISOString();
+    if (DEMO) { const db = demoLoad(); return db.comments.filter((c) => c.body.toLowerCase().includes("@" + first.toLowerCase()) && c.created_at >= since).map((c) => { const r = db.records.find((x) => x.id === c.record_id); return { ...c, section: r?.section, title: r?.title }; }); }
+    const { data } = await sb().from("comments").select("*, records(section,title)").ilike("body", `%@${first}%`).gte("created_at", since).order("created_at", { ascending: false }).limit(30);
+    return (data || []).map((c: any) => ({ ...c, section: c.records?.section, title: c.records?.title }));
+  },
+  /** Server-side search across every record the user may see (titles and field values). */
+  async searchRecords(q: string, n = 25): Promise<Rec[]> {
+    if (!q.trim()) return [];
+    if (DEMO) { const db = demoLoad(); const s = q.toLowerCase(); return db.records.filter((r) => demoVisible(db, r) && (r.title + " " + JSON.stringify(r.data)).toLowerCase().includes(s)).slice(0, n); }
+    const { data, error } = await sb().rpc("search_records", { q, n });
+    if (!error) return (data || []) as Rec[];
+    const { data: d2 } = await sb().from("records").select("*").ilike("title", `%${q}%`).limit(n); return (d2 || []) as Rec[];
+  },
   async profiles(): Promise<Profile[]> {
     if (DEMO) return demoLoad().profiles;
     const { data } = await sb().from("profiles").select("*").order("created_at"); return (data || []) as Profile[];

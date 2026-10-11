@@ -409,7 +409,7 @@ insert into public.records (section, title, status, data, company, controlled) v
 ('legal.issues','Response layer advertised publicly','Open','{"priority": "High", "summary": "EW, interceptors, directed energy and obscuration on the websites draw regulator attention.", "action": "Present as a reserved bay for integration by an authorised government end user; pilot stays passive.", "owner": "Michael"}'::jsonb,null,false),
 ('legal.issues','AGRON 1 export self-classification','Open','{"priority": "High", "summary": "Own software with encryption and sensor fusion needs classification before export, foreign access or sale abroad.", "action": "Prepare technical description; counsel or BIS classification request.", "owner": "Michael + CTO"}'::jsonb,null,false),
 ('legal.issues','No counsel engaged yet','Open','{"priority": "Critical", "summary": "Binding conclusions need licensed counsel in the US (export controls) and the UAE.", "action": "Engage two firms on limited scope; draft scoping memos.", "owner": "Michael"}'::jsonb,null,false),
-('legal.issues','Trademarks: AGRON, StarDome, StarWall, AGRON 1','Open','{"priority": "Medium", "summary": "US applications filed or in preparation; UAE needs a separate national filing.", "action": "Record filing numbers; plan UAE filing before launch.", "owner": "Michael"}'::jsonb,null,false),
+('legal.issues','Trademark: AGRON','Open','{"priority": "Medium", "summary": "US applications filed or in preparation; UAE needs a separate national filing.", "action": "Record filing numbers; plan UAE filing before launch.", "owner": "Michael"}'::jsonb,null,false),
 ('legal.issues','Sale, leasing and financing structure','Open','{"priority": "High", "summary": "Under leasing, export, end-user and importer-of-record duties follow the owner; financiers need sanctions screening.", "action": "Every deal carries an end-user certificate and re-export clauses.", "owner": "Michael + counsel"}'::jsonb,null,false),
 ('legal.issues','Strait of Hormuz and Gulf tanker work','Open','{"priority": "High", "summary": "OFAC Iran sanctions, flag-state and coastal-state law, ISPS and war-risk insurance conditions apply.", "action": "Screen every vessel, owner, manager and charterer before any deal.", "owner": "Sales"}'::jsonb,null,false),
 ('legal.regulators','BIS — Bureau of Industry and Security','Reference','{"jurisdiction": "US", "role": "EAR / Commerce Control List, ECCN, export licences", "website": "https://www.bis.gov"}'::jsonb,null,false),
@@ -429,7 +429,5 @@ insert into public.records (section, title, status, data, company, controlled) v
 ('legal.regulators','IMO','Reference','{"jurisdiction": "International", "role": "SOLAS, ISPS Code", "website": "https://www.imo.org"}'::jsonb,null,false),
 ('legal.corporate','AGRON Inc.','Active','{"entity": "AGRON Inc.", "jurisdiction": "Delaware, USA", "filing": "Incorporated 2026"}'::jsonb,null,false),
 ('legal.corporate','AGRON UAE entity','Planned','{"entity": "AGRON (UAE)", "jurisdiction": "Abu Dhabi or other — under review", "filing": "Scope with UAE counsel first"}'::jsonb,null,false),
-('legal.trademarks','AGRON','Planned','{"mark": "AGRON", "office": "USPTO"}'::jsonb,null,false),
-('legal.trademarks','StarDome','Planned','{"mark": "StarDome", "office": "USPTO"}'::jsonb,null,false),
-('legal.trademarks','StarWall','Planned','{"mark": "StarWall", "office": "USPTO"}'::jsonb,null,false),
-('legal.trademarks','AGRON 1','Planned','{"mark": "AGRON 1", "office": "USPTO"}'::jsonb,null,false);
+('legal.trademarks','AGRON','Planned','{"mark": "AGRON", "office": "USPTO"}'::jsonb,null,false);
+

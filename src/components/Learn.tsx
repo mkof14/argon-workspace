@@ -16,7 +16,7 @@ export default function Learn() {
   const { lang, me, access, toast, openAi, tick } = useApp();
   const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
   const [tab, setTab] = useState<"guide" | "terms" | "faq">((params?.get("tab") as any) || "guide");
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(params?.get("q") || "");
   const [focus] = useState(params?.get("s") || "");
   const [faq, setFaq] = useState<Faq[]>([]);
   const [gd, setGd] = useState<string>(() => { const f = params?.get("s"); return f ? f.split(".")[0] : "basics"; });

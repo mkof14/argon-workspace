@@ -25,6 +25,8 @@ const P: Record<string, string> = {
   lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>', trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
   logout: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h11"/>', list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>', cols: '<rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="4" height="13" rx="1"/>',
+  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8"/>',
+  inbox: '<path d="M3 13h5l1.5 3h5L16 13h5"/><path d="M5 5h14l2 8v6H3v-6z"/>',
   stardome: '<path d="M4 20V14h16v6z"/><path d="M6 14a6 6 0 0 1 12 0" fill="currentColor" fill-opacity=".22" stroke="none"/><path d="M6 14a6 6 0 0 1 12 0M12 8V5M9 17h.01M12 17h.01M15 17h.01"/><circle cx="12" cy="4" r="1"/>',
   lifebuoy: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M5.6 5.6l3.6 3.6M14.8 14.8l3.6 3.6M18.4 5.6l-3.6 3.6M9.2 14.8l-3.6 3.6"/><path d="M5.6 5.6l3.6 3.6a4 4 0 0 1 5.6 0l3.6-3.6a9 9 0 0 0-12.8 0z" fill="currentColor" fill-opacity=".22" stroke="none"/>',
   d_tech: '<path d="M4 9a8 8 0 0 0 11 11z" fill="currentColor" fill-opacity=".22" stroke="none"/><path d="M4 9a8 8 0 0 0 11 11L4 9z"/><path d="M9.5 14.5L13 11M13 11l1-1"/><circle cx="14.5" cy="9.5" r="1.2"/><path d="M15.5 4.5a4 4 0 0 1 4 4M16 1.8a7 7 0 0 1 6.2 6.2"/><path d="M9 20l-2 2h6"/>',

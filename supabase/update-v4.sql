@@ -47,7 +47,7 @@ select s, t, st, d::jsonb from (values
 ('legal.regulators','Census Bureau — AES / EEI','Reference','{"jurisdiction":"US","role":"Export filing (EEI) under the Foreign Trade Regulations","website":"https://www.census.gov/foreign-trade"}'),
 ('legal.regulators','FDA CDRH — laser products','Reference','{"jurisdiction":"US","role":"Laser product performance standard and product reports (21 CFR 1040)","website":"https://www.fda.gov/radiation-emitting-products"}'),
 ('legal.regulators','NTIA','Reference','{"jurisdiction":"US","role":"Federal spectrum management","website":"https://www.ntia.gov"}'),
-('legal.regulators','USPTO','Reference','{"jurisdiction":"US","role":"Trademarks and patents","website":"https://www.uspto.gov"}'),
+('legal.regulators','USPTO','Reference','{"jurisdiction":"US","role":"Trademarks","website":"https://www.uspto.gov"}'),
 ('legal.regulators','IRS','Reference','{"jurisdiction":"US","role":"Federal tax","website":"https://www.irs.gov"}'),
 ('legal.regulators','Delaware Division of Corporations','Reference','{"jurisdiction":"US","role":"Corporate filings, franchise tax","website":"https://corp.delaware.gov"}'),
 ('legal.regulators','OSHA','Reference','{"jurisdiction":"US","role":"Workplace safety","website":"https://www.osha.gov"}'),

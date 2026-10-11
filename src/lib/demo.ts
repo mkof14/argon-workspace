@@ -41,7 +41,7 @@ export function demoSeed(): Rec[] {
     out.push(r("legal.regulators", name, "Reference", { jurisdiction: j, role, website: w }, {}, 5));
   out.push(r("legal.corporate", "AGRON Inc.", "Active", { entity: "AGRON Inc.", jurisdiction: "Delaware, USA", filing: "Incorporated 2026" }, {}, 9));
   out.push(r("legal.corporate", "AGRON UAE entity", "Planned", { entity: "AGRON (UAE)", jurisdiction: "Abu Dhabi or other — under review" }, {}, 9));
-  for (const m of ["AGRON", "StarDome", "StarWall", "AGRON 1"]) out.push(r("legal.trademarks", m, "Planned", { mark: m, office: "USPTO" }, {}, 9));
+  for (const m of ["AGRON"]) out.push(r("legal.trademarks", m, "Planned", { mark: m, office: "USPTO" }, {}, 9));
 
   // ---- SAMPLE operational data (marked) ----
   out.push(
@@ -56,7 +56,7 @@ export function demoSeed(): Rec[] {
     r("sales.pipeline", "Tanker fleet pilot (sample)", "Qualified", S({ client: "Tanker operator (sample)", segment: "Tanker / commercial vessel", config: "C20 Base", currency: "USD", country: "UAE", screening: "Not started", owner: "Sample Sales" }), {}, 3),
     r("sales.pipeline", "Private island (sample)", "Lead", S({ client: "Family office (sample)", segment: "Private island", config: "C40 Advanced", currency: "USD", screening: "Not started" }), {}, 6),
     r("sales.partners", "Gulf Marine Partners (sample)", "Onboarding", S({ region: "UAE / GCC", agreement: "Referral", screening: "Cleared" }), { company: "Gulf Marine Partners (sample)" }),
-    r("technical.software", "AGRON 1 · radar adapter v0.2", "In progress", S({ type: "Feature", component: "StarWall adapters", priority: "High", owner: "Sample Engineer" }), { controlled: true }),
+    r("technical.software", "AGRON 1 · radar adapter v0.2", "In progress", S({ type: "Feature", component: "Device adapters", priority: "High", owner: "Sample Engineer" }), { controlled: true }),
     r("technical.testing", "Bench test · radar + EO/IR fusion", "Planned", S({ type: "Bench", config: "C20 Enhanced", equipment: "Radar + LWIR camera", date: "2026-11-20", owner: "Sample Engineer" }), { controlled: true }),
     r("technical.certification", "TDRA type approval · surveillance radar", "Not started", S({ scheme: "TDRA type approval", equipment: "Short-range surveillance radar" })),
     r("marketing.events", "Monaco Yacht Show 2026", "Done", S({ city: "Monaco", date: "2026-09-23", leads: 0 }), {}, 15),

@@ -308,10 +308,10 @@ ${o.sender ? `<p style="margin:8px 0 10px;font-size:16px;color:#2A3440">${L("Bes
 <td style="font-size:13px;line-height:1.6;color:#7A8796;text-align:${align}">
 <strong style="color:#2A3440">AGRON Inc.</strong> · Aerial-Ground Robotics Operations Network<br>
 <a href="https://www.agron1.com" style="color:#7A8796">agron1.com</a> · <a href="https://stardome.life" style="color:#7A8796">stardome.life</a><br>
-<span style="font-size:12px">${L("This message may contain confidential information intended only for the recipient. AGRON™, StarDome™, StarWall™ and AGRON 1™ are trademarks of AGRON Inc.",
-  "Письмо может содержать конфиденциальную информацию, предназначенную только для адресата. AGRON™, StarDome™, StarWall™ и AGRON 1™ — товарные знаки AGRON Inc.",
-  "Лист може містити конфіденційну інформацію, призначену лише для адресата. AGRON™, StarDome™, StarWall™ і AGRON 1™ — торговельні марки AGRON Inc.",
-  "قد تحتوي هذه الرسالة على معلومات سرية مخصصة للمستلم فقط. AGRON™ وStarDome™ وStarWall™ وAGRON 1™ علامات تجارية لشركة AGRON Inc.")}</span>
+<span style="font-size:12px">${L("This message may contain confidential information intended only for the recipient. AGRON™ is a trademark of AGRON Inc.",
+  "Письмо может содержать конфиденциальную информацию, предназначенную только для адресата. AGRON™ — товарный знак AGRON Inc.",
+  "Лист може містити конфіденційну інформацію, призначену лише для адресата. AGRON™ — торговельна марка AGRON Inc.",
+  "قد تحتوي هذه الرسالة على معلومات سرية مخصصة للمستلم فقط. AGRON™ علامة تجارية لشركة AGRON Inc.")}</span>
 </td></tr></table></td></tr>
 </table>
 <div style="font-size:12px;color:#9AA6B3;margin-top:14px">© ${new Date().getFullYear()} AGRON Inc.</div>
