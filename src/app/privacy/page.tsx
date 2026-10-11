@@ -1,5 +1,5 @@
 import { LegalPage } from "../legal-page";
-export const metadata = { title: "Privacy Policy · AGRON Workspace", robots: { index: true } };
+export const metadata = { title: "Privacy Policy", robots: { index: true } };
 export default function Privacy() {
   return (
     <LegalPage title="Privacy Policy" updated="October 11, 2026">

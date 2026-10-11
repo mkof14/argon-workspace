@@ -1,5 +1,5 @@
 import { LegalPage } from "../legal-page";
-export const metadata = { title: "Terms of Use · AGRON Workspace", robots: { index: true } };
+export const metadata = { title: "Terms of Use", robots: { index: true } };
 export default function Terms() {
   return (
     <LegalPage title="Terms of Use" updated="October 11, 2026">
