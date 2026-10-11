@@ -657,3 +657,23 @@ a.hub-row:hover{background:var(--surface-2)}
 .org-node small{color:var(--ink-3);font-size:12.5px}
 .toolbar .faint svg{width:16px;height:16px;vertical-align:-3px}
 .toolbar>.faint{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+
+/* ---------- v0.9.1: department hero in AGRON style ---------- */
+.dhero{position:relative;overflow:hidden;border-radius:16px;padding:26px 28px;background:var(--rail);color:#E9EEF3;border:1px solid var(--rail-line);display:grid;gap:22px}
+.dhero-top{display:flex;gap:18px;align-items:center}
+.dhero-ic{flex:none;width:64px;height:64px;border-radius:16px;display:grid;place-items:center;background:var(--dc);color:#fff}
+.dhero-ic svg{width:34px;height:34px}
+.dhero-kicker{font-size:13.5px;font-weight:600;color:#FF6A2B}
+.dhero h2{margin:2px 0 6px;font-family:var(--f-display);font-weight:600;font-size:clamp(28px,3.4vw,40px);letter-spacing:-.015em;line-height:1.1;color:#fff}
+.dhero p{margin:0;color:#AEB9C4;font-size:15.5px;max-width:80ch}
+.dhero-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+.dstat{display:grid;gap:2px;padding:14px 16px;border-radius:12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);text-decoration:none;color:#E9EEF3;transition:background .15s,border-color .15s}
+.dstat:hover{background:rgba(255,255,255,.09);border-color:var(--dc)}
+.dstat b{font-family:var(--f-display);font-size:30px;font-weight:600;line-height:1.1;color:#fff;font-variant-numeric:tabular-nums}
+.dstat span{font-size:14px;font-weight:600;color:#C7D0DA}
+.dstat small{font-size:12.5px;color:#8E9BA9}
+.dstat.bad b{color:#FF8A8F}
+.hub-card .card-h h2{display:flex;align-items:center;gap:10px;font-size:17px}
+.hub-card .card-h h2 svg{width:30px;height:30px;padding:6px;border-radius:9px;background:color-mix(in srgb,var(--dc) 14%,var(--surface));color:var(--dc);flex:none}
+.stageboard .card-h h2 svg{width:30px;height:30px;padding:6px;border-radius:9px;background:color-mix(in srgb,var(--dc) 14%,var(--surface));color:var(--dc)}
+@media (max-width:600px){.dhero{padding:20px}.dhero-ic{width:52px;height:52px}}

@@ -4,7 +4,7 @@ import Link from "next/link";
 import Icon from "./Icon";
 import { useApp, findSection, SECTIONS } from "./App";
 import StageBoard from "./StageBoard";
-import { DEPT_COLORS } from "@/config/workspace.config.mjs";
+import { DEPARTMENTS, DEPT_COLORS } from "@/config/workspace.config.mjs";
 import { TEMPLATES } from "@/config/templates";
 import { CHECKLISTS } from "./RecordDrawer";
 import { workingDays } from "@/config/hr";
@@ -22,6 +22,16 @@ const usd = (v: number) => v.toLocaleString("en-US", { style: "currency", curren
 const today = () => new Date().toISOString().slice(0, 10);
 const rel = (d: number, lang: string) => (d < 0 ? t("days_late", lang as any).replace("{n}", String(-d)) : d === 0 ? t("today", lang as any) : t("in_days", lang as any).replace("{n}", String(d)));
 const href = (r: Rec) => `/${r.section.replace(".", "/")}?r=${r.id}`;
+const INTRO: Record<string, T2> = {
+  hr: L("People, hiring, time off, onboarding and people compliance for the AGRON team in the US and the UAE.", "Люди, найм, отпуска, онбординг и кадровый комплаенс команды AGRON в США и ОАЭ."),
+  technical: L("StarDome equipment, AGRON 1 software, integration, tests, certification and engineering changes.", "Оборудование StarDome, ПО AGRON 1, интеграция, испытания, сертификация и инженерные изменения."),
+  operations: L("Container builds, procurement, logistics, installation, service and the installed StarDome base.", "Сборка контейнеров, закупки, логистика, монтаж, сервис и установленные системы StarDome."),
+  finance: L("Cash, invoices, budget, costing and margins, leasing, investors, tax and insurance.", "Деньги, счета, бюджет, себестоимость и маржа, лизинг, инвесторы, налоги и страхование."),
+  sales: L("StarDome pipeline, clients, proposals, tenders, partners and the weighted forecast.", "Воронка StarDome, клиенты, КП, тендеры, партнёры и взвешенный прогноз."),
+  marketing: L("Leads, campaigns, events, content and the AGRON media library.", "Лиды, рассылки, выставки, контент и медиатека AGRON."),
+  security: L("Sanctions screening, technology control, cyber risks, access reviews, incidents and audits.", "Санкционные проверки, контроль технологий, киберриски, доступы, инциденты и аудиты."),
+  company: L("Tasks and reminders, meetings, decisions, procedures and contacts shared across AGRON.", "Задачи и напоминания, встречи, решения, регламенты и контакты AGRON."),
+};
 const checklistPct = (r: Rec, key = "steps", list = "onboard") => { const items = CHECKLISTS[list] || []; const v = r.data?.[key] || {}; const done = items.filter((_, i) => v[i]).length; return items.length ? Math.round((done / items.length) * 100) : 0; };
 
 export default function DeptHub({ dept }: { dept: string }) {
@@ -219,9 +229,19 @@ export default function DeptHub({ dept }: { dept: string }) {
   if (!view) return <div className="empty">…</div>;
   return (
     <div style={{ display: "grid", gap: 16, ["--dc" as any]: c }}>
-      {view.kpis.length > 0 && <section className="kpis">{view.kpis.map((k) => (
-        <Link key={k.l.en} href={k.href || "#"} className="kpi" style={{ textDecoration: "none", color: "inherit", ["--dc" as any]: k.tone === "bad" ? "#E5484D" : c }}>
-          <div className="eyebrow">{T(k.l)}</div><div className="v" style={{ fontSize: 26 }}>{k.v}</div>{k.s && <div className="faint" style={{ fontSize: 13.5 }}>{k.s}</div>}</Link>))}</section>}
+      <section className="dhero">
+        <div className="dhero-top">
+          <span className="dhero-ic"><Icon n={DEPARTMENTS.find((d: any) => d.key === dept)?.icon || "grid"} /></span>
+          <div style={{ minWidth: 0 }}>
+            <div className="dhero-kicker">AGRON Inc. · {t("dept_overview", lang)}</div>
+            <h2>{tx(DEPARTMENTS.find((d: any) => d.key === dept)?.label, lang)}</h2>
+            <p>{T(INTRO[dept] || L("", ""))}</p>
+          </div>
+        </div>
+        {view.kpis.length > 0 && <div className="dhero-stats">{view.kpis.map((k) => (
+          <Link key={k.l.en} href={k.href || "#"} className={`dstat ${k.tone === "bad" && k.v !== "0" ? "bad" : ""}`}>
+            <b>{k.v}</b><span>{T(k.l)}</span>{k.s && <small>{k.s}</small>}</Link>))}</div>}
+      </section>
       {view.strip}
       <div className="hub-grid">{view.cards}</div>
       <div className="toolbar">{secs.map((s) => <Link key={s.id} href={`/${s.dept}/${s.key}`} className="btn ghost sm"><Icon n={s.icon} />{tx(s.label, lang)}</Link>)}</div>
