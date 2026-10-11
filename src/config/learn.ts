@@ -1,7 +1,9 @@
 // AGRON Learning Center content: how to work with each section, general guides, and terminology.
-// English and Russian; other interface languages show English.
+// English and Russian here; Ukrainian and Arabic in learn-i18n.ts.
+import { UK, AR } from "./learn-i18n";
 export type T2 = { en: string; ru: string };
-export const l2 = (o: T2 | undefined, lang: string) => (o ? (lang === "ru" ? o.ru : o.en) : "");
+/** EN/RU are written in place; Ukrainian and Arabic come from learn-i18n.ts (falls back to English). */
+export const l2 = (o: T2 | undefined, lang: string) => (o ? (lang === "ru" ? o.ru : lang === "uk" ? UK[o.en] || o.en : lang === "ar" ? AR[o.en] || o.en : o.en) : "");
 
 /** Short, practical description per section: first line = purpose, following lines = how to work. */
 export const HELP: Record<string, T2> = {
@@ -104,7 +106,7 @@ export const HELP: Record<string, T2> = {
 /** General how-to guides. */
 export const GUIDES: { id: string; icon: string; title: T2; body: T2 }[] = [
   { id: "start", icon: "rocket", title: { en: "Getting started", ru: "С чего начать" },
-    body: { en: "- Sign in with your work email: a one-time link arrives by mail\n- The menu shows only the sections your role can open\n- Set your name, title and phone in My profile: they go into email signatures", ru: "- Вход по рабочей почте: приходит одноразовая ссылка\n- В меню только разделы, доступные вашей роли\n- Заполните имя, должность и телефон в «Мой профиль» — они идут в подпись писем" } },
+    body: { en: "- Sign in with your work email (a 6-digit code arrives by mail) or with Google\n- The menu shows only the sections your role can open\n- Set your name, title and phone in My profile: they go into email signatures", ru: "- Вход по рабочей почте (приходит 6-значный код) или через Google\n- В меню только разделы, доступные вашей роли\n- Заполните имя, должность и телефон в «Мой профиль» — они идут в подпись писем" } },
   { id: "records", icon: "list", title: { en: "Records, table and board", ru: "Записи, таблица и доска" },
     body: { en: "- New creates a record; click a row to open it\n- Board: drag a card to change status\n- Click a column header to sort; status tiles in the header filter\n- Red date = overdue, amber = due within 14 days", ru: "- «Создать» — новая запись; клик по строке — открыть\n- Доска: перетащите карточку, чтобы сменить статус\n- Клик по заголовку столбца — сортировка; плитки статусов в шапке — фильтр\n- Красная дата — просрочено, жёлтая — до 14 дней" } },
   { id: "files", icon: "clip", title: { en: "Files and sharing", ru: "Файлы и отправка" },
@@ -222,7 +224,7 @@ export const GLOSSARY: Record<string, [string, T2][]> = {
 
 /** Starter FAQ (also seeded into the database). */
 export const SEED_FAQ: { q: T2; a: T2; section?: string }[] = [
-  { q: { en: "How do I sign in?", ru: "Как войти в кабинет?" }, a: { en: "Enter your work email on the sign-in page and click the link that arrives. No password is needed. If nothing arrives in a minute, check Spam.", ru: "Введите рабочий email на странице входа и нажмите ссылку из письма. Пароль не нужен. Если письма нет через минуту — проверьте «Спам»." } },
+  { q: { en: "How do I sign in?", ru: "Как войти в кабинет?" }, a: { en: "Enter your work email on the sign-in page and type the 6-digit code from the email, or press Continue with Google. No password is needed. If nothing arrives in a minute, check Spam. An administrator activates new accounts.", ru: "Введите рабочий email на странице входа и 6-значный код из письма — или нажмите «Войти через Google». Пароль не нужен. Если письма нет через минуту — проверьте «Спам». Новый аккаунт активирует администратор." } },
   { q: { en: "Why don't I see some departments?", ru: "Почему я не вижу некоторые отделы?" }, a: { en: "Your role decides which sections you see. Ask the owner or an administrator to change your role or access in Users & roles.", ru: "Набор разделов зависит от роли. Попросите владельца или администратора изменить роль или доступ в «Пользователи и роли»." } },
   { q: { en: "Why can't I mark a deal as Won?", ru: "Почему сделка не переходит в Won?" }, a: { en: "Sanctions and end-user screening must be Cleared first. Set the screening field to Cleared after the check in Security → Restricted-party screening.", ru: "Сначала санкционная проверка и проверка конечного пользователя должны быть Cleared. Отметьте результат после проверки в «Безопасность» → «Санкционные проверки»." }, section: "sales.pipeline" },
   { q: { en: "Why can't a container move to Shipping?", ru: "Почему контейнер не переходит в Shipping?" }, a: { en: "The export and end-user check must be Cleared before shipping. Update the Export check field once Legal confirms.", ru: "До отгрузки экспортная проверка и проверка конечного пользователя должны быть Cleared. Обновите поле после подтверждения юристов." }, section: "operations.builds" },

@@ -31,7 +31,7 @@ export default function Search({ onClose, initial = "", voice = false }: { onClo
   useEffect(() => { // records and FAQ from the server, debounced
     setSel(0);
     if (q.trim().length < 2) { setRecs([]); setFaq([]); return; }
-    const h = setTimeout(() => { store.searchRecords(q.trim(), 20).then(setRecs).catch(() => {}); store.faqSearch(q.trim(), lang === "ru" ? "ru" : "en", 4).then(setFaq).catch(() => {}); }, 220);
+    const h = setTimeout(() => { store.searchRecords(q.trim(), 20).then(setRecs).catch(() => {}); store.faqSearch(q.trim(), lang, 4).then(setFaq).catch(() => {}); }, 220);
     return () => clearTimeout(h);
   }, [q, lang]);
 

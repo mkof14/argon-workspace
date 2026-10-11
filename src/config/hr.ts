@@ -36,7 +36,9 @@ export const OFFBOARD_CHECKLIST = [
 ];
 /** Working days (Mon–Fri) between two dates, inclusive. */
 export function workingDays(from: string, to: string) {
-  const a = new Date(from), b = new Date(to || from); if (isNaN(+a) || isNaN(+b) || b < a) return 0;
+  // "YYYY-MM-DD" is parsed as UTC by Date(); read it as a local calendar day so weekends are right in every time zone
+  const day = (s: string) => (/^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T00:00:00`) : new Date(s));
+  const a = day(from), b = day(to || from); if (isNaN(+a) || isNaN(+b) || b < a) return 0;
   let n = 0; for (const d = new Date(a); d <= b; d.setDate(d.getDate() + 1)) { const w = d.getDay(); if (w !== 0 && w !== 6) n++; }
   return n;
 }

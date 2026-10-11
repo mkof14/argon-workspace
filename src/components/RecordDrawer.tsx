@@ -12,11 +12,15 @@ import { markdownToPdf } from "@/lib/pdf";
 import { US_CHECKLIST, UAE_CHECKLIST, deskById } from "@/config/legal";
 import { OFFBOARD_CHECKLIST, ONBOARD_CHECKLIST } from "@/config/hr";
 
-export const GROUPS: Record<string, { en: string; ru: string }> = {
-  A: { en: "A · Product identification", ru: "A · Идентификация продукта" }, B: { en: "B · U.S. export review", ru: "B · Экспорт из США" },
-  C: { en: "C · UAE import review", ru: "C · Ввоз в ОАЭ" }, D: { en: "D · UAE installation & operation", ru: "D · Установка и эксплуатация в ОАЭ" },
-  E: { en: "E · Procurement & logistics", ru: "E · Закупка и логистика" }, F: { en: "F · Risk assessment", ru: "F · Оценка риска" },
-  G: { en: "G · Evidence", ru: "G · Подтверждение" }, H: { en: "Checklists", ru: "Чек-листы" },
+export const GROUPS: Record<string, { en: string; ru: string; uk: string; ar: string }> = {
+  A: { en: "A · Product identification", ru: "A · Идентификация продукта", uk: "A · Ідентифікація продукту", ar: "A · تعريف المنتج" },
+  B: { en: "B · U.S. export review", ru: "B · Экспорт из США", uk: "B · Експорт зі США", ar: "B · مراجعة التصدير الأمريكي" },
+  C: { en: "C · UAE import review", ru: "C · Ввоз в ОАЭ", uk: "C · Ввезення в ОАЕ", ar: "C · مراجعة الاستيراد إلى الإمارات" },
+  D: { en: "D · UAE installation & operation", ru: "D · Установка и эксплуатация в ОАЭ", uk: "D · Встановлення та експлуатація в ОАЕ", ar: "D · التركيب والتشغيل في الإمارات" },
+  E: { en: "E · Procurement & logistics", ru: "E · Закупка и логистика", uk: "E · Закупівля та логістика", ar: "E · المشتريات والخدمات اللوجستية" },
+  F: { en: "F · Risk assessment", ru: "F · Оценка риска", uk: "F · Оцінка ризику", ar: "F · تقييم المخاطر" },
+  G: { en: "G · Evidence", ru: "G · Подтверждение", uk: "G · Підтвердження", ar: "G · الأدلة" },
+  H: { en: "Checklists", ru: "Чек-листы", uk: "Чек-листи", ar: "قوائم التحقق" },
 };
 export const CHECKLISTS: Record<string, string[]> = { us: US_CHECKLIST, uae: UAE_CHECKLIST, onboard: ONBOARD_CHECKLIST, offboard: OFFBOARD_CHECKLIST };
 // Where an AI answer can be saved in a record, per section
@@ -118,7 +122,7 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
           <div className="fgrid">
             <div className="field wide"><label htmlFor="f-title">{t("title", lang)}</label><input id="f-title" className="input" value={title} readOnly={!canWrite} onChange={(e) => setTitle(e.target.value)} /></div>
             <div className="field"><label htmlFor="f-status">{t("status", lang)}</label><select id="f-status" className="input" value={status} disabled={!canWrite} onChange={(e) => setStatus(e.target.value)}>{section.statuses.map((s: string) => <option key={s}>{s}</option>)}</select></div>
-            {section.fields.map((f: any, i: number) => { const g = f.group && f.group !== section.fields[i - 1]?.group ? <div key={`g-${f.group}`} className="fgroup wide">{(GROUPS[f.group] as any)?.[lang === "ru" ? "ru" : "en"]}</div> : null; return g ? [g, field(f)] : field(f); })}
+            {section.fields.map((f: any, i: number) => { const g = f.group && f.group !== section.fields[i - 1]?.group ? <div key={`g-${f.group}`} className="fgroup wide">{(GROUPS[f.group] as any)?.[lang]}</div> : null; return g ? [g, field(f)] : field(f); })}
             {gateBlocked && <div className="gate-msg wide">{tx(gate.msg, lang)}</div>}
             {canWrite && section.controlled && me.us_person && <label className="check wide"><input type="checkbox" checked={controlled} onChange={(e) => setControlled(e.target.checked)} /><Icon n="lock" className="lockico" />{t("controlled", lang)}</label>}
             {canWrite && section.external?.length > 0 && <div className="field wide"><label htmlFor="f-company">{t("visibility", lang)}</label><input id="f-company" className="input" value={company} onChange={(e) => setCompany(e.target.value)} placeholder="" /><span className="hint">{t("vis_hint", lang)}</span></div>}

@@ -1,0 +1,26 @@
+name: Uptime
+# Every 15 minutes: the site, sign-in page and the health endpoint (database + auth) must answer.
+# A failed run makes GitHub email the repository owner (Settings → Notifications → Actions).
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+permissions: {}
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Health endpoint (app, database, sign-in)
+        run: |
+          for i in 1 2 3; do
+            body=$(curl -sS --max-time 20 -w '\n%{http_code}' https://workspace.agron1.com/api/health) && code=$(echo "$body" | tail -1)
+            echo "$body"
+            [ "$code" = "200" ] && exit 0
+            sleep 30
+          done
+          echo "::error::AGRON Workspace health check failed 3 times"; exit 1
+      - name: Sign-in page
+        run: |
+          code=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' https://workspace.agron1.com/login)
+          echo "login: $code"; [ "$code" = "200" ] || { echo "::error::Sign-in page returned $code"; exit 1; }

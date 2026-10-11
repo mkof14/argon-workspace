@@ -30,7 +30,7 @@ export default function AiPanel({ ctx, onClose }: { ctx: AiContext; onClose: () 
   // Similar saved questions while typing (free, no AI call)
   useEffect(() => {
     const text = q.trim(); if (text.length < 6) { setSugg([]); return; }
-    const id = setTimeout(() => store.faqSearch(text, lang === "ru" ? "ru" : lang === "en" ? "en" : undefined, 3).then(setSugg).catch(() => {}), 350);
+    const id = setTimeout(() => store.faqSearch(text, lang, 3).then(setSugg).catch(() => {}), 350);
     return () => clearTimeout(id);
   }, [q, lang]);
 

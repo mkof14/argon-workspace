@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Icon from "./Icon";
 import { DEPARTMENTS, DEPT_COLORS, ROLES, allSections } from "@/config/workspace.config.mjs";
 import { LANGS, Lang, t, tx } from "@/lib/i18n";
+import { installErrorReporting } from "@/lib/errors";
 import { DEMO, Profile, Rule, accessFor, isExternal, store, Access } from "@/lib/store";
 import dynamic from "next/dynamic";
 import Dashboard from "./Dashboard";
@@ -14,6 +15,7 @@ import type { MailInit } from "./Mail";
 // Screens that are not needed on first paint load on demand
 const Admin = dynamic(() => import("./Admin"), { ssr: false });
 const Roles = dynamic(() => import("./Roles"), { ssr: false });
+const System = dynamic(() => import("./System"), { ssr: false });
 const MyProfile = dynamic(() => import("./MyProfile"), { ssr: false });
 const Learn = dynamic(() => import("./Learn"), { ssr: false });
 const AiPanel = dynamic(() => import("./AiPanel"), { ssr: false });
@@ -24,7 +26,7 @@ const DeptHub = dynamic(() => import("./DeptHub"), { ssr: false });
 const Search = dynamic(() => import("./Search"), { ssr: false });
 const Footer = dynamic(() => import("./Footer"), { ssr: false });
 const Bell = dynamic(() => import("./Inbox").then((m) => m.Bell), { ssr: false });
-export const VERSION = "1.0";
+export const VERSION = "1.1";
 
 type Ctx = {
   lang: Lang; me: Profile; access: Access; toast: (m: string, err?: boolean) => void;
@@ -89,6 +91,7 @@ export default function App({ slug }: { slug: string[] }) {
     if (p && ["owner", "admin", "management", "legal"].includes(p.role)) store.faqList().catch(() => {}); // loads the starter FAQ once
   }, [router]);
   useEffect(() => { reload(); }, [reload]);
+  useEffect(() => { installErrorReporting(); }, []);
   useEffect(() => { const st = navStack.current; if (st.length > 1 && st[st.length - 2] === route) st.pop(); else if (st[st.length - 1] !== route) st.push(route); }, [route]);
   useEffect(() => { const dk = section?.dept || hubDept; if (dk) setOpenDepts((o) => ({ ...o, [dk]: true })); setRailOpen(false); }, [route]); // eslint-disable-line
 
@@ -109,7 +112,7 @@ export default function App({ slug }: { slug: string[] }) {
   const depts = DEPARTMENTS.map((d: any) => ({ ...d, secs: SECTIONS.filter((s) => s.dept === d.key && access.read.has(s.id)) })).filter((d: any) => d.secs.length);
   const isAdmin = me.role === "owner" || me.role === "admin";
   const dept = section ? DEPARTMENTS.find((d: any) => d.key === section.dept) : null;
-  const special: Record<string, [string, string]> = { "admin/users": [t("admin", lang), t("users", lang)], "admin/roles": [t("admin", lang), t("roles", lang)], me: [t("workspace", lang), t("my_profile", lang)], learn: [t("workspace", lang), t("learn", lang)], reports: [t("workspace", lang), t("reports", lang)], templates: [t("workspace", lang), t("templates", lang)] };
+  const special: Record<string, [string, string]> = { "admin/users": [t("admin", lang), t("users", lang)], "admin/roles": [t("admin", lang), t("roles", lang)], "admin/system": [t("admin", lang), t("sys_title", lang)], me: [t("workspace", lang), t("my_profile", lang)], learn: [t("workspace", lang), t("learn", lang)], reports: [t("workspace", lang), t("reports", lang)], templates: [t("workspace", lang), t("templates", lang)] };
   const hubD = hubDept ? DEPARTMENTS.find((d: any) => d.key === hubDept) : null;
   const crumbGroup = hubD ? tx(hubD.label, lang) : section ? tx(dept.label, lang) : special[route]?.[0] || t("workspace", lang);
   const crumbTitle = hubD ? t("dept_overview", lang) : section ? tx(section.label, lang) : special[route]?.[1] || t("overview", lang);
@@ -123,12 +126,13 @@ export default function App({ slug }: { slug: string[] }) {
 
   let body: React.ReactNode;
   if (!route) body = <Dashboard depts={depts} />;
-  else if ((route === "admin/users" || route === "admin/roles") && isAdmin) body = <>
+  else if ((route === "admin/users" || route === "admin/roles" || route === "admin/system") && isAdmin) body = <>
       <nav className="dtabs" style={{ ["--dc" as any]: "#5B6CF0" }}>
         <Link href="/admin/users" className={route === "admin/users" ? "on" : ""}><Icon n="users" />{t("users", lang)}</Link>
         <Link href="/admin/roles" className={route === "admin/roles" ? "on" : ""}><Icon n="key" />{t("roles", lang)}</Link>
+        <Link href="/admin/system" className={route === "admin/system" ? "on" : ""}><Icon n="pulse" />{t("sys_title", lang)}</Link>
       </nav>
-      {route === "admin/users" ? <Admin /> : <Roles />}
+      {route === "admin/users" ? <Admin /> : route === "admin/system" ? <System /> : <Roles />}
     </>;
   else if (route.startsWith("admin/")) body = <div className="empty">{t("no_access", lang)}</div>;
   else if (route === "me") body = <MyProfile />;
@@ -185,7 +189,8 @@ export default function App({ slug }: { slug: string[] }) {
             })}
             {isAdmin && <><div className="nav-label">{t("admin", lang)}</div>
               <Link href="/admin/users" className={`nav-item top ${route === "admin/users" ? "active" : ""}`} style={{ ["--dc" as any]: "#94A3B8" }}><Icon n="users" /><span>{t("users", lang)}</span></Link>
-              <Link href="/admin/roles" className={`nav-item top ${route === "admin/roles" ? "active" : ""}`} style={{ ["--dc" as any]: "#94A3B8" }}><Icon n="key" /><span>{t("roles", lang)}</span></Link></>}
+              <Link href="/admin/roles" className={`nav-item top ${route === "admin/roles" ? "active" : ""}`} style={{ ["--dc" as any]: "#94A3B8" }}><Icon n="key" /><span>{t("roles", lang)}</span></Link>
+              <Link href="/admin/system" className={`nav-item top ${route === "admin/system" ? "active" : ""}`} style={{ ["--dc" as any]: "#94A3B8" }}><Icon n="pulse" /><span>{t("sys_title", lang)}</span></Link></>}
           </nav>
           <div className="rail-foot">
             <Link href="/me" className="me" style={{ textDecoration: "none", color: "inherit" }}><span className="avatar">{(me.full_name || me.email || "?").slice(0, 1).toUpperCase()}</span>

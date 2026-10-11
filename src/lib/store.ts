@@ -1,7 +1,7 @@
 "use client";
 import { allSections, defaultRules, ROLES } from "@/config/workspace.config.mjs";
 import type * as DemoMod from "./demo";
-import { SEED_FAQ } from "@/config/learn";
+import { SEED_FAQ, l2 } from "@/config/learn";
 
 export type Rec = {
   id: string; section: string; title: string; status: string | null; data: Record<string, any>;
@@ -60,7 +60,7 @@ function demoVisible(db: DemoDB, r: Rec) {
 }
 
 function demoFaq(db: DemoDB): Faq[] {
-  if (!db.faq) { db.faq = SEED_FAQ.flatMap((f, i) => (["en", "ru"] as const).map((l) => ({ id: `faq-${i}-${l}`, question: f.q[l], answer: f.a[l], lang: l, section: f.section || null, verified: true, hits: 0, source: "seed" }))); demoSave(db); }
+  if (!db.faq) { db.faq = SEED_FAQ.flatMap((f, i) => (["en", "ru", "uk", "ar"] as const).map((l) => ({ id: `faq-${i}-${l}`, question: l2(f.q, l), answer: l2(f.a, l), lang: l, section: f.section || null, verified: true, hits: 0, source: "seed" }))); demoSave(db); }
   return db.faq;
 }
 const words = (s: string) => new Set(s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((w) => w.length > 2));
@@ -224,7 +224,7 @@ export const store = {
     const get = async () => (await sb().from("faq").select("*").order("verified", { ascending: false }).order("hits", { ascending: false }).limit(500)).data || [];
     let rows = await get();
     if (!rows.length) { // first run: load the starter FAQ (allowed for owner, admin, management, legal)
-      const seed = SEED_FAQ.flatMap((f) => (["en", "ru"] as const).map((l) => ({ question: f.q[l], answer: f.a[l], lang: l, section: f.section || null, verified: true, source: "seed" })));
+      const seed = SEED_FAQ.flatMap((f) => (["en", "ru", "uk", "ar"] as const).map((l) => ({ question: l2(f.q, l), answer: l2(f.a, l), lang: l, section: f.section || null, verified: true, source: "seed" })));
       const { error } = await sb().from("faq").insert(seed);
       if (!error) rows = await get();
     }

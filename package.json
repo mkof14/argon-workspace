@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "gen:access": "node scripts/gen-access.mjs"
+    "gen:access": "node scripts/gen-access.mjs",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test 'tests/*.test.ts'",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.1",

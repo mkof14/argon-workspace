@@ -25,7 +25,7 @@ export default function Learn() {
   const [allLangs, setAllLangs] = useState(false);
   const [edit, setEdit] = useState<Partial<Faq> | null>(null);
   const editor = ["owner", "admin", "management", "legal"].includes(me.role);
-  const fl = lang === "ru" ? "ru" : "en";
+  const fl: string = lang; // FAQ entries are stored per language: en, ru, uk, ar
 
   const loadFaq = () => store.faqList().then(setFaq).catch(() => {});
   useEffect(() => { loadFaq(); }, [tick]); // eslint-disable-line
@@ -66,7 +66,7 @@ export default function Learn() {
           <button className={tab === "faq" ? "on" : ""} onClick={() => setTab("faq")}><Icon n="info" />FAQ</button>
         </div>
         <div className="filters" style={{ borderBottom: 0 }}><div className="search"><Icon n="search" /><input className="input" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("learn_search", lang)} aria-label={t("learn_search", lang)} /></div>
-          {tab === "faq" && <label className="check"><input type="checkbox" checked={allLangs} onChange={(e) => setAllLangs(e.target.checked)} />EN + RU</label>}
+          {tab === "faq" && <label className="check"><input type="checkbox" checked={allLangs} onChange={(e) => setAllLangs(e.target.checked)} />EN · RU · UA · AR</label>}
           {tab === "faq" && !isExternal(me.role) && <button className="btn primary" onClick={() => setEdit({ question: q, answer: "", lang: fl })}><Icon n="plus" />{t("add_question", lang)}</button>}
         </div>
       </div>
