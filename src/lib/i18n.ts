@@ -9,6 +9,17 @@ export type Tx = { en: string; ru: string; uk: string; ar: string };
 export const tx = (o: Partial<Tx> | undefined, lang: Lang) => (o ? o[lang] || o.en || "" : "");
 
 const S: Record<string, Tx> = {
+  q_deal: { en: "New deal", ru: "Новая сделка", uk: "Нова угода", ar: "صفقة جديدة" },
+  q_expense: { en: "New expense", ru: "Новый расход", uk: "Нова витрата", ar: "مصروف جديد" },
+  q_leave: { en: "Request time off", ru: "Запросить отпуск", uk: "Запросити відпустку", ar: "طلب إجازة" },
+  q_legal: { en: "Ask Legal", ru: "Запрос юристам", uk: "Запит юристам", ar: "طلب قانوني" },
+  q_incident: { en: "Report incident", ru: "Сообщить об инциденте", uk: "Повідомити про інцидент", ar: "الإبلاغ عن حادث" },
+  quick_actions: { en: "Quick actions", ru: "Быстрые действия", uk: "Швидкі дії", ar: "إجراءات سريعة" },
+  my_work: { en: "My work", ru: "Моя работа", uk: "Моя робота", ar: "عملي" },
+  recent_pages: { en: "Recently opened", ru: "Недавно открытые", uk: "Нещодавно відкриті", ar: "فُتح مؤخراً" },
+  recent_empty: { en: "Pages you open will appear here.", ru: "Здесь появятся открытые страницы.", uk: "Тут з'являться відкриті сторінки.", ar: "ستظهر الصفحات هنا." },
+  dept_overview: { en: "Overview", ru: "Обзор", uk: "Огляд", ar: "نظرة عامة" },
+  download_pdf: { en: "Download PDF", ru: "Скачать PDF", uk: "Завантажити PDF", ar: "تنزيل PDF" },
   sb_total: { en: "total", ru: "всего", uk: "всього", ar: "الإجمالي" },
   sb_open_value: { en: "open value", ru: "в работе", uk: "в роботі", ar: "قيمة مفتوحة" },
   sb_weighted: { en: "weighted forecast", ru: "взвешенный прогноз", uk: "зважений прогноз", ar: "التوقع المرجّح" },

@@ -7,7 +7,8 @@ import { DEPARTMENTS, DEPT_COLORS } from "@/config/workspace.config.mjs";
 import { t, tx } from "@/lib/i18n";
 import { Activity, Rec, store } from "@/lib/store";
 import { DONE, OPEN, dueItems, isMine, money } from "@/lib/insights";
-import { elementToPdf, saveBlob, tone } from "@/lib/format";
+import { saveBlob, tone } from "@/lib/format";
+import { markdownToPdf } from "@/lib/pdf";
 import ReportBuilder from "./ReportBuilder";
 
 const num = (v: any) => Number(v) || 0;
@@ -71,7 +72,7 @@ export default function Reports() {
       <div ref={ref} style={{ display: "grid", gap: 16 }}>
       <div className="toolbar">
         <button className="btn primary sm" onClick={() => openAi({ title: t("exec_brief", lang), section: "", ask: (lang === "ru" ? "Напиши краткую сводку для CEO на одну страницу: 3 главных вывода, риски, что решить на этой неделе. Данные:\n\n" : "Write a one-page CEO brief: 3 key takeaways, risks, and what to decide this week. Data:\n\n") + brief() })}><Icon n="spark" />{t("ai_brief", lang)}</button>
-        <button className="btn sm" onClick={() => ref.current && elementToPdf(ref.current, `AGRON_report_${new Date().toISOString().slice(0, 10)}.pdf`)}><Icon n="pdf" />PDF</button>
+        <button className="btn sm" onClick={() => markdownToPdf(brief(), { title: "Executive brief", filename: `AGRON_executive_brief_${new Date().toISOString().slice(0, 10)}` })}><Icon n="pdf" />PDF</button>
         <button className="btn sm" onClick={() => window.print()}><Icon n="print" />{t("print", lang)}</button>
         <button className="btn sm" onClick={csv}><Icon n="download" />CSV</button>
         <button className="btn sm" onClick={async () => { await navigator.clipboard.writeText(brief()); }}><Icon n="copy" />{t("copy", lang)}</button>

@@ -20,9 +20,11 @@ const AiPanel = dynamic(() => import("./AiPanel"), { ssr: false });
 const ComposerModal = dynamic(() => import("./Mail").then((m) => m.ComposerModal), { ssr: false });
 const Reports = dynamic(() => import("./Reports"), { ssr: false });
 const Templates = dynamic(() => import("./Templates"), { ssr: false });
+const DeptHub = dynamic(() => import("./DeptHub"), { ssr: false });
 const Search = dynamic(() => import("./Search"), { ssr: false });
+const Footer = dynamic(() => import("./Footer"), { ssr: false });
 const Bell = dynamic(() => import("./Inbox").then((m) => m.Bell), { ssr: false });
-export const VERSION = "0.8";
+export const VERSION = "0.9";
 
 type Ctx = {
   lang: Lang; me: Profile; access: Access; toast: (m: string, err?: boolean) => void;
@@ -62,7 +64,9 @@ export default function App({ slug }: { slug: string[] }) {
   }, []);
 
   const route = slug.join("/");
-  const sectionId = slug.length === 2 ? `${slug[0]}.${slug[1]}` : "";
+  const HUBS = ["technical", "operations", "finance", "sales", "marketing", "security", "hr", "company"];
+  const hubDept = slug.length === 2 && slug[1] === "overview" && HUBS.includes(slug[0]) ? slug[0] : "";
+  const sectionId = slug.length === 2 && !hubDept ? `${slug[0]}.${slug[1]}` : "";
   const section = sectionId ? findSection(sectionId) : null;
 
   // language & theme
@@ -86,7 +90,7 @@ export default function App({ slug }: { slug: string[] }) {
   }, [router]);
   useEffect(() => { reload(); }, [reload]);
   useEffect(() => { const st = navStack.current; if (st.length > 1 && st[st.length - 2] === route) st.pop(); else if (st[st.length - 1] !== route) st.push(route); }, [route]);
-  useEffect(() => { if (section) setOpenDepts((o) => ({ ...o, [section.dept]: true })); setRailOpen(false); }, [route]); // eslint-disable-line
+  useEffect(() => { const dk = section?.dept || hubDept; if (dk) setOpenDepts((o) => ({ ...o, [dk]: true })); setRailOpen(false); }, [route]); // eslint-disable-line
 
   const toast = useCallback((m: string, err?: boolean) => {
     const id = Date.now() + Math.random(); setToasts((x) => [...x, { id, m, err }]);
@@ -106,10 +110,15 @@ export default function App({ slug }: { slug: string[] }) {
   const isAdmin = me.role === "owner" || me.role === "admin";
   const dept = section ? DEPARTMENTS.find((d: any) => d.key === section.dept) : null;
   const special: Record<string, [string, string]> = { "admin/users": [t("admin", lang), t("users", lang)], "admin/roles": [t("admin", lang), t("roles", lang)], me: [t("workspace", lang), t("my_profile", lang)], learn: [t("workspace", lang), t("learn", lang)], reports: [t("workspace", lang), t("reports", lang)], templates: [t("workspace", lang), t("templates", lang)] };
-  const crumbGroup = section ? tx(dept.label, lang) : special[route]?.[0] || t("workspace", lang);
-  const crumbTitle = section ? tx(section.label, lang) : special[route]?.[1] || t("overview", lang);
+  const hubD = hubDept ? DEPARTMENTS.find((d: any) => d.key === hubDept) : null;
+  const crumbGroup = hubD ? tx(hubD.label, lang) : section ? tx(dept.label, lang) : special[route]?.[0] || t("workspace", lang);
+  const crumbTitle = hubD ? t("dept_overview", lang) : section ? tx(section.label, lang) : special[route]?.[1] || t("overview", lang);
   const curLang = LANGS.find((l) => l.code === lang)!;
   if (typeof document !== "undefined") document.title = `${crumbTitle} · AGRON Workspace`;
+  if (typeof window !== "undefined") { try { // remember recently visited pages for the footer
+    const href = "/" + route; const list = JSON.parse(localStorage.getItem("agronws.recent") || "[]").filter((x: any) => x.href !== href);
+    if (list[0]?.href !== href) localStorage.setItem("agronws.recent", JSON.stringify([{ href, title: crumbTitle, group: crumbGroup }, ...list].slice(0, 10)));
+  } catch {} }
   const goBack = () => { if (navStack.current.length > 1) router.back(); else router.push("/"); };
 
   let body: React.ReactNode;
@@ -124,12 +133,23 @@ export default function App({ slug }: { slug: string[] }) {
   else if (route.startsWith("admin/")) body = <div className="empty">{t("no_access", lang)}</div>;
   else if (route === "me") body = <MyProfile />;
   else if (route === "learn") body = <Learn />;
+  else if (hubD && depts.some((d: any) => d.key === hubDept)) {
+    const secs = SECTIONS.filter((x) => x.dept === hubDept && access.read.has(x.id));
+    body = <>
+      <nav className="dtabs" aria-label={tx(hubD.label, lang)} style={{ ["--dc" as any]: (DEPT_COLORS as any)[hubDept] }}>
+        <Link href={`/${hubDept}/overview`} className="on" aria-current="page"><Icon n="grid" />{t("dept_overview", lang)}</Link>
+        {secs.map((x) => <Link key={x.id} href={`/${x.dept}/${x.key}`}><Icon n={x.icon} />{tx(x.label, lang)}</Link>)}
+      </nav>
+      <DeptHub key={hubDept} dept={hubDept} />
+    </>;
+  }
   else if (route === "reports") body = <Reports />;
   else if (route === "templates") body = <Templates />;
   else if (section && access.read.has(section.id)) {
     const secs = SECTIONS.filter((x) => x.dept === section.dept && access.read.has(x.id));
     body = <>
       {secs.length > 1 && <nav className="dtabs" aria-label={tx(dept.label, lang)} style={{ ["--dc" as any]: section.color }}>
+        {HUBS.includes(section.dept) && <Link href={`/${section.dept}/overview`}><Icon n="grid" />{t("dept_overview", lang)}</Link>}
         {secs.map((x) => <Link key={x.id} href={`/${x.dept}/${x.key}`} className={x.id === section.id ? "on" : ""} aria-current={x.id === section.id ? "page" : undefined}><Icon n={x.icon} />{tx(x.label, lang)}</Link>)}
       </nav>}
       <SectionView key={section.id} section={section} />
@@ -157,7 +177,7 @@ export default function App({ slug }: { slug: string[] }) {
                   <button className="nav-item" aria-expanded={open} onClick={() => setOpenDepts((o) => ({ ...o, [d.key]: !open }))}>
                     <Icon n={d.icon} /><span>{tx(d.label, lang)}</span><Icon n="chev" className="chev" />
                   </button>
-                  {open && <div className="nav-sub">{d.secs.map((s: any) => (
+                  {open && <div className="nav-sub">{HUBS.includes(d.key) && <Link href={`/${d.key}/overview`} className={`nav-item ${hubDept === d.key ? "active" : ""}`}><Icon n="grid" /><span>{t("dept_overview", lang)}</span></Link>}{d.secs.map((s: any) => (
                     <Link key={s.id} href={`/${d.key}/${s.key}`} className={`nav-item ${sectionId === s.id ? "active" : ""}`}><Icon n={s.icon} /><span>{tx(s.label, lang)}</span></Link>
                   ))}</div>}
                 </div>
@@ -209,44 +229,8 @@ export default function App({ slug }: { slug: string[] }) {
                 <button className="btn ghost sm" style={{ marginInlineStart: "auto" }} onClick={() => { store.resetDemo(); reload(); }}>Reset</button></div>}
               {body}
             </main>
-            <footer className="foot">
-              <div className="foot-grid">
-                <div className="foot-brand">
-                  <img src="/logo-full.webp" alt="AGRON" width={640} height={187} />
-                  <p>{t("foot_about", lang)}</p>
-                  <div className="foot-me"><span className="avatar">{(me.full_name || me.email || "?").slice(0, 1).toUpperCase()}</span><span><b>{me.full_name || me.email}</b><br /><small>{tx((ROLES as any)[me.role]?.label, lang)}{me.us_person ? " · US person" : ""}</small></span></div>
-                  <div className="toolbar">
-                    <button className="btn ghost sm" onClick={() => setSearch({})}><Icon n="search" />{t("search_short", lang)}</button>
-                    <button className="btn ghost sm" onClick={() => setSearch({ voice: true })}><Icon n="mic" />{t("voice", lang)}</button>
-                    <button className="btn ghost sm" onClick={toggleTheme}><Icon n={dark ? "sun" : "moon"} />{dark ? t("theme_light", lang) : t("theme_dark", lang)}</button>
-                  </div>
-                </div>
-                <nav aria-label={t("workspace", lang)}><h3>{t("workspace", lang)}</h3>
-                  <Link href="/">{t("overview", lang)}</Link><Link href="/reports">{t("reports", lang)}</Link><Link href="/templates">{t("templates", lang)}</Link>
-                  {access.read.has("company.tasks") && <Link href="/company/tasks">{tx(findSection("company.tasks")?.label, lang)}</Link>}
-                  {access.read.has("mail.templates") && <button className="linkish" onClick={() => setMail({})}>{t("write_email", lang)}</button>}
-                  <button className="linkish" onClick={() => setAi({ title: crumbTitle, section: sectionId })}>{t("ask_ai", lang)}</button>
-                  <Link href="/learn">{t("learn", lang)}</Link></nav>
-                <nav aria-label={t("departments", lang)}><h3>{t("departments", lang)}</h3>
-                  {depts.map((d: any) => <Link key={d.key} href={`/${d.key}/${d.secs[0].key}`}>{tx(d.label, lang)}</Link>)}</nav>
-                <nav aria-label={t("management", lang)}><h3>{t("management", lang)}</h3>
-                  {access.read.has("legal.board") && <Link href="/legal/board">{tx(findSection("legal.board")?.label, lang)}</Link>}
-                  {access.read.has("legal.governance") && <Link href="/legal/governance">{tx(findSection("legal.governance")?.label, lang)}</Link>}
-                  {access.read.has("company.decisions") && <Link href="/company/decisions">{tx(findSection("company.decisions")?.label, lang)}</Link>}
-                  {isAdmin && <><Link href="/admin/users">{t("users", lang)}</Link><Link href="/admin/roles">{t("roles", lang)}</Link></>}
-                  <Link href="/me">{t("my_profile", lang)}</Link>
-                  {!DEMO && <button className="linkish" onClick={async () => { await store.signOut(); router.replace("/login"); }}>{t("sign_out", lang)}</button>}</nav>
-                <nav aria-label="AGRON Inc."><h3>AGRON Inc.</h3>
-                  <a href="https://www.agron1.com" target="_blank" rel="noopener">agron1.com</a>
-                  <a href="https://stardome.life" target="_blank" rel="noopener">stardome.life</a>
-                  <a href="mailto:info@agron1.com">info@agron1.com</a>
-                  <a href="mailto:info@agron1.com?subject=AGRON%20Workspace%20support">{t("support", lang)}</a></nav>
-              </div>
-              <div className="foot-bar">
-                <span>© 2026 AGRON Inc.</span><span>{t("foot_tm", lang)}</span><span>{t("foot_conf", lang)}</span>
-                <span className="foot-keys"><kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> {t("search_short", lang)} · <kbd>/</kbd></span><span className="mono">v{VERSION}</span>
-              </div>
-            </footer>
+            <Footer depts={depts} isAdmin={isAdmin} dark={dark} onTheme={toggleTheme} onLang={setLang} onSearch={(v) => setSearch({ voice: v })} hubs={HUBS} version={VERSION}
+              onSignOut={DEMO ? undefined : async () => { await store.signOut(); router.replace("/login"); }} />
           </div>
         </div>
       </div>

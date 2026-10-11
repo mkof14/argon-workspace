@@ -4,11 +4,13 @@ import Icon from "./Icon";
 import { useApp } from "./App";
 import { t, tx } from "@/lib/i18n";
 import { Activity, Comment, Rec, isExternal, store } from "@/lib/store";
-import { elementToPdf, fmt, printHtml, recordMarkdown, saveBlob, slug, tone } from "@/lib/format";
+import { fmt, printHtml, recordMarkdown, saveBlob, slug, tone } from "@/lib/format";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import Attachments from "./Attachments";
+import { markdownToPdf } from "@/lib/pdf";
 import { US_CHECKLIST, UAE_CHECKLIST, deskById } from "@/config/legal";
+import { OFFBOARD_CHECKLIST, ONBOARD_CHECKLIST } from "@/config/hr";
 
 export const GROUPS: Record<string, { en: string; ru: string }> = {
   A: { en: "A · Product identification", ru: "A · Идентификация продукта" }, B: { en: "B · U.S. export review", ru: "B · Экспорт из США" },
@@ -16,7 +18,7 @@ export const GROUPS: Record<string, { en: string; ru: string }> = {
   E: { en: "E · Procurement & logistics", ru: "E · Закупка и логистика" }, F: { en: "F · Risk assessment", ru: "F · Оценка риска" },
   G: { en: "G · Evidence", ru: "G · Подтверждение" }, H: { en: "Checklists", ru: "Чек-листы" },
 };
-export const CHECKLISTS: Record<string, string[]> = { us: US_CHECKLIST, uae: UAE_CHECKLIST };
+export const CHECKLISTS: Record<string, string[]> = { us: US_CHECKLIST, uae: UAE_CHECKLIST, onboard: ONBOARD_CHECKLIST, offboard: OFFBOARD_CHECKLIST };
 // Where an AI answer can be saved in a record, per section
 const APPLY: Record<string, string> = { "legal.matrix": "ai_review", "legal.requests": "answer", "legal.desks": "memo", "legal.issues": "action", "legal.programs": "elements" };
 
@@ -68,7 +70,7 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
     try { if (navigator.share) { await navigator.share({ title: `AGRON · ${title}`, url }); return; } } catch { return; }
     try { await navigator.clipboard.writeText(url); toast(t("share_text", lang)); } catch {}
   };
-  const pdf = async () => { if (!printRef.current) return; toast(t("pdf_wait", lang)); printRef.current.hidden = false; try { await elementToPdf(printRef.current, `AGRON_${slug(title)}.pdf`); } finally { printRef.current.hidden = true; } };
+  const pdf = async () => { toast(t("pdf_wait", lang)); try { await markdownToPdf(typeof data.document === "string" && data.document ? data.document : md(), { title, filename: `AGRON_${slug(title)}` }); } catch (e: any) { toast(e.message || "PDF error", true); } };
 
   const field = (f: any) => {
     const v = data[f.key] ?? ""; const set = (x: any) => setData((d) => ({ ...d, [f.key]: x })); const id = `f-${f.key}`;

@@ -10,6 +10,8 @@ import { DueItem, dueItems, isMine } from "@/lib/insights";
 const SEEN = "agronws.inbox.seen";
 type Mention = Awaited<ReturnType<typeof store.mentions>>[number];
 
+// One shared load for the bell and the footer (same tick → same request)
+const cache: { k: string; recs?: Promise<Rec[]>; men?: Promise<Mention[]> } = { k: "" };
 /** Loads everything the bell needs once per app reload. */
 export function useInbox() {
   const { me, access, tick } = useApp();
@@ -17,8 +19,10 @@ export function useInbox() {
   const [mentions, setMentions] = useState<Mention[]>([]);
   useEffect(() => {
     const secs = SECTIONS.filter((s) => access.read.has(s.id) && s.id !== "legal.matrix" && s.view !== "mail").map((s) => s.id);
-    store.listMany(secs).then(setRecs).catch(() => {});
-    store.mentions(me.full_name || "").then(setMentions).catch(() => {});
+    const k = `${tick}|${secs.length}|${me.id}`;
+    if (cache.k !== k) { cache.k = k; cache.recs = store.listMany(secs); cache.men = store.mentions(me.full_name || ""); }
+    cache.recs!.then(setRecs).catch(() => {});
+    cache.men!.then(setMentions).catch(() => {});
   }, [tick, access, me.full_name]);
   const due = useMemo(() => dueItems(recs, 14), [recs]);
   const mine = useMemo(() => due.filter((x) => isMine(x.r, me)), [due, me]);

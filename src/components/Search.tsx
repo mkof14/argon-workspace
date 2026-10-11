@@ -98,7 +98,7 @@ export default function Search({ onClose, initial = "", voice = false }: { onClo
   return (
     <>
       <div className="scrim" onClick={onClose} />
-      <div className="search" role="dialog" aria-modal="true" aria-label={t("search_all", lang)}>
+      <div className="gsearch" role="dialog" aria-modal="true" aria-label={t("search_all", lang)}>
         <div className="search-in">
           <Icon n="search" />
           <input ref={inp} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={key} placeholder={t("search_ph", lang)} aria-label={t("search_all", lang)} role="combobox" aria-expanded="true" aria-controls="search-list" aria-activedescendant={`sh-${sel}`} />

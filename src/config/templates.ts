@@ -937,6 +937,120 @@ ${SIG2("**AGRON Inc.**", "**{{name}}**")}${COUNSEL_NOTE}` },
 Manager: ______________ Date: ______  Employee: ______________ Date: ______`,
     save: { section: "hr.onboarding", title: "Onboarding · {{person}}", status: "To do", data: { person: "{{person}}", checklist: "Offer + CIIAA · Background check · US-person check · Accounts · Equipment · I-9 · Security setup · Export briefing · Policies · Product intro" } } },
 
+  { id: "job_description", dept: "hr", icon: "file",
+    name: { en: "Job description", ru: "Описание вакансии" },
+    desc: { en: "Role purpose, responsibilities, requirements, export-control note, compensation range, EEO statement.", ru: "Цель роли, обязанности, требования, экспортный контроль, вилка оплаты, EEO." },
+    fields: [F("position", "Position", "Должность", "text", { req: true }), F("department", "Department", "Отдел", "text", { req: true }), F("manager", "Reports to", "Руководитель", "text", { def: "Chief Executive Officer" }), F("location", "Location", "Место работы", "text", { def: "Remote (US), travel to the UAE as required" }), F("type", "Employment type", "Тип занятости", "select", { options: ["Full-time", "Part-time", "Contract"], def: "Full-time" }), F("purpose", "Role purpose (2–3 sentences)", "Цель роли (2–3 предложения)", "long", { req: true }), F("duties", "Responsibilities (one per line)", "Обязанности (по строке)", "long", { req: true }), F("must", "Requirements (one per line)", "Требования (по строке)", "long", { req: true }), F("nice", "Nice to have (one per line)", "Будет плюсом (по строке)", "long"), F("range", "Salary range, USD", "Вилка, USD", "text", { def: "[min] – [max] per year, plus bonus and equity" }), F("us_person", "US-person requirement", "Требование US person", "select", { options: ["Required: access to export-controlled technology", "Preferred", "Not required"], def: "Required: access to export-controlled technology" })],
+    body: `# {{position}}
+
+| | |
+|---|---|
+| **Company** | AGRON Inc. |
+| **Department** | {{department}} |
+| **Reports to** | {{manager}} |
+| **Location** | {{location}} |
+| **Employment type** | {{type}} |
+| **Compensation** | {{range}} |
+
+## About AGRON
+AGRON Inc. builds StarDome, containerized security and monitoring systems with the AGRON 1 operator-assistance software, for superyachts, marinas, ports, private islands, offshore and industrial sites and commercial vessels in the United States, the UAE and beyond.
+
+## Role purpose
+{{purpose}}
+
+## Responsibilities
+{{duties}}
+
+## Requirements
+{{must}}
+
+## Nice to have
+{{nice}}
+
+## Export control
+{{us_person}}. This position may involve access to technology and technical data subject to U.S. export control laws (EAR / ITAR). If you are not a U.S. person, the Company may need to obtain a government authorization before granting access, and employment may be conditioned on such authorization.
+
+## Equal opportunity
+AGRON Inc. is an equal opportunity employer. We consider all qualified applicants without regard to race, color, religion, sex, sexual orientation, gender identity, national origin, disability, veteran status or any other characteristic protected by law, consistent with applicable export control requirements.
+
+**To apply:** send your CV to info@agron1.com with "{{position}}" in the subject.`,
+    save: { section: "hr.hiring", title: "{{position}}", status: "Open", data: { department: "{{department}}", location: "{{location}}", notes: "{{purpose}}" } } },
+
+  { id: "interview_scorecard", dept: "hr", icon: "check",
+    name: { en: "Interview scorecard", ru: "Карта оценки кандидата" },
+    desc: { en: "Structured interview: competencies scored 1–5, evidence, red flags, recommendation.", ru: "Структурированное интервью: компетенции 1–5, факты, риски, рекомендация." },
+    fields: [F("candidate", "Candidate", "Кандидат", "text", { req: true }), F("position", "Position", "Вакансия", "text", { req: true }), DATE, F("interviewer", "Interviewer", "Интервьюер", "text", { req: true }), F("s_skill", "Role skills (1–5) and evidence", "Профессиональные навыки (1–5) и факты", "text"), F("s_problem", "Problem solving (1–5) and evidence", "Решение задач (1–5) и факты", "text"), F("s_comm", "Communication (1–5) and evidence", "Коммуникация (1–5) и факты", "text"), F("s_own", "Ownership and reliability (1–5)", "Ответственность (1–5)", "text"), F("s_fit", "Values and team fit (1–5)", "Ценности и команда (1–5)", "text"), F("strengths", "Strengths", "Сильные стороны", "long"), F("concerns", "Concerns / red flags", "Сомнения / риски", "long"), F("rec", "Recommendation", "Рекомендация", "select", { options: ["Strong hire", "Hire", "No hire", "Strong no hire"], def: "Hire" })],
+    body: `# Interview scorecard
+
+| | |
+|---|---|
+| **Candidate** | {{candidate}} |
+| **Position** | {{position}} |
+| **Date** | {{date}} |
+| **Interviewer** | {{interviewer}} |
+
+## Competencies (score 1–5, with specific evidence)
+| Competency | Score and evidence |
+|---|---|
+| Role skills | {{s_skill}} |
+| Problem solving | {{s_problem}} |
+| Communication | {{s_comm}} |
+| Ownership and reliability | {{s_own}} |
+| Values and team fit | {{s_fit}} |
+
+Scale: 1 = well below the bar, 3 = meets the bar, 5 = exceptional.
+
+## Strengths
+{{strengths}}
+
+## Concerns
+{{concerns}}
+
+## Recommendation: **{{rec}}**
+
+*Base the assessment only on job-related evidence. Do not record questions or notes about age, family status, religion, national origin, health or other protected characteristics. US-person status is checked by HR only, not in the interview.*` },
+
+  { id: "separation_letter", dept: "hr", icon: "logout", counsel: true,
+    name: { en: "Separation letter", ru: "Письмо об окончании работы" },
+    desc: { en: "Confirms last day, final pay, benefits, return of property and continuing obligations.", ru: "Подтверждает последний день, расчёт, льготы, возврат имущества и обязательства." },
+    fields: [F("name", "Employee", "Сотрудник", "text", { req: true }), F("address", "Employee address", "Адрес сотрудника"), F("reason", "Separation type", "Тип увольнения", "select", { options: ["resignation", "end of contract", "termination of employment", "mutual agreement"], def: "resignation" }), F("last_day", "Last working day", "Последний рабочий день", "date", { req: true }), F("final_pay", "Final paycheck date", "Дата окончательного расчёта", "date"), F("pto", "Accrued unused paid time off (days)", "Неиспользованный отпуск (дней)", "number"), F("benefits_end", "Health coverage ends", "Медстраховка до", "date"), F("property", "Property to return", "Что вернуть", "text", { def: "laptop, phone, access badges, documents and any Company data" }), SIGNER, SIGNER_T],
+    body: `**AGRON Inc.**
+{{today}}
+
+{{name}}
+{{address}}
+
+**Re: Confirmation of separation of employment**
+
+Dear {{name}},
+
+This letter confirms that your employment with AGRON Inc. (the "Company") will end by {{reason}}, with your last working day on **{{last_day}}**.
+
+**1. Final pay.** You will receive your final paycheck, including wages earned through your last working day, on or before {{final_pay}}, in accordance with applicable state law. Accrued unused paid time off: {{pto}} days, which will be paid out where required by law or Company policy.
+
+**2. Benefits.** Your Company health coverage ends on {{benefits_end}}. Information on continuation coverage under COBRA (if applicable) will be sent to you separately. Your rights under any retirement or equity plan are governed by the terms of those plans.
+
+**3. Return of Company property.** Please return all Company property, including {{property}}, no later than your last working day, and permanently delete any Company information from personal devices and accounts. Please confirm in writing when this is done.
+
+**4. Continuing obligations.** Your obligations under the Confidential Information and Invention Assignment Agreement you signed continue after your employment ends, including your duties to keep Company information confidential and not to export or disclose controlled technical data.
+
+**5. Access.** Your access to Company systems will end at the close of your last working day.
+
+**6. Expenses.** Please submit any outstanding business expense claims, with receipts, within five (5) business days after your last working day.
+
+**7. References and contact.** Questions about pay, benefits or documents can be sent to info@agron1.com.
+
+We thank you for your contributions to AGRON and wish you every success.
+
+Sincerely,
+
+______________________
+{{signer}}, {{signer_title}}
+AGRON Inc.
+
+Acknowledged: ______________________ {{name}}  Date: __________${COUNSEL_NOTE}`,
+    save: { section: "hr.offboarding", title: "Offboarding · {{name}}", status: "Planned", data: { person: "{{name}}", due: "{{last_day}}" } } },
+
   /* =========================== Security =========================== */
   { id: "incident_report", dept: "security", icon: "alert",
     name: { en: "Security incident report", ru: "Отчёт об инциденте безопасности" },

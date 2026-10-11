@@ -6,7 +6,8 @@ import { DEPARTMENTS, DEPT_COLORS } from "@/config/workspace.config.mjs";
 import { t, tx } from "@/lib/i18n";
 import type { Rec } from "@/lib/store";
 import { OPEN, dueItems, dayDiff } from "@/lib/insights";
-import { elementToPdf, printHtml, saveBlob } from "@/lib/format";
+import { printHtml, saveBlob } from "@/lib/format";
+import { markdownToPdf } from "@/lib/pdf";
 
 type Block = { h: string; note?: string; kv?: [string, string][]; head?: string[]; rows?: string[][]; empty?: string };
 type Report = { title: string; sub: string; blocks: Block[] };
@@ -148,7 +149,7 @@ export default function ReportBuilder({ recs }: { recs: Rec[] }) {
         </div>
         {rep && <div ref={ref} style={{ display: "grid", gap: 12, scrollMarginTop: 80 }}>
           <div className="toolbar">
-            <button className="btn primary sm" onClick={() => { const el = document.getElementById("rb-doc"); if (el) elementToPdf(el, `AGRON_${rep.title.replace(/\W+/g, "_")}.pdf`); }}><Icon n="pdf" />{t("rb_pdf", lang)}</button>
+            <button className="btn primary sm" onClick={() => markdownToPdf(md, { title: rep.title, filename: `AGRON_${rep.title.replace(/\W+/g, "_")}_${new Date().toISOString().slice(0, 10)}` })}><Icon n="pdf" />{t("rb_pdf", lang)}</button>
             <button className="btn sm" onClick={() => printHtml(rep.title, document.getElementById("rb-doc")?.innerHTML || "")}><Icon n="print" />{t("print", lang)}</button>
             <button className="btn sm" onClick={csv}><Icon n="download" />Excel / CSV</button>
             <button className="btn sm" onClick={async () => { await navigator.clipboard.writeText(md); toast(t("copied", lang)); }}><Icon n="copy" />{t("copy", lang)}</button>

@@ -89,7 +89,7 @@ export default function Dashboard({ depts }: { depts: any[] }) {
       </section>}
       <section><div className="eyebrow" style={{ marginBottom: 10 }}>{t("departments", lang)}</div>
         <div className="depts">{depts.map((d) => (
-          <Link key={d.key} href={`/${d.key}/${d.secs[0].key}`} className="dept-tile" style={{ ["--dc" as any]: (DEPT_COLORS as any)[d.key] }}>
+          <Link key={d.key} href={["technical", "operations", "finance", "sales", "marketing", "security", "hr", "company"].includes(d.key) ? `/${d.key}/overview` : `/${d.key}/${d.secs[0].key}`} className="dept-tile" style={{ ["--dc" as any]: (DEPT_COLORS as any)[d.key] }}>
             <span className="ic"><Icon n={d.icon} /></span><b>{tx(d.label, lang)}</b>
             <span>{d.secs.slice(0, 5).map((s: any) => tx(s.label, lang)).join(" · ")}{d.secs.length > 5 ? " …" : ""}</span>
             <span className="cnt">{d.secs.length} {t("sections_n", lang)}</span></Link>))}</div></section>
