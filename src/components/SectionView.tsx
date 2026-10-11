@@ -7,6 +7,7 @@ import dynamic from "next/dynamic";
 const MailCenter = dynamic(() => import("./Mail"), { ssr: false });
 const LegalHub = dynamic(() => import("./LegalHub"), { ssr: false });
 import { SectionTemplates } from "./Templates";
+import { CsvImport } from "./DataTools";
 import { DEPARTMENTS } from "@/config/workspace.config.mjs";
 import { HELP, l2 } from "@/config/learn";
 import Link from "next/link";
@@ -111,6 +112,7 @@ export default function SectionView({ section }: { section: any }) {
         <button className="btn ghost sm" onClick={() => openMail({ section: section.id })}><Icon n="mail" />{t("write_email", lang)}</button>
         <button className="btn ghost sm" onClick={() => openAi({ title: tx(section.label, lang), section: section.id, rows: filtered.slice(0, 60) })}><Icon n="spark" />{t("ask_ai", lang)}</button>
         <button className="btn ghost sm" onClick={() => saveBlob(`AGRON_${section.id}_${new Date().toISOString().slice(0, 10)}.csv`, toCsv(section, filtered, lang), "text/csv;charset=utf-8")}><Icon n="download" />{t("export_csv", lang)}</button>
+        {canWrite && section.view !== "desks" && <CsvImport section={section} onDone={load} />}
       </div>
 
       <section className="card">

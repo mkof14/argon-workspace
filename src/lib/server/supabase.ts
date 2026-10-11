@@ -7,8 +7,8 @@ const URL_ = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 /** Supabase client acting as the signed-in user (reads auth cookies). */
-export function userClient() {
-  const store = cookies();
+export async function userClient() {
+  const store = await cookies();
   return createServerClient(URL_, ANON, {
     cookieOptions: COOKIE_OPTIONS,
     cookies: {
@@ -21,7 +21,7 @@ export function userClient() {
 export const adminClient = () => createClient(URL_, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } });
 
 export async function currentProfile() {
-  const sb = userClient();
+  const sb = await userClient();
   const { data: u } = await sb.auth.getUser();
   if (!u?.user) return null;
   const { data } = await sb.from("profiles").select("*").eq("id", u.user.id).single();

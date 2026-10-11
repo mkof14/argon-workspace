@@ -46,7 +46,7 @@ export async function POST(req: Request) {
 
   // Log with the user's own session (row-level security applies)
   try {
-    await userClient().from("records").insert({
+    await (await userClient()).from("records").insert({
       section: "mail.outbox", title: subject, status, created_by: me.id,
       data: { to: to.join(", "), cc: cc.join(", "), template: String(b.template || ""), sender: me.full_name || me.email, related: String(b.related || ""), html, error: error || undefined },
     });

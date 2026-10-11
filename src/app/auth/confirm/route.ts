@@ -11,7 +11,7 @@ export async function GET(req: Request) {
   const next = url.searchParams.get("next") || (type === "recovery" ? "/auth/reset" : "/");
   const safeNext = next.startsWith("/") && !next.startsWith("//") ? next : "/";
   if (token_hash) {
-    const { error } = await userClient().auth.verifyOtp({ type, token_hash });
+    const { error } = await (await userClient()).auth.verifyOtp({ type, token_hash });
     if (!error) return NextResponse.redirect(new URL(safeNext, url.origin));
   }
   return NextResponse.redirect(new URL(`/login?error_description=${encodeURIComponent("This link has expired or was already used. Sign in with your password or request a new link.")}`, url.origin));

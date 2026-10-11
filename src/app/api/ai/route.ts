@@ -55,7 +55,7 @@ export async function POST(req: Request) {
   // 2) Verified company FAQ answers close to the question go into the prompt
   let faqText = "";
   try {
-    const { data: faq } = await userClient().rpc("faq_search", { q, lng: null, n: 3 });
+    const { data: faq } = await (await userClient()).rpc("faq_search", { q, lng: null, n: 3 });
     const good = (faq || []).filter((f: any) => f.sim >= 0.35);
     if (good.length) faqText = "Company FAQ (saved answers; prefer verified):\n" + good.map((f: any) => `Q: ${f.question}\nA: ${f.answer}${f.verified ? " [verified]" : ""}`).join("\n\n");
   } catch {}

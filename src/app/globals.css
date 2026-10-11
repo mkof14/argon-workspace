@@ -677,3 +677,14 @@ a.hub-row:hover{background:var(--surface-2)}
 .hub-card .card-h h2 svg{width:30px;height:30px;padding:6px;border-radius:9px;background:color-mix(in srgb,var(--dc) 14%,var(--surface));color:var(--dc);flex:none}
 .stageboard .card-h h2 svg{width:30px;height:30px;padding:6px;border-radius:9px;background:color-mix(in srgb,var(--dc) 14%,var(--surface));color:var(--dc)}
 @media (max-width:600px){.dhero{padding:20px}.dhero-ic{width:52px;height:52px}}
+@media (max-width:640px){
+  .tb-right{gap:6px}
+  .tb-right .mic-top{display:none}
+  .tb-right .askai span{display:none}
+  .tb-right .askai{padding:0 10px}
+  .topbar .crumb small{display:none}
+  .foot-keys{display:none}
+}
+.modal-wrap{position:fixed;inset:0;z-index:70;display:grid;place-items:center;padding:16px}
+.modal-wrap .modal{position:relative;z-index:71;width:min(620px,100%);max-height:85vh;overflow:auto}
+.modal-wrap .modal{left:auto;top:auto;transform:none;padding:0;display:block}

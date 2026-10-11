@@ -24,7 +24,7 @@ const DeptHub = dynamic(() => import("./DeptHub"), { ssr: false });
 const Search = dynamic(() => import("./Search"), { ssr: false });
 const Footer = dynamic(() => import("./Footer"), { ssr: false });
 const Bell = dynamic(() => import("./Inbox").then((m) => m.Bell), { ssr: false });
-export const VERSION = "0.9";
+export const VERSION = "1.0";
 
 type Ctx = {
   lang: Lang; me: Profile; access: Access; toast: (m: string, err?: boolean) => void;
@@ -209,9 +209,9 @@ export default function App({ slug }: { slug: string[] }) {
             <div className="crumb"><small>{crumbGroup}</small><h1>{crumbTitle}</h1></div>
             <div className="tb-right">
               <button className="searchbtn" onClick={() => setSearch({})} aria-label={t("search_all", lang)}><Icon n="search" /><span>{t("search_short", lang)}</span><kbd>⌘K</kbd></button>
-              <button className="iconbtn" onClick={() => setSearch({ voice: true })} title={t("voice", lang)} aria-label={t("voice", lang)}><Icon n="mic" /></button>
+              <button className="iconbtn mic-top" onClick={() => setSearch({ voice: true })} title={t("voice", lang)} aria-label={t("voice", lang)}><Icon n="mic" /></button>
               <Bell />
-              <button className="btn sm" onClick={() => setAi({ title: crumbTitle, section: sectionId })}><Icon n="spark" />{t("ask_ai", lang)}</button>
+              <button className="btn sm askai" onClick={() => setAi({ title: crumbTitle, section: sectionId })} aria-label={t("ask_ai", lang)}><Icon n="spark" /><span>{t("ask_ai", lang)}</span></button>
               <div className="dd">
                 <button className="dd-btn" aria-haspopup="menu" aria-expanded={langOpen} aria-label={t("language", lang)} onClick={() => setLangOpen(!langOpen)}>
                   <Icon n="globe" /><span>{curLang.short}</span><Icon n="down" />

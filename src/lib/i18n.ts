@@ -9,6 +9,20 @@ export type Tx = { en: string; ru: string; uk: string; ar: string };
 export const tx = (o: Partial<Tx> | undefined, lang: Lang) => (o ? o[lang] || o.en || "" : "");
 
 const S: Record<string, Tx> = {
+  csv_import: { en: "Import CSV", ru: "Импорт CSV", uk: "Імпорт CSV", ar: "استيراد CSV" },
+  csv_empty: { en: "The file has no rows", ru: "В файле нет строк", uk: "У файлі немає рядків", ar: "الملف فارغ" },
+  csv_need_title: { en: "Add a column named Title (or Name)", ru: "Нужен столбец Title (или Name / Название)", uk: "Потрібен стовпець Title (або Name)", ar: "أضف عمود Title" },
+  csv_rows: { en: "rows ready to import", ru: "строк готовы к импорту", uk: "рядків готові до імпорту", ar: "صفوف جاهزة" },
+  csv_matched: { en: "Columns matched", ru: "Столбцы распознаны", uk: "Стовпці розпізнано", ar: "الأعمدة المطابقة" },
+  csv_skipped: { en: "Ignored columns", ru: "Пропущенные столбцы", uk: "Пропущені стовпці", ar: "أعمدة متجاهلة" },
+  csv_go: { en: "Import {n} records", ru: "Импортировать {n} записей", uk: "Імпортувати {n} записів", ar: "استيراد {n} سجل" },
+  csv_done: { en: "Imported {n} records", ru: "Импортировано записей: {n}", uk: "Імпортовано записів: {n}", ar: "تم استيراد {n} سجل" },
+  csv_template: { en: "Download empty template", ru: "Скачать пустой шаблон", uk: "Завантажити порожній шаблон", ar: "تنزيل قالب فارغ" },
+  backup_t: { en: "Backup and export", ru: "Резервная копия и экспорт", uk: "Резервна копія та експорт", ar: "النسخ الاحتياطي والتصدير" },
+  backup_p: { en: "Download all workspace records and users. Keep a copy outside the system at least once a month: the current database plan has no automatic backups.", ru: "Скачайте все записи и пользователей. Храните копию вне системы хотя бы раз в месяц: на текущем тарифе базы нет автоматических резервных копий.", uk: "Завантажте всі записи та користувачів. Зберігайте копію щонайменше раз на місяць.", ar: "نزّل جميع السجلات والمستخدمين." },
+  backup_json: { en: "Full backup (JSON)", ru: "Полная копия (JSON)", uk: "Повна копія (JSON)", ar: "نسخة كاملة JSON" },
+  backup_csv: { en: "All records (Excel / CSV)", ru: "Все записи (Excel / CSV)", uk: "Усі записи (Excel / CSV)", ar: "كل السجلات CSV" },
+  export_done: { en: "Exported {n} records", ru: "Выгружено записей: {n}", uk: "Вивантажено записів: {n}", ar: "تم تصدير {n} سجل" },
   q_deal: { en: "New deal", ru: "Новая сделка", uk: "Нова угода", ar: "صفقة جديدة" },
   q_expense: { en: "New expense", ru: "Новый расход", uk: "Нова витрата", ar: "مصروف جديد" },
   q_leave: { en: "Request time off", ru: "Запросить отпуск", uk: "Запросити відпустку", ar: "طلب إجازة" },
