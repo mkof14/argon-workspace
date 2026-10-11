@@ -9,6 +9,7 @@ export type Tx = { en: string; ru: string; uk: string; ar: string };
 export const tx = (o: Partial<Tx> | undefined, lang: Lang) => (o ? o[lang] || o.en || "" : "");
 
 const S: Record<string, Tx> = {
+  main_site: { en: "Go to agron1.com", ru: "Перейти на agron1.com", uk: "Перейти на agron1.com", ar: "الانتقال إلى agron1.com" },
   sys_title: { en: "System", ru: "Система", uk: "Система", ar: "النظام" },
   sys_health: { en: "Service health", ru: "Состояние сервисов", uk: "Стан сервісів", ar: "حالة الخدمات" },
   sys_ok: { en: "All systems working", ru: "Всё работает", uk: "Усе працює", ar: "كل الأنظمة تعمل" },

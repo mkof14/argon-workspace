@@ -40,6 +40,13 @@ export default function Footer({ depts, isAdmin, dark, onTheme, onLang, onSearch
         <button className="btn ghost sm" onClick={() => openAi({ title: t("ask_ai", lang) })}><Icon n="spark" />{t("ask_ai", lang)}</button>
       </div>
       <div className="foot-grid">
+        <div className="foot-brand">
+          <a href="https://www.agron1.com" target="_blank" rel="noopener" className="foot-logo" aria-label={t("main_site", lang)}>
+            <img src="/logo-full.webp" alt="AGRON — Aerial-Ground Robotics Operations Network" width={640} height={187} loading="lazy" />
+          </a>
+          <p>{t("foot_about", lang)}</p>
+          <a href="https://www.agron1.com" target="_blank" rel="noopener" className="btn sm foot-site"><Icon n="globe" />{t("main_site", lang)}<Icon n="ext" /></a>
+        </div>
         <nav aria-label={t("my_work", lang)}><h3>{t("my_work", lang)}</h3>
           <Link href="/reports#attention" className="foot-stat"><span>{t("for_me", lang)}</span><b className={overdueMine ? "bad" : ""}>{inbox.mine.length}</b></Link>
           {["owner", "admin", "management"].includes(me.role) && <Link href="/reports#attention" className="foot-stat"><span>{t("overdue_company", lang)}</span><b className={inbox.company.length ? "bad" : ""}>{inbox.company.length}</b></Link>}
@@ -70,7 +77,7 @@ export default function Footer({ depts, isAdmin, dark, onTheme, onLang, onSearch
         <select className="input foot-sel" value={lang} onChange={(e) => onLang(e.target.value as Lang)} aria-label={t("language", lang)}>{LANGS.map((l) => <option key={l.code} value={l.code}>{l.name}</option>)}</select>
         <button className="btn ghost sm" onClick={onTheme}><Icon n={dark ? "sun" : "moon"} />{dark ? t("theme_light", lang) : t("theme_dark", lang)}</button>
         {onSignOut && <button className="btn ghost sm" onClick={onSignOut}><Icon n="logout" />{t("sign_out", lang)}</button>}
-        <span className="foot-right">© 2026 AGRON Inc. · {t("foot_conf", lang)} · <span className="mono">v{version}</span></span>
+        <span className="foot-right"><a href="https://www.agron1.com" target="_blank" rel="noopener">© 2026 AGRON Inc.</a> · {t("foot_conf", lang)} · <span className="mono">v{version}</span></span>
       </div>
     </footer>
   );
