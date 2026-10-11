@@ -15,7 +15,7 @@ export async function middleware(req: NextRequest) {
   });
   const { data } = await sb.auth.getUser();
   const p = req.nextUrl.pathname;
-  const open = p.startsWith("/login") || p.startsWith("/auth") || p.startsWith("/api") || p === "/manifest.webmanifest" || p === "/robots.txt" || p === "/icon.png" || p === "/apple-icon.png";
+  const open = p.startsWith("/login") || p === "/privacy" || p === "/terms" || p.startsWith("/auth") || p.startsWith("/api") || p === "/manifest.webmanifest" || p === "/robots.txt" || p === "/icon.png" || p === "/apple-icon.png";
   if (!data.user && !open) {
     return NextResponse.redirect(new URL("/login", req.url));
   }
