@@ -778,3 +778,19 @@ a.hub-row:hover{background:var(--surface-2)}
 .approve-btns{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .approve-btns .btn{justify-content:center;min-height:46px;font-size:16px}
 @media (max-width:480px){.approve-dl>div{grid-template-columns:1fr;gap:2px}}
+
+/* StarDome configurations */
+.sd-cfgs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.sd-cfg{display:grid;gap:2px;justify-items:start;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);cursor:pointer;text-align:start;font:inherit;color:var(--ink)}
+.sd-cfg b{font-size:15.5px}.sd-cfg .chip{justify-self:end;margin-top:-30px}
+.sd-cfg.on{border-color:var(--accent);background:var(--accent-soft)}
+.sd-hero-b{display:flex;gap:20px;align-items:center;justify-content:space-between}
+.sd-ready{display:grid;justify-items:end;gap:4px;flex:none}.sd-ready b{font-size:34px;line-height:1;color:var(--accent)}
+.sd-areas{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;padding:0 20px 20px}
+.sd-area{border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:grid;gap:8px;align-content:start}
+.sd-area-h{display:flex;align-items:center;gap:10px}.sd-area-h a{color:inherit;text-decoration:none}.sd-area-h a:hover{color:var(--accent)}
+.sd-list{list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:14px}
+.sd-list li{display:flex;gap:8px;align-items:center;justify-content:space-between;min-width:0}
+.sd-list a{color:var(--ink-2);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}.sd-list a:hover{color:var(--accent)}
+.sd-two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:900px){.sd-cfgs{grid-template-columns:repeat(2,minmax(0,1fr))}.sd-two{grid-template-columns:1fr}.sd-hero-b{flex-direction:column;align-items:flex-start}.sd-ready{justify-items:start}}

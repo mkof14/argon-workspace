@@ -28,7 +28,8 @@ const Footer = dynamic(() => import("./Footer"), { ssr: false });
 const Bell = dynamic(() => import("./Inbox").then((m) => m.Bell), { ssr: false });
 const Intake = dynamic(() => import("./Intake"), { ssr: false });
 const DocsAsk = dynamic(() => import("./DocsAsk"), { ssr: false });
-export const VERSION = "1.5";
+const StarDome = dynamic(() => import("./StarDome"), { ssr: false });
+export const VERSION = "1.6";
 
 type Ctx = {
   lang: Lang; me: Profile; access: Access; toast: (m: string, err?: boolean) => void;
@@ -117,7 +118,7 @@ export default function App({ slug }: { slug: string[] }) {
   const depts = DEPARTMENTS.map((d: any) => ({ ...d, secs: SECTIONS.filter((s) => s.dept === d.key && access.read.has(s.id)) })).filter((d: any) => d.secs.length);
   const isAdmin = me.role === "owner" || me.role === "admin";
   const dept = section ? DEPARTMENTS.find((d: any) => d.key === section.dept) : null;
-  const special: Record<string, [string, string]> = { "admin/users": [t("admin", lang), t("users", lang)], "admin/roles": [t("admin", lang), t("roles", lang)], "admin/system": [t("admin", lang), t("sys_title", lang)], me: [t("workspace", lang), t("my_profile", lang)], learn: [t("workspace", lang), t("learn", lang)], reports: [t("workspace", lang), t("reports", lang)], templates: [t("workspace", lang), t("templates", lang)], ask: [t("workspace", lang), t("ask_docs", lang)] };
+  const special: Record<string, [string, string]> = { stardome: [t("workspace", lang), t("sd_title", lang)], "admin/users": [t("admin", lang), t("users", lang)], "admin/roles": [t("admin", lang), t("roles", lang)], "admin/system": [t("admin", lang), t("sys_title", lang)], me: [t("workspace", lang), t("my_profile", lang)], learn: [t("workspace", lang), t("learn", lang)], reports: [t("workspace", lang), t("reports", lang)], templates: [t("workspace", lang), t("templates", lang)], ask: [t("workspace", lang), t("ask_docs", lang)] };
   const hubD = hubDept ? DEPARTMENTS.find((d: any) => d.key === hubDept) : null;
   const crumbGroup = hubD ? tx(hubD.label, lang) : section ? tx(dept.label, lang) : special[route]?.[0] || t("workspace", lang);
   const crumbTitle = hubD ? t("dept_overview", lang) : section ? tx(section.label, lang) : special[route]?.[1] || t("overview", lang);
@@ -143,6 +144,7 @@ export default function App({ slug }: { slug: string[] }) {
   else if (route === "me") body = <MyProfile />;
   else if (route === "learn") body = <Learn />;
   else if (route === "ask") body = <DocsAsk />;
+  else if (route === "stardome") body = <StarDome />;
   else if (hubD && depts.some((d: any) => d.key === hubDept)) {
     const secs = SECTIONS.filter((x) => x.dept === hubDept && access.read.has(x.id));
     body = <>
@@ -178,6 +180,7 @@ export default function App({ slug }: { slug: string[] }) {
             <div className="prod"><i />{t("workspace", lang)}</div></div>
           <nav>
             <Link href="/" className={`nav-item top ${!route ? "active" : ""}`} style={{ ["--dc" as any]: "#FF6A2B" }}><Icon n="stardome" /><span>{t("overview", lang)}</span></Link>
+            {!isExternal(me.role) && <Link href="/stardome" className={`nav-item top ${route === "stardome" ? "active" : ""}`} style={{ ["--dc" as any]: "#FF6A2B" }}><Icon n="container" /><span>{t("sd_title", lang)}</span></Link>}
             {!isExternal(me.role) && <Link href="/ask" className={`nav-item top ${route === "ask" ? "active" : ""}`} style={{ ["--dc" as any]: "#7C5CFF" }}><Icon n="spark" /><span>{t("ask_docs", lang)}</span></Link>}
             <Link href="/reports" className={`nav-item top ${route === "reports" ? "active" : ""}`} style={{ ["--dc" as any]: "#E5484D" }}><Icon n="pie" /><span>{t("reports", lang)}</span></Link>
             <Link href="/templates" className={`nav-item top ${route === "templates" ? "active" : ""}`} style={{ ["--dc" as any]: "#C9971C" }}><Icon n="file" /><span>{t("templates", lang)}</span></Link>

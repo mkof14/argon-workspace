@@ -30,7 +30,7 @@ export default function DocsAsk() {
   const box = useRef<HTMLTextAreaElement>(null);
 
   const status = () => api({ action: "status" }).then((r) => r.json()).then(setSt).catch(() => {});
-  useEffect(() => { if (!DEMO) status(); box.current?.focus(); }, []);
+  useEffect(() => { if (!DEMO) status(); box.current?.focus(); const pre = new URLSearchParams(location.search).get("q"); if (pre) ask(pre); }, []); // eslint-disable-line
   // Files added before this feature (or by others) are read automatically the first time someone opens the page
   useEffect(() => {
     if (!st?.pending || prep) return;
