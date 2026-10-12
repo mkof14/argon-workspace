@@ -23,7 +23,7 @@ export const KIND: Record<string, { icon: string; c: string }> = {
 const days = (d: string) => Math.round((new Date(d).getTime() - new Date(new Date().toISOString().slice(0, 10)).getTime()) / 86400000);
 
 export default function SectionView({ section }: { section: any }) {
-  const { lang, access, toast, openAi, openMail, tick } = useApp();
+  const { lang, access, toast, openAi, openMail, tick, openIntake } = useApp();
   const [rows, setRows] = useState<Rec[] | null>(null);
   const [q, setQ] = useState(() => (typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("q") || "" : ""));
   const [st, setSt] = useState(() => (typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("st") || "" : ""));
@@ -124,7 +124,7 @@ export default function SectionView({ section }: { section: any }) {
         </div>
 
         {rows === null ? <div className="empty">…</div> : !rows.length ? (
-          <div className="empty"><span className="ic" style={{ display: "inline-grid", placeItems: "center", width: 64, height: 64, borderRadius: 18, background: "color-mix(in srgb,var(--dc) 15%,transparent)", color: "var(--dc)", marginBottom: 10 }}><Icon n={section.icon} /></span><b>{t("empty", lang)}</b>{canWrite ? t("empty_p", lang) : ""}</div>
+          <div className="empty"><span className="ic" style={{ display: "inline-grid", placeItems: "center", width: 64, height: 64, borderRadius: 18, background: "color-mix(in srgb,var(--dc) 15%,transparent)", color: "var(--dc)", marginBottom: 10 }}><Icon n={section.icon} /></span><b>{t("empty", lang)}</b>{canWrite ? t("empty_p", lang) : ""}{canWrite && <button className="btn sm" style={{ marginTop: 12 }} onClick={() => openIntake()}><Icon n="upload" />{t("intake_empty", lang)}</button>}</div>
         ) : view === "gallery" ? (
           <div className="gallery">{filtered.map((r) => { const k = KIND[r.data?.kind] || KIND.Document; return (
             <button key={r.id} className="gcard" onClick={() => setOpen(r)}>

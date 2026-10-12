@@ -10,7 +10,7 @@ import { GLOSSARY, GUIDES, HELP, l2 } from "@/config/learn";
 import { t, tx } from "@/lib/i18n";
 import { Faq, isExternal, store } from "@/lib/store";
 
-const lines = (s: string) => { const [first, ...rest] = s.split("\n"); return { first, bullets: rest.map((x) => x.replace(/^-\s*/, "")).filter(Boolean) }; };
+const lines = (s: string) => { const [first, ...rest] = s.split("\n"); return { first, bullets: rest.map((x) => x.replace(/^(-|\d+\.)\s*/, "")).filter(Boolean) }; };
 
 export default function Learn() {
   const { lang, me, access, toast, openAi, tick } = useApp();
@@ -77,7 +77,7 @@ export default function Learn() {
           {depts.map((d: any) => <button key={d.key} className={gd === d.key ? "on" : ""} style={{ ["--dc" as any]: (DEPT_COLORS as any)[d.key] }} onClick={() => setGd(d.key)}><Icon n={d.icon} />{tx(d.label, lang)}</button>)}
         </div>
         {(gd === "basics" || ql) && <div className="guides">{GUIDES.filter((g) => hit(l2(g.title, lang), l2(g.body, lang))).map((g) => (
-          <details key={g.id} className="guide-row" style={{ ["--dc" as any]: "#14B8A6" }} open={!!ql}>
+          <details key={g.id} className="guide-row" style={{ ["--dc" as any]: "#14B8A6" }} open={!!ql || g.id === "start" || g.id === "upload"}>
             <summary><span className="flag"><Icon n={g.icon} /></span><span className="t"><b>{l2(g.title, lang)}</b></span><Icon n="down" className="lockico" /></summary>
             <div className="body"><ol>{lines("\n" + l2(g.body, lang)).bullets.map((x, i) => <li key={i}>{x}</li>)}</ol></div>
           </details>))}</div>}

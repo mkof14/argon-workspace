@@ -26,12 +26,14 @@ const DeptHub = dynamic(() => import("./DeptHub"), { ssr: false });
 const Search = dynamic(() => import("./Search"), { ssr: false });
 const Footer = dynamic(() => import("./Footer"), { ssr: false });
 const Bell = dynamic(() => import("./Inbox").then((m) => m.Bell), { ssr: false });
-export const VERSION = "1.1";
+const Intake = dynamic(() => import("./Intake"), { ssr: false });
+export const VERSION = "1.2";
 
 type Ctx = {
   lang: Lang; me: Profile; access: Access; toast: (m: string, err?: boolean) => void;
   openAi: (c: AiContext) => void; reload: () => void; tick: number;
   openMail: (m: MailInit) => void; people: Profile[]; rules: Rule[] | null; setRules: (r: Rule[]) => void;
+  openIntake: (files?: File[]) => void;
 };
 const AppCtx = createContext<Ctx>(null as any);
 export const useApp = () => useContext(AppCtx);
@@ -56,6 +58,8 @@ export default function App({ slug }: { slug: string[] }) {
   const [rules, setRules] = useState<Rule[] | null>(null);
   const navStack = useRef<string[]>([]);
   const [search, setSearch] = useState<null | { voice?: boolean }>(null);
+  const [intake, setIntake] = useState<null | { files?: File[] }>(null);
+  const [dragFiles, setDragFiles] = useState(false);
   useEffect(() => { // Ctrl/⌘+K or "/" opens search anywhere
     const k = (e: KeyboardEvent) => {
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target as HTMLElement)?.tagName) || (e.target as HTMLElement)?.isContentEditable;
@@ -162,8 +166,11 @@ export default function App({ slug }: { slug: string[] }) {
   else body = <div className="card empty">{t("no_access", lang)}</div>;
 
   return (
-    <AppCtx.Provider value={{ lang, me, access, toast, openAi: setAi, reload, tick, openMail: setMail, people, rules, setRules }}>
-      <div className="app" onClick={(e) => { if (langOpen && !(e.target as HTMLElement).closest(".dd")) setLangOpen(false); }}>
+    <AppCtx.Provider value={{ lang, me, access, toast, openAi: setAi, reload, tick, openMail: setMail, people, rules, setRules, openIntake: (files?: File[]) => setIntake({ files }) }}>
+      <div className={`app ${dragFiles ? "drag-files" : ""}`} onClick={(e) => { if (langOpen && !(e.target as HTMLElement).closest(".dd")) setLangOpen(false); }}
+        onDragOver={(e) => { if (!isExternal(me.role) && e.dataTransfer.types.includes("Files")) { e.preventDefault(); if (!dragFiles) setDragFiles(true); } }}
+        onDragLeave={(e) => { if (!e.relatedTarget) setDragFiles(false); }}
+        onDrop={(e) => { setDragFiles(false); if (e.defaultPrevented || isExternal(me.role) || !e.dataTransfer.files.length) return; e.preventDefault(); setIntake({ files: [...e.dataTransfer.files] }); }}>
         <aside className={`rail ${railOpen ? "open" : ""}`} aria-label={t("menu", lang)}>
           <div className="rail-brand"><img src="/logo-full.webp" alt="AGRON — Aerial-Ground Robotics Operations Network" width={640} height={187} />
             <div className="prod"><i />{t("workspace", lang)}</div></div>
@@ -215,6 +222,7 @@ export default function App({ slug }: { slug: string[] }) {
             <div className="tb-right">
               <button className="searchbtn" onClick={() => setSearch({})} aria-label={t("search_all", lang)}><Icon n="search" /><span>{t("search_short", lang)}</span><kbd>⌘K</kbd></button>
               <button className="iconbtn mic-top" onClick={() => setSearch({ voice: true })} title={t("voice", lang)} aria-label={t("voice", lang)}><Icon n="mic" /></button>
+              {!isExternal(me.role) && <button className="btn sm intake-btn" onClick={() => setIntake({})} title={t("intake_t", lang)} aria-label={t("intake_t", lang)}><Icon n="upload" /><span>{t("intake_btn", lang)}</span></button>}
               <Bell />
               <button className="btn sm askai" onClick={() => setAi({ title: crumbTitle, section: sectionId })} aria-label={t("ask_ai", lang)}><Icon n="spark" /><span>{t("ask_ai", lang)}</span></button>
               <div className="dd">
@@ -225,7 +233,7 @@ export default function App({ slug }: { slug: string[] }) {
                   <button key={l.code} role="menuitemradio" aria-checked={l.code === lang} className={l.code === lang ? "on" : ""} lang={l.code} onClick={() => setLang(l.code)}>
                     <span className="code">{l.short}</span>{l.name}</button>))}</div>}
               </div>
-              <button className="iconbtn" onClick={toggleTheme} title={dark ? t("theme_light", lang) : t("theme_dark", lang)} aria-label={dark ? t("theme_light", lang) : t("theme_dark", lang)}><Icon n={dark ? "sun" : "moon"} /></button>
+              <button className="iconbtn theme-top" onClick={toggleTheme} title={dark ? t("theme_light", lang) : t("theme_dark", lang)} aria-label={dark ? t("theme_light", lang) : t("theme_dark", lang)}><Icon n={dark ? "sun" : "moon"} /></button>
             </div>
           </header>
           <div className="content">
@@ -242,6 +250,7 @@ export default function App({ slug }: { slug: string[] }) {
       {ai && <AiPanel ctx={ai} onClose={() => setAi(null)} />}
       {mail && <ComposerModal init={mail} onClose={() => setMail(null)} />}
       {search && <Search voice={search.voice} onClose={() => setSearch(null)} />}
+      {intake && <Intake initial={intake.files} onClose={() => setIntake(null)} />}
       <div className="toasts" aria-live="polite">{toasts.map((x) => <div key={x.id} className={`toast ${x.err ? "err" : ""}`}>{x.m}</div>)}</div>
     </AppCtx.Provider>
   );

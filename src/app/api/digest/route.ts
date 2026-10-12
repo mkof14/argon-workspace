@@ -21,6 +21,7 @@ const when = (d: number) => (d < 0 ? `${-d} day${d === -1 ? "" : "s"} overdue` :
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET;
   if (!secret || req.headers.get("authorization") !== `Bearer ${secret}`) return new Response("Not allowed", { status: 401 });
+  await cleanIntake().catch(() => {});
   return run(null);
 }
 export async function POST() {
@@ -73,4 +74,15 @@ async function run(only: string | null) {
     } catch (e: any) { skipped.push(`${p.email}: ${e?.message || "send failed"}`); }
   }
   return Response.json({ ok: true, sent, skipped: skipped.length });
+}
+
+/** Smart upload leaves files in `_intake/<user>/` until they are saved or removed; drop anything older than a day. */
+async function cleanIntake() {
+  const st = adminClient().storage.from("files"); const cutoff = Date.now() - 864e5;
+  const { data: users } = await st.list("_intake", { limit: 1000 });
+  for (const u of users || []) {
+    const { data: files } = await st.list(`_intake/${u.name}`, { limit: 1000 });
+    const old = (files || []).filter((f: any) => f.id && Date.parse(f.created_at || "") < cutoff).map((f: any) => `_intake/${u.name}/${f.name}`);
+    if (old.length) await st.remove(old);
+  }
 }

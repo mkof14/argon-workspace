@@ -14,7 +14,7 @@ type Recent = { href: string; title: string; group: string };
 export default function Footer({ depts, isAdmin, dark, onTheme, onLang, onSearch, onSignOut, version, hubs }: {
   depts: any[]; isAdmin: boolean; dark: boolean; onTheme: () => void; onLang: (l: Lang) => void; onSearch: (voice?: boolean) => void; onSignOut?: () => void; version: string; hubs: string[];
 }) {
-  const { lang, me, access, openMail, openAi } = useApp();
+  const { lang, me, access, openMail, openAi, openIntake } = useApp();
   const inbox = useInbox();
   const [recent, setRecent] = useState<Recent[]>([]);
   useEffect(() => { try { setRecent(JSON.parse(localStorage.getItem(RECENT) || "[]")); } catch {} }, [inbox.recs]);
@@ -33,6 +33,7 @@ export default function Footer({ depts, isAdmin, dark, onTheme, onLang, onSearch
     <footer className="foot">
       <div className="foot-quick">
         <b>{t("quick_actions", lang)}</b>
+        {!["partner", "vendor", "investor"].includes(me.role) && <button className="btn primary sm" onClick={() => openIntake()}><Icon n="upload" />{t("intake_t", lang)}</button>}
         {quick.map(([s, i, l]) => { const sec = findSection(s); return <Link key={s} href={`/${sec.dept}/${sec.key}?new=1`} className="btn ghost sm"><Icon n={i} />{l}</Link>; })}
         <Link href="/reports" className="btn ghost sm"><Icon n="pie" />{t("get_report", lang)}</Link>
         <Link href="/templates" className="btn ghost sm"><Icon n="file" />{t("templates", lang)}</Link>
