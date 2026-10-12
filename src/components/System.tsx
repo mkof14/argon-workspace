@@ -16,6 +16,13 @@ export default function System() {
   const [errs, setErrs] = useState<Err[]>([]);
   const [all, setAll] = useState(false);
   const [open, setOpen] = useState<number | null>(null);
+  const [mt, setMt] = useState<{ ok: boolean; code: string; message: string } | null>(null);
+  const [mtBusy, setMtBusy] = useState(false);
+  const testMail = async () => {
+    setMtBusy(true); setMt(null);
+    try { const r = await fetch("/api/mail/test", { method: "POST" }); setMt(r.ok ? await r.json() : { ok: false, code: "http", message: await r.text() }); }
+    catch (e: any) { setMt({ ok: false, code: "net", message: e.message || "Error" }); } finally { setMtBusy(false); }
+  };
 
   const loadHealth = () => fetch("/api/health", { cache: "no-store" }).then((r) => r.json()).then(setH).catch(() => setH({ ok: false, checks: { app: false }, ms: 0, at: new Date().toISOString() }));
   const loadErrs = async () => {
@@ -48,6 +55,11 @@ export default function System() {
               <span className="sys-dot" aria-hidden="true" /><b>{names[k] || k}</b>
               <span className="faint">{v ? t("sys_on", lang) : hints[k] || t("sys_off", lang)}</span>
             </div>)) : <div className="faint">…</div>}
+        </div>
+        <div className="card-b" style={{ paddingTop: 0, display: "grid", gap: 10 }}>
+          <div className="toolbar"><button className="btn sm" disabled={mtBusy} onClick={testMail}><Icon n="mail" />{mtBusy ? "…" : t("sys_mail_test", lang)}</button>
+            <span className="faint" style={{ fontSize: 13.5 }}>{t("sys_mail_test_p", lang)}</span></div>
+          {mt && <div className={`sys-msg ${mt.ok ? "ok" : "bad"}`} role="status"><b>{mt.ok ? t("sys_on", lang) : t("sys_mail_fail", lang)}</b> {mt.message}</div>}
         </div>
         <p className="faint" style={{ margin: "0 20px 16px", fontSize: 13.5 }}>{t("sys_uptime_note", lang)}</p>
       </section>

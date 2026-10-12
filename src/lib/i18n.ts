@@ -9,6 +9,9 @@ export type Tx = { en: string; ru: string; uk: string; ar: string };
 export const tx = (o: Partial<Tx> | undefined, lang: Lang) => (o ? o[lang] || o.en || "" : "");
 
 const S: Record<string, Tx> = {
+  sys_mail_test: { en: "Check email sending", ru: "Проверить отправку почты", uk: "Перевірити надсилання пошти", ar: "فحص إرسال البريد" },
+  sys_mail_test_p: { en: "Logs in to Gmail with the password from Vercel and sends a test email to you.", ru: "Входит в Gmail с паролем из Vercel и отправляет вам тестовое письмо.", uk: "Входить у Gmail з паролем із Vercel і надсилає вам тестовий лист.", ar: "يسجّل الدخول إلى Gmail بكلمة المرور من Vercel ويرسل إليك رسالة اختبار." },
+  sys_mail_fail: { en: "Not working:", ru: "Не работает:", uk: "Не працює:", ar: "لا يعمل:" },
   main_site: { en: "Go to agron1.com", ru: "Перейти на agron1.com", uk: "Перейти на agron1.com", ar: "الانتقال إلى agron1.com" },
   sys_title: { en: "System", ru: "Система", uk: "Система", ar: "النظام" },
   sys_health: { en: "Service health", ru: "Состояние сервисов", uk: "Стан сервісів", ar: "حالة الخدمات" },
