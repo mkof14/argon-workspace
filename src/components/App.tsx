@@ -28,7 +28,7 @@ const Footer = dynamic(() => import("./Footer"), { ssr: false });
 const Bell = dynamic(() => import("./Inbox").then((m) => m.Bell), { ssr: false });
 const Intake = dynamic(() => import("./Intake"), { ssr: false });
 const DocsAsk = dynamic(() => import("./DocsAsk"), { ssr: false });
-export const VERSION = "1.3";
+export const VERSION = "1.4";
 
 type Ctx = {
   lang: Lang; me: Profile; access: Access; toast: (m: string, err?: boolean) => void;

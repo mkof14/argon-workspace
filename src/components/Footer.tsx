@@ -54,6 +54,7 @@ export default function Footer({ depts, isAdmin, dark, onTheme, onLang, onSearch
           <Link href="/company/tasks" className="foot-stat"><span>{t("mentions", lang)}</span><b>{inbox.mentions.length}</b></Link>
           <button className="linkish" onClick={() => onSearch()}><Icon n="search" /> {t("search_short", lang)} <kbd>⌘K</kbd></button>
           <button className="linkish" onClick={() => onSearch(true)}><Icon n="mic" /> {t("voice", lang)}</button>
+          <Link href="/me" className="linkish"><Icon n="calendar" /> {t("cal_t", lang)}</Link>
         </nav>
         <nav aria-label={t("recent_pages", lang)}><h3>{t("recent_pages", lang)}</h3>
           {recent.length ? recent.slice(0, 7).map((r) => <Link key={r.href} href={r.href} title={r.group}>{r.title}<small>{r.group}</small></Link>) : <span className="faint">{t("recent_empty", lang)}</span>}
