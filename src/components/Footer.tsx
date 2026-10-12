@@ -4,6 +4,7 @@ import Link from "next/link";
 import Icon from "./Icon";
 import { useApp, findSection } from "./App";
 import { useInbox } from "./Inbox";
+import InstallApp from "./InstallApp";
 import { ROLES } from "@/config/workspace.config.mjs";
 import { LANGS, Lang, t, tx } from "@/lib/i18n";
 
@@ -54,6 +55,7 @@ export default function Footer({ depts, isAdmin, dark, onTheme, onLang, onSearch
           <Link href="/company/tasks" className="foot-stat"><span>{t("mentions", lang)}</span><b>{inbox.mentions.length}</b></Link>
           <button className="linkish" onClick={() => onSearch()}><Icon n="search" /> {t("search_short", lang)} <kbd>⌘K</kbd></button>
           <button className="linkish" onClick={() => onSearch(true)}><Icon n="mic" /> {t("voice", lang)}</button>
+          <InstallApp compact />
           <Link href="/me" className="linkish"><Icon n="calendar" /> {t("cal_t", lang)}</Link>
         </nav>
         <nav aria-label={t("recent_pages", lang)}><h3>{t("recent_pages", lang)}</h3>

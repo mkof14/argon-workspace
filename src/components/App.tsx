@@ -29,7 +29,7 @@ const Bell = dynamic(() => import("./Inbox").then((m) => m.Bell), { ssr: false }
 const Intake = dynamic(() => import("./Intake"), { ssr: false });
 const DocsAsk = dynamic(() => import("./DocsAsk"), { ssr: false });
 const StarDome = dynamic(() => import("./StarDome"), { ssr: false });
-export const VERSION = "1.6";
+export const VERSION = "1.7";
 
 type Ctx = {
   lang: Lang; me: Profile; access: Access; toast: (m: string, err?: boolean) => void;
@@ -97,7 +97,23 @@ export default function App({ slug }: { slug: string[] }) {
     if (p && ["owner", "admin", "management", "legal"].includes(p.role)) store.faqList().catch(() => {}); // loads the starter FAQ once
   }, [router]);
   useEffect(() => { reload(); }, [reload]);
-  useEffect(() => { installErrorReporting(); }, []);
+  useEffect(() => { installErrorReporting(); if ("serviceWorker" in navigator && !DEMO) navigator.serviceWorker.register("/sw.js").catch(() => {}); }, []);
+  // Opened from the phone's share sheet (files kept by the service worker) or the Upload shortcut
+  useEffect(() => {
+    if (!me || me.role === "pending" || isExternal(me.role)) return;
+    const q = new URLSearchParams(location.search);
+    if (q.get("upload") === "1") { setIntake({}); history.replaceState(null, "", location.pathname); }
+    if (q.get("share") === "1") {
+      history.replaceState(null, "", location.pathname);
+      (async () => {
+        try {
+          const c = await caches.open("agron-share"); const keys = await c.keys(); const files: File[] = [];
+          for (const k of keys) { const r = await c.match(k); if (!r) continue; files.push(new File([await r.blob()], decodeURIComponent(r.headers.get("X-Name") || "file"), { type: r.headers.get("Content-Type") || "" })); await c.delete(k); }
+          setIntake({ files });
+        } catch { setIntake({}); }
+      })();
+    }
+  }, [me?.id]); // eslint-disable-line
   useEffect(() => { const st = navStack.current; if (st.length > 1 && st[st.length - 2] === route) st.pop(); else if (st[st.length - 1] !== route) st.push(route); }, [route]);
   useEffect(() => { const dk = section?.dept || hubDept; if (dk) setOpenDepts((o) => ({ ...o, [dk]: true })); setRailOpen(false); }, [route]); // eslint-disable-line
 

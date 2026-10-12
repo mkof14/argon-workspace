@@ -11,9 +11,11 @@ export const metadata: Metadata = {
   openGraph: { type: "website", siteName: "AGRON Workspace", title: "AGRON Workspace", description: "AGRON Inc. company workspace. Sign in with your work email.", images: [{ url: "/logo-full.webp", width: 640, height: 187, alt: "AGRON" }] },
   twitter: { card: "summary", title: "AGRON Workspace", description: "AGRON Inc. company workspace." },
   formatDetection: { telephone: false, email: false, address: false },
+  appleWebApp: { capable: true, title: "AGRON", statusBarStyle: "default" },
+  other: { "mobile-web-app-capable": "yes" },
 };
 export const viewport: Viewport = {
-  width: "device-width", initialScale: 1,
+  width: "device-width", initialScale: 1, viewportFit: "cover",
   themeColor: [{ media: "(prefers-color-scheme: light)", color: "#ECEFF3" }, { media: "(prefers-color-scheme: dark)", color: "#0C1015" }],
 };
 

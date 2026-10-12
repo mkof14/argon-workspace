@@ -102,6 +102,8 @@ export default function Intake({ onClose, initial }: { onClose: () => void; init
             <Icon n="upload" /><b>{t("intake_drop", lang)}</b><span className="faint">{t("intake_types", lang)}</span>
             <input ref={inp} type="file" multiple hidden onChange={(e) => { if (e.target.files) add(e.target.files); e.target.value = ""; }} />
           </div>
+          <label className="btn intake-cam"><Icon n="image" />{t("intake_photo", lang)}
+            <input type="file" accept="image/*" capture="environment" hidden onChange={(e) => { if (e.target.files) add(e.target.files); e.target.value = ""; }} /></label>
 
           {items.map((it) => { const sec = it.section ? findSection(it.section) : null; return (
             <section key={it.id} className={`intake-card s-${it.step}`}>

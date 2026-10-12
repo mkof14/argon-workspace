@@ -4,6 +4,7 @@ import Icon from "./Icon";
 import { useApp } from "./App";
 import PasswordInput from "./PasswordInput";
 import CalendarLink from "./CalendarLink";
+import InstallApp from "./InstallApp";
 import { ROLES, ROLE_COLORS } from "@/config/workspace.config.mjs";
 import { t, tx } from "@/lib/i18n";
 import { DEMO, sb, store } from "@/lib/store";
@@ -50,6 +51,7 @@ export default function MyProfile() {
             <div><button className="btn primary" type="submit">{t("save_pw", lang)}</button></div>
           </form></div>
       </section>
+      <InstallApp />
       {!["partner", "vendor", "investor"].includes(me.role) && <CalendarLink />}
     </div>
   );
