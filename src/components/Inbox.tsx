@@ -6,23 +6,28 @@ import { useApp, findSection, SECTIONS } from "./App";
 import { t, tx } from "@/lib/i18n";
 import { Rec, store } from "@/lib/store";
 import { DueItem, dueItems, isMine } from "@/lib/insights";
+import { DEMO, sb } from "@/lib/sb";
 
 const SEEN = "agronws.inbox.seen";
 type Mention = Awaited<ReturnType<typeof store.mentions>>[number];
 
 // One shared load for the bell and the footer (same tick → same request)
-const cache: { k: string; recs?: Promise<Rec[]>; men?: Promise<Mention[]> } = { k: "" };
+type Appr = { id: string; record_id: string; section: string; created_at: string; title?: string };
+const cache: { k: string; recs?: Promise<Rec[]>; men?: Promise<Mention[]>; appr?: Promise<Appr[]> } = { k: "" };
 /** Loads everything the bell needs once per app reload. */
 export function useInbox() {
   const { me, access, tick } = useApp();
   const [recs, setRecs] = useState<Rec[]>([]);
   const [mentions, setMentions] = useState<Mention[]>([]);
+  const [approvals, setApprovals] = useState<Appr[]>([]);
   useEffect(() => {
     const secs = SECTIONS.filter((s) => access.read.has(s.id) && s.id !== "legal.matrix" && s.view !== "mail").map((s) => s.id);
     const k = `${tick}|${secs.length}|${me.id}`;
-    if (cache.k !== k) { cache.k = k; cache.recs = store.listMany(secs); cache.men = store.mentions(me.full_name || ""); }
+    if (cache.k !== k) { cache.k = k; cache.recs = store.listMany(secs); cache.men = store.mentions(me.full_name || "");
+      cache.appr = DEMO ? Promise.resolve([]) : (async () => { const { data } = await sb().from("approvals").select("id,record_id,section,created_at").eq("approver_id", me.id).eq("status", "pending").order("created_at"); const ids = (data || []).map((x: any) => x.record_id); if (!ids.length) return []; const { data: rs } = await sb().from("records").select("id,title").in("id", ids); return (data || []).map((x: any) => ({ ...x, title: rs?.find((r: any) => r.id === x.record_id)?.title })); })(); }
     cache.recs!.then(setRecs).catch(() => {});
     cache.men!.then(setMentions).catch(() => {});
+    cache.appr!.then(setApprovals).catch(() => {});
   }, [tick, access, me.full_name]);
   const due = useMemo(() => dueItems(recs, 14), [recs]);
   const mine = useMemo(() => due.filter((x) => isMine(x.r, me)), [due, me]);
@@ -30,8 +35,8 @@ export function useInbox() {
   const company = lead ? due.filter((x) => x.d < 0 && !isMine(x.r, me)) : [];
   let seen = ""; try { seen = localStorage.getItem(SEEN) || ""; } catch {}
   const newMentions = mentions.filter((m) => m.created_at > seen);
-  const count = mine.filter((x) => x.d <= 1).length + newMentions.length + Math.min(company.length, 9);
-  return { recs, due, mine, company, mentions, newMentions, count };
+  const count = approvals.length + mine.filter((x) => x.d <= 1).length + newMentions.length + Math.min(company.length, 9);
+  return { recs, due, mine, company, mentions, newMentions, approvals, count };
 }
 
 export default function Inbox({ data, onClose }: { data: ReturnType<typeof useInbox>; onClose: () => void }) {
@@ -61,7 +66,11 @@ export default function Inbox({ data, onClose }: { data: ReturnType<typeof useIn
         <div className="inbox-h"><b>{t("notifications", lang)}</b><Link href="/reports" className="btn ghost sm" onClick={onClose}><Icon n="pie" />{t("reports", lang)}</Link></div>
         <nav className="seg" style={{ margin: "0 14px" }}>{tabs.map(([k, l, n]) => <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{l} <b className="mono">{n}</b></button>)}</nav>
         <div className="feed inbox-b">
-          {tab === "mine" && (data.mine.length ? data.mine.map(row) : <div className="empty">{t("nothing_for_you", lang)}</div>)}
+          {tab === "mine" && data.approvals.length > 0 && <div className="inbox-appr"><b><Icon n="check" /> {t("appr_for_you", lang)}</b>
+            {data.approvals.map((x) => { const s = findSection(x.section); return <Link key={x.id} href={`/${x.section.replace(".", "/")}?r=${x.record_id}`} className="deadline" onClick={onClose} style={{ ["--dc" as any]: s?.color }}>
+              <span className="dic"><Icon n={s?.icon || "check"} /></span><span style={{ minWidth: 0 }}><b style={{ fontWeight: 600 }}>{x.title || "—"}</b><br /><span className="faint" style={{ fontSize: 13 }}>{s ? tx(s.label, lang) : ""} · {x.created_at.slice(0, 10)}</span></span>
+              <span className="chip c-warn">{t("appr_pending", lang)}</span></Link>; })}</div>}
+          {tab === "mine" && (data.mine.length || data.approvals.length ? data.mine.map(row) : <div className="empty">{t("nothing_for_you", lang)}</div>)}
           {tab === "company" && (data.company.length ? data.company.slice(0, 40).map(row) : <div className="empty">{t("no_overdue", lang)}</div>)}
           {tab === "mentions" && (data.mentions.length ? data.mentions.map((m) => (
             <Link key={m.id} href={m.section ? `/${m.section.replace(".", "/")}?r=${m.record_id}` : "#"} onClick={onClose} className="feed-row" style={{ display: "grid", textDecoration: "none", color: "inherit" }}>

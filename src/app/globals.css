@@ -763,3 +763,18 @@ a.hub-row:hover{background:var(--surface-2)}
 /* Calendar link */
 .cal-link{display:flex;gap:8px}.cal-link .input{flex:1;min-width:0;font-size:13px}
 .cal-steps{margin:10px 0 0;padding-inline-start:20px;display:grid;gap:6px;font-size:14.5px;line-height:1.5;color:var(--ink-2)}
+
+/* Approvals */
+.appr{border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:grid;gap:8px;background:var(--surface-2)}
+.appr-h{display:flex;align-items:center;gap:8px}.appr-h svg{width:16px;height:16px;color:var(--accent)}.appr-h .chip{margin-inline-start:auto}
+.appr-p{margin:0;font-size:14px;line-height:1.5}
+.appr-form{display:grid;gap:10px}
+.inbox-appr{display:grid;gap:6px;padding-bottom:10px;margin-bottom:6px;border-bottom:1px solid var(--line-2)}
+.inbox-appr>b{font-size:14px;display:flex;align-items:center;gap:6px}.inbox-appr>b svg{width:15px;height:15px;color:var(--accent)}
+.login .box.approve{width:min(520px,100%)}
+.approve-dl{margin:0;display:grid;gap:6px}
+.approve-dl>div{display:grid;grid-template-columns:150px 1fr;gap:10px;font-size:14.5px;padding:6px 0;border-bottom:1px solid var(--line-2)}
+.approve-dl dt{color:var(--ink-3)}.approve-dl dd{margin:0;overflow-wrap:anywhere}
+.approve-btns{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.approve-btns .btn{justify-content:center;min-height:46px;font-size:16px}
+@media (max-width:480px){.approve-dl>div{grid-template-columns:1fr;gap:2px}}

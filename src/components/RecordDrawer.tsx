@@ -1,4 +1,6 @@
 "use client";
+import Approval from "./Approval";
+import { APPROVALS } from "@/config/approvals";
 import { useEffect, useRef, useState } from "react";
 import Icon from "./Icon";
 import { useApp } from "./App";
@@ -136,6 +138,7 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
             <div className="md tpl-paper" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(data.document) as string) }} />
           </details>}
           <datalist id="people-list">{people.map((p) => <option key={p.id} value={p.full_name || p.email} />)}</datalist>
+          {rec && APPROVALS[section.id] && <Approval rec={rec} canWrite={canWrite} onChanged={onSaved} />}
           {section.id !== "mail.outbox" && <Attachments section={section} rec={rec} canWrite={canWrite} title={title} />}
           {rec && <div className="thread">
             <div className="eyebrow">{t("comments", lang)}</div>
