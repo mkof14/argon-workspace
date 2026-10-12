@@ -43,7 +43,7 @@ Return ONLY a JSON object, no prose, with keys:
 {"section": "<section id from the catalogue>", "title": "<short English title: document number if any + subject>", "status": "<one of that section's statuses, matching the document's maturity; drafts are early statuses>",
  "data": {"<field key>": "<value>"}, "summary": "<2-4 sentence summary in LANG>", "controlled": true|false, "reason": "<one sentence in LANG: why this section>",
  "alternatives": ["<other plausible section id>", "..."], "confidence": 0.0-1.0}
-Rules for fields: dates as YYYY-MM-DD; numbers and money as plain numbers; select fields must use one of the listed options exactly or be omitted; put the summary also into a notes/description field of the section if it has one (notes, findings, specs, request, body, scope, description).
+Rules for fields: dates as YYYY-MM-DD; date fields such as due, expires, renewal, eta or warranty_end take the deadline, expiry or end date (if only a start date and a term are given, compute the end date);  numbers and money as plain numbers; select fields must use one of the listed options exactly or be omitted; put the summary also into a notes/description field of the section if it has one (notes, findings, specs, request, body, scope, description).
 controlled = true only when the document contains technical data about sensors, radar, RF detection or countermeasures, EO/IR, sonar, UAV/interceptors or AGRON 1 internals that could be export-controlled; commercial, legal, HR, finance and generic documents are false.`;
 
 const parseJson = (s: string) => { const m = s.match(/\{[\s\S]*\}/); if (!m) throw new Error("AI did not return a proposal"); return JSON.parse(m[0]); };
