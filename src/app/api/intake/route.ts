@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { adminClient, currentProfile, userClient } from "@/lib/server/supabase";
 import { allSections, DEPARTMENTS } from "@/config/workspace.config.mjs";
 import { HELP } from "@/config/learn";
+import { indexFile } from "@/lib/server/docs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -138,6 +139,7 @@ export async function POST(req: Request) {
       const to = `${sec.id}/${rec.id}/${Date.now()}_${safe(String(b.name || b.path.split("/").pop()).replace(/^\d+_/, ""))}`;
       const { error: mv } = await admin.storage.from(BUCKET).move(b.path, to);
       if (mv) return Response.json({ id: rec.id, section: sec.id, warning: "Record saved, but the file could not be attached: " + mv.message });
+      try { await indexFile(admin, to); } catch {} // make it searchable in "Ask your documents"
     }
     return Response.json({ id: rec.id, section: sec.id });
   }

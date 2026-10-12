@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import Icon from "./Icon";
 import { useApp } from "./App";
 import { t } from "@/lib/i18n";
-import { FileItem, Rec, store } from "@/lib/store";
+import { DEMO, FileItem, Rec, store } from "@/lib/store";
 
 const MAX = 50 * 1024 * 1024;
 export const fileIcon = (type: string, name = "") =>
@@ -46,7 +46,8 @@ export default function Attachments({ section, rec, canWrite, title }: { section
     try {
       for (const f of Array.from(list)) {
         if (f.size > MAX) { toast(t("file_too_big", lang), true); continue; }
-        await store.upload(prefix, f);
+        const it = await store.upload(prefix, f);
+        if (!DEMO && /\.(pdf|docx|xlsx|pptx|txt|md|csv)$/i.test(f.name)) fetch("/api/docs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "index", path: it.path }) }).catch(() => {}); // searchable in Ask your documents
       }
       toast(t("uploaded", lang)); load();
     } catch (e: any) { toast(e.message || "Upload failed", true); } finally { setBusy(false); }
@@ -60,7 +61,7 @@ export default function Attachments({ section, rec, canWrite, title }: { section
       openMail({ template: "materials", section: section.id, record: rec || undefined, vars: { material: title, links: links.join("\n") } });
     } catch (e: any) { toast(e.message, true); }
   };
-  const del = async (f: FileItem) => { try { await store.removeFile(f.path); load(); } catch (e: any) { toast(e.message, true); } };
+  const del = async (f: FileItem) => { try { await store.removeFile(f.path); if (!DEMO) fetch("/api/docs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "remove", path: f.path }) }).catch(() => {}); load(); } catch (e: any) { toast(e.message, true); } };
 
   return (
     <div className="thread">
