@@ -29,7 +29,7 @@ const Bell = dynamic(() => import("./Inbox").then((m) => m.Bell), { ssr: false }
 const Intake = dynamic(() => import("./Intake"), { ssr: false });
 const DocsAsk = dynamic(() => import("./DocsAsk"), { ssr: false });
 const StarDome = dynamic(() => import("./StarDome"), { ssr: false });
-export const VERSION = "1.9";
+export const VERSION = "2.0";
 
 type Ctx = {
   lang: Lang; me: Profile; access: Access; toast: (m: string, err?: boolean) => void;
@@ -85,7 +85,7 @@ export default function App({ slug }: { slug: string[] }) {
   }, []);
 
   const route = slug.join("/");
-  const HUBS = ["technical", "operations", "finance", "sales", "marketing", "security", "hr", "company"];
+  const HUBS = ["technical", "operations", "finance", "sales", "marketing", "security", "legal", "hr", "company"];
   const hubDept = slug.length === 2 && slug[1] === "overview" && HUBS.includes(slug[0]) ? slug[0] : "";
   const sectionId = slug.length === 2 && !hubDept ? `${slug[0]}.${slug[1]}` : "";
   const section = sectionId ? findSection(sectionId) : null;

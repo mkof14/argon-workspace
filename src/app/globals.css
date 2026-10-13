@@ -922,3 +922,23 @@ a.hub-row:hover{background:var(--surface-2)}
 .ai.rep{width:min(860px,100vw)}
 .rep-md table{font-size:13px}
 .rep-md h1{font-size:20px}.rep-md h2{font-size:16px;margin-top:18px}
+
+/* Portals, KPIs, security scan */
+.portal-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.portal{display:grid;gap:3px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;text-decoration:none;color:var(--ink);background:var(--surface);min-width:0}
+.portal:hover{border-color:var(--dc,var(--accent))}
+.portal b{display:flex;align-items:center;gap:6px;font-size:14px;font-weight:600}.portal b svg{width:13px;height:13px;color:var(--ink-3);flex:none}
+.portal small{color:var(--ink-3);font-size:12.5px;line-height:1.4}
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
+.kpi{display:grid;gap:2px;padding:10px 12px;border-radius:10px;background:var(--surface-2);min-width:0}
+.kpi span{font-size:12.5px;color:var(--ink-2);line-height:1.35}
+.kpi b{font-size:20px;font-weight:600}
+.kpi small{font-size:12px;color:var(--ink-3)}.kpi small.up{color:var(--ok)}.kpi small.down{color:var(--bad)}
+.scan-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
+.scan{border:1px solid var(--line);border-radius:12px;padding:10px 12px;display:grid;gap:6px;min-width:0}
+.scan-h{display:flex;align-items:center;gap:8px}.scan-h .chip{margin-inline-start:auto}
+.scan-row{display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-top:1px solid var(--line-2);min-width:0}
+.scan-row>svg{width:16px;height:16px;flex:none;margin-top:2px}
+.scan-row.pass>svg{color:var(--ok)}.scan-row.warn>svg{color:var(--warn)}.scan-row.fail>svg{color:var(--bad)}
+.scan-row span{display:grid;min-width:0;flex:1}.scan-row b{font-size:13.5px;font-weight:600}
+.scan-row small{font-size:12px;color:var(--ink-3);overflow-wrap:anywhere}

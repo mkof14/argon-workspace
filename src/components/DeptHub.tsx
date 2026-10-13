@@ -8,6 +8,7 @@ import MktCalendar from "./MktCalendar";
 import ChannelsBoard from "./ChannelsBoard";
 import SystemsBoard from "./SystemsBoard";
 import DeptReport from "./DeptReport";
+import { PortalsCard, MetricsCard, FxCard, DomainScan, AccessReview } from "./DeptTools";
 import { MktIdeas } from "./MarketingStudio";
 import { DEPARTMENTS, DEPT_COLORS } from "@/config/workspace.config.mjs";
 import { TEMPLATES } from "@/config/templates";
@@ -16,7 +17,7 @@ import { workingDays } from "@/config/hr";
 import { l2 } from "@/config/learn";
 import { t, tx } from "@/lib/i18n";
 import { Rec, store } from "@/lib/store";
-import { OPEN, dayDiff } from "@/lib/insights";
+import { OPEN, dayDiff, dueItems } from "@/lib/insights";
 
 type T2 = { en: string; ru: string };
 const L = (en: string, ru: string): T2 => ({ en, ru });
@@ -33,6 +34,7 @@ const INTRO: Record<string, T2> = {
   operations: L("Container builds, procurement, logistics, installation, service and the installed StarDome base.", "Сборка контейнеров, закупки, логистика, монтаж, сервис и установленные системы StarDome."),
   finance: L("Cash, invoices, budget, costing and margins, leasing, investors, tax and insurance.", "Деньги, счета, бюджет, себестоимость и маржа, лизинг, инвесторы, налоги и страхование."),
   sales: L("StarDome pipeline, clients, proposals, tenders, partners and the weighted forecast.", "Воронка StarDome, клиенты, КП, тендеры, партнёры и взвешенный прогноз."),
+  legal: L("Export control, contracts, licences, corporate records, trademarks, regulators and the AI legal desks.", "Экспортный контроль, договоры, лицензии, корпоративные документы, товарные знаки, регуляторы и ИИ-юристы."),
   marketing: L("Everything that tells the world about AGRON: brand, social media, press, interviews and podcasts, video, presentations, advertising and events. Nothing goes public without a compliance check and approval.", "Всё, что рассказывает миру об AGRON: бренд, соцсети, СМИ, интервью и подкасты, видео, презентации, реклама и выставки. Ничего не публикуется без проверки комплаенса и согласования."),
   security: L("Sanctions screening, technology control, cyber risks, access reviews, incidents and audits.", "Санкционные проверки, контроль технологий, киберриски, доступы, инциденты и аудиты."),
   company: L("Tasks and reminders, meetings, decisions, procedures and contacts shared across AGRON.", "Задачи и напоминания, встречи, решения, регламенты и контакты AGRON."),
@@ -242,6 +244,19 @@ export default function DeptHub({ dept }: { dept: string }) {
       strip = tplStrip(["incident_report", "end_user", "ciiaa"]);
     }
 
+    /* ------------------------------ Legal ------------------------------ */
+    if (dept === "legal") {
+      const req = of("legal.requests"), mx = of("legal.matrix");
+      const due = dueItems((recs || []).filter((r) => r.section.startsWith("legal.") && r.section !== "legal.matrix"), 60);
+      kpis.push({ l: L("Open legal requests", "Открытые запросы юристам"), v: String(req.filter(OPEN).length), s: `${req.filter((r) => ["High", "Critical"].includes(r.data?.priority) && OPEN(r)).length} ${T(L("high priority", "высокий приоритет"))}`, href: "/legal/requests" });
+      kpis.push({ l: L("Deadlines in 60 days", "Сроки в ближайшие 60 дней"), v: String(due.filter((x) => x.d >= 0).length), s: `${due.filter((x) => x.d >= 0 && x.d <= 14).length} ${T(L("within 14 days", "в течение 14 дней"))}` });
+      kpis.push({ l: L("Overdue", "Просрочено"), v: String(due.filter((x) => x.d < 0).length), tone: "bad" });
+      if (has("legal.matrix")) kpis.push({ l: L("Equipment awaiting legal review", "Оборудование ждёт юр. проверки"), v: String(mx.filter((r) => ["Pending review", "Under review"].includes(r.status || "")).length), s: `${mx.filter((r) => r.status === "Counsel approved").length} ${T(L("approved by counsel", "одобрено юристом"))}`, href: "/legal/matrix" });
+      cards.push(<List key="due" title={L("Filings, renewals and obligations", "Подачи, продления и обязательства")} icon="calendar" items={due.map((x) => ({ title: x.r.title, sub: `${tx(findSection(x.r.section)?.label, lang)} · ${String(x.r.data?.[x.k]).slice(0, 10)}`, right: rel(x.d, lang), tone: x.d < 0 ? "bad" as const : x.d <= 14 ? "warn" as const : "info" as const, href: href(x.r) }))} empty={L("No legal deadlines in the next 60 days.", "Юридических сроков в ближайшие 60 дней нет.")} />);
+      cards.push(<Bars key="desk" title={L("Open requests by legal desk", "Открытые запросы по направлениям")} icon="headset" more="/legal/requests" rows={Object.entries(req.filter(OPEN).reduce((a: any, r) => { const k = r.data?.desk || "Other"; a[k] = (a[k] || 0) + 1; return a; }, {})).map(([l, v]) => ({ l, v: v as number })).sort((a, b) => b.v - a.v)} />);
+      if (has("legal.matrix")) cards.push(<Bars key="mx" title={L("Equipment compliance matrix", "Матрица комплаенса оборудования")} icon="grid" more="/legal/matrix" rows={(findSection("legal.matrix")?.statuses || []).map((st: string) => ({ l: st, v: mx.filter((r) => r.status === st).length }))} />);
+    }
+
     /* ------------------------------ Knowledge base ------------------------------ */
     if (dept === "company") {
       const tasks = of("company.tasks");
@@ -251,6 +266,12 @@ export default function DeptHub({ dept }: { dept: string }) {
       cards.push(<List key="act" title={L("Action items from recent meetings", "Поручения с последних встреч")} icon="calendar" more="/company/meetings" items={of("company.meetings").filter((r) => r.data?.actions).sort((a, b) => String(b.data?.date).localeCompare(String(a.data?.date))).map((r) => ({ title: r.title, sub: String(r.data.actions).split("\n")[0], right: r.data?.date || "", href: href(r) }))} empty={L("No action items recorded.", "Поручений нет.")} />);
       strip = tplStrip(["decision_memo", "meeting_agenda", "ceo_weekly"]);
     }
+    // Every department: monthly KPIs first, its own tools, official portals last, and a report
+    if (dept === "security") { cards.unshift(<AccessReview key="acc" />); cards.unshift(<DomainScan key="dom" />); }
+    if (dept === "finance") cards.push(<FxCard key="fx" />);
+    cards.unshift(<MetricsCard key="kpi" dept={dept} recs={recs} />);
+    cards.push(<PortalsCard key="portals" dept={dept} />);
+    if (dept !== "marketing" && dept !== "technical") strip = <div className="toolbar" style={{ gap: 10 }}><DeptReport dept={dept} recs={recs} />{strip}</div>;
     return { kpis, cards, strip };
   }, [recs, dept, lang, access]); // eslint-disable-line
 

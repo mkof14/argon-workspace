@@ -9,7 +9,8 @@ import { DEMO, Rec } from "@/lib/store";
 import { markdownToPdf } from "@/lib/pdf";
 import { printHtml, saveBlob } from "@/lib/format";
 import { delta, prevMonth, thisMonth } from "@/lib/channels";
-import { dayDiff } from "@/lib/insights";
+import { dayDiff, dueItems, OPEN } from "@/lib/insights";
+import { DEPARTMENTS, METRIC_KPIS } from "@/config/workspace.config.mjs";
 
 type T4 = { en: string; ru: string; uk: string; ar: string };
 const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk, ar });
@@ -92,16 +93,71 @@ export function technicalReport(all: Rec[], ms: string[]): string {
   ].join("\n\n");
 }
 
+
+/** Any department: monthly KPIs, every section's status, overdue and upcoming items, and department highlights. */
+export function genericReport(dept: string, all: Rec[], ms: string[]): string {
+  const d: any = (DEPARTMENTS as any[]).find((x) => x.key === dept); const name = d?.label?.en || dept;
+  const of = (s: string) => all.filter((r) => r.section === s);
+  const before = prevMonth(ms[0]);
+  const kpis: any[] = (METRIC_KPIS as any)[dept] || [];
+  const met = of(`${dept}.metrics`); const cols = [before, ...ms];
+  const kpiRows = kpis.map((k) => [k.label.en, ...cols.map((p) => { const r = met.find((m) => m.data?.period === p); const v = r?.data?.[k.key]; return v === undefined || v === "" ? "—" : k.type === "money" ? usd(n(v)) : f(n(v)); })]);
+  const secs = (d?.sections || []).filter((s: any) => s.key !== "metrics").map((s: any) => `${dept}.${s.key}`);
+  const due = dueItems(all.filter((r) => secs.includes(r.section)), 30);
+  const secRows = secs.map((id: string) => { const rs = of(id); if (!rs.length) return null; const by = Object.entries(rs.reduce((a: any, r) => { a[r.status || "—"] = (a[r.status || "—"] || 0) + 1; return a; }, {})).map(([k, v]) => `${k} ${v}`).join(", ");
+    return [tx(findSection(id)?.label, "en"), rs.length, rs.filter(OPEN).length, due.filter((x) => x.r.section === id && x.d < 0).length, due.filter((x) => x.r.section === id && x.d >= 0).length, rs.filter((r) => inMonths(r.created_at, ms)).length, by]; }).filter(Boolean) as (string | number)[][];
+  const lab = (k: string) => tx(findSection(`${dept}.${k}`)?.label, "en");
+  const hl: string[] = [];
+  if (dept === "security") {
+    const scr = of("security.screening"); hl.push(`Screenings: ${scr.length} total · ${scr.filter((r) => r.status === "Cleared").length} cleared · ${scr.filter((r) => ["Flagged", "Escalated"].includes(r.status || "")).length} flagged or escalated · ${scr.filter((r) => r.status === "Pending").length} pending`);
+    const inc = of("security.incidents").filter((r) => inMonths(r.data?.date || r.created_at, ms)); hl.push(`Incidents in the period: ${inc.length}${inc.length ? " — " + inc.map((r) => `${r.title} (${r.data?.severity || ""}, ${r.status})`).join("; ") : ""}`);
+    const cy = of("security.cyber").filter((r) => ["Open", "Mitigating"].includes(r.status || "")); hl.push(`Open cyber risks: ${cy.length} (${["Restricted", "High", "Medium", "Low"].map((k) => `${k} ${cy.filter((r) => r.data?.risk === k).length}`).join(", ")})`);
+    hl.push(`Technical data not yet classified: ${of("security.tcp").filter((r) => ["Unclassified", "Under review"].includes(r.status || "")).length}`);
+  }
+  if (dept === "finance") {
+    const inv = of("finance.invoices").filter((r) => r.status !== "Paid" && r.status !== "Draft");
+    for (const dir of ["Receivable", "Payable"]) { const x = inv.filter((r) => r.data?.direction === dir); hl.push(`${dir}: ${usd(x.reduce((a, r) => a + n(r.data?.amount), 0))} open, ${usd(x.filter((r) => r.data?.due && dayDiff(r.data.due) < 0).reduce((a, r) => a + n(r.data?.amount), 0))} overdue`); }
+    hl.push(table(["Budget", "Planned", "Actual"], of("finance.budget").filter((r) => r.status !== "Closed").map((r) => [r.data?.department || r.title, usd(n(r.data?.planned)), usd(n(r.data?.actual))])));
+    hl.push(`Expenses submitted in the period: ${usd(of("finance.expenses").filter((r) => inMonths(r.data?.date || r.created_at, ms)).reduce((a, r) => a + n(r.data?.amount), 0))}`);
+  }
+  if (dept === "sales") {
+    const deals = of("sales.pipeline"); const st = ["Lead", "Qualified", "Proposal", "Negotiation"];
+    hl.push(table(["Stage", "Deals", "Value"], st.map((k) => { const x = deals.filter((r) => r.status === k); return [k, x.length, usd(x.reduce((a, r) => a + n(r.data?.value), 0))]; })));
+    const won = deals.filter((r) => r.status === "Won" && inMonths(r.updated_at, ms)); hl.push(`Won in the period: ${won.length} · ${usd(won.reduce((a, r) => a + n(r.data?.value), 0))}${won.length ? " — " + won.map((r) => r.title).join("; ") : ""}`);
+    hl.push(`Deals in Proposal or Negotiation without cleared screening: ${deals.filter((r) => ["Proposal", "Negotiation"].includes(r.status || "") && r.data?.screening !== "Cleared").length}`);
+  }
+  if (dept === "operations") {
+    const b = of("operations.builds"); hl.push(table(["Build stage", "Containers"], (findSection("operations.builds")?.statuses || []).map((k: string) => [k, b.filter((r) => r.status === k).length])));
+    hl.push(`Shipments in transit or customs: ${of("operations.logistics").filter((r) => ["In transit", "Customs"].includes(r.status || "")).length} · open support tickets: ${of("operations.support").filter(OPEN).length}`);
+  }
+  if (dept === "hr") {
+    const team = of("hr.team").filter((r) => r.status !== "Left"); hl.push(`Headcount: ${team.filter((r) => r.status === "Active" || r.status === "On leave").length} active, ${team.filter((r) => r.status === "Onboarding").length} joining · by location: ${Object.entries(team.reduce((a: any, r) => { const k = r.data?.location || "—"; a[k] = (a[k] || 0) + 1; return a; }, {})).map(([k, v]) => `${k} ${v}`).join(", ")}`);
+    hl.push(`Open positions: ${of("hr.hiring").filter((r) => ["Open", "Interviewing", "Offer"].includes(r.status || "")).length} · candidates in process: ${of("hr.candidates").filter((r) => !["Hired", "Rejected"].includes(r.status || "")).length}`);
+  }
+  if (dept === "legal") {
+    hl.push(`Legal requests: ${of("legal.requests").filter(OPEN).length} open · answered in the period: ${of("legal.requests").filter((r) => r.status === "Answered" && inMonths(r.updated_at, ms)).length}`);
+    hl.push(`Equipment compliance matrix: ${["Pending review", "Under review", "Verified (preliminary)", "Counsel approved", "Restricted", "Prohibited"].map((k) => `${k} ${of("legal.matrix").filter((r) => r.status === k).length}`).join(", ")}`);
+  }
+  return [
+    `# AGRON — ${name} report`, `Period: ${ms[0]}${ms.length > 1 ? ` – ${ms[ms.length - 1]}` : ""} · prepared ${new Date().toISOString().slice(0, 10)}`,
+    ...(kpis.length ? [`## Monthly KPIs`, met.length ? table(["KPI", ...cols], kpiRows) : `_No monthly numbers yet: add them in ${lab("metrics")}._`] : []),
+    ...(hl.length ? [`## Highlights`, hl.map((x) => (x.startsWith("|") ? x : `- ${x}`)).join("\n\n")] : []),
+    `## Sections`, table(["Section", "Records", "Open", "Overdue", "Due in 30 days", "New in period", "By status"], secRows),
+    `## Overdue`, due.filter((x) => x.d < 0).slice(0, 15).map((x) => `- ${x.r.title} — ${tx(findSection(x.r.section)?.label, "en")}, ${-x.d} days late`).join("\n") || "_Nothing overdue._",
+    `## Next 30 days`, due.filter((x) => x.d >= 0).slice(0, 15).map((x) => `- ${String(x.r.data?.[x.k]).slice(0, 10)} · ${x.r.title} (${tx(findSection(x.r.section)?.label, "en")})`).join("\n") || "_Nothing due._",
+  ].join("\n\n");
+}
+
 /** Report button + panel for a department overview. */
-export default function DeptReport({ dept, recs }: { dept: "marketing" | "technical"; recs: Rec[] }) {
+export default function DeptReport({ dept, recs }: { dept: string; recs: Rec[] }) {
   const { lang, toast } = useApp();
   const T = (x: T4) => tx(x, lang as Lang);
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<"p0" | "p1" | "p3">("p0");
   const [sum, setSum] = useState(""); const [busy, setBusy] = useState(false);
-  const md = useMemo(() => { const ms = monthsOf(kind); return (dept === "marketing" ? marketingReport : technicalReport)(recs, ms); }, [recs, kind, dept]);
+  const md = useMemo(() => { const ms = monthsOf(kind); return dept === "marketing" ? marketingReport(recs, ms) : dept === "technical" ? technicalReport(recs, ms) : genericReport(dept, recs, ms); }, [recs, kind, dept]);
   const full = sum ? md.replace(/\n\n/, `\n\n${sum}\n\n`) : md;
-  const title = dept === "marketing" ? "AGRON Marketing report" : "AGRON Technical report";
+  const title = `AGRON ${((DEPARTMENTS as any[]).find((x) => x.key === dept)?.label?.en || dept)} report`;
   const ai = async () => {
     if (DEMO) { toast(t("ai_demo", lang), true); return; }
     setBusy(true);

@@ -69,6 +69,20 @@ const APPROVE_GATE = { statuses: ["Approved"], field: "check", in: CHECK_OK, msg
 // ---------- Departments ----------
 // Each section: key, label, statuses (board columns), fields, columns (table), read/write roles,
 // optional gate (a status that requires a condition), controlled (shows US-persons-only flag).
+
+// Monthly KPIs per department (one record per month). good: "up" = higher is better, "down" = lower is better.
+const K = (key, type, good, en, ru, uk, ar) => ({ key, type, good, label: L(en, ru, uk, ar) });
+export const METRIC_KPIS = {
+  security: [K("mfa_pct", "number", "up", "Two-step verification coverage, %", "Охват двухэтапной проверкой, %", "Охоплення двоетапною перевіркою, %", "تغطية التحقق بخطوتين، %"), K("screenings", "number", "up", "Screenings done", "Проверок проведено", "Перевірок проведено", "عمليات الفحص"), K("flagged", "number", "down", "Screening matches", "Совпадений в проверках", "Збігів у перевірках", "تطابقات الفحص"), K("incidents", "number", "down", "Security incidents", "Инцидентов безопасности", "Інцидентів безпеки", "الحوادث الأمنية"), K("phishing_fail_pct", "number", "down", "Phishing test failures, %", "Провалы фишинг-теста, %", "Провали фішинг-тесту, %", "فشل اختبار التصيد، %"), K("patches_overdue", "number", "down", "Critical patches overdue", "Просроченные критичные обновления", "Прострочені критичні оновлення", "تحديثات حرجة متأخرة"), K("access_reviews", "number", "up", "Access reviews done", "Проверок доступа проведено", "Перевірок доступу проведено", "مراجعات الصلاحيات"), K("training_pct", "number", "up", "Security training completed, %", "Обучение безопасности пройдено, %", "Навчання безпеки пройдено, %", "إكمال تدريب الأمن، %")],
+  finance: [K("revenue", "money", "up", "Revenue", "Выручка", "Виручка", "الإيرادات"), K("expenses", "money", "down", "Expenses", "Расходы", "Витрати", "المصروفات"), K("cash", "money", "up", "Cash at month end", "Деньги на конец месяца", "Гроші на кінець місяця", "النقد نهاية الشهر"), K("burn", "money", "down", "Net burn", "Чистый расход (burn)", "Чисті витрати (burn)", "صافي الإنفاق"), K("receivables", "money", "down", "Receivables", "Дебиторка", "Дебіторка", "الذمم المدينة"), K("payables", "money", "down", "Payables", "Кредиторка", "Кредиторка", "الذمم الدائنة"), K("invoices_overdue", "number", "down", "Invoices overdue", "Просроченные счета", "Прострочені рахунки", "فواتير متأخرة")],
+  sales: [K("new_leads", "number", "up", "New qualified leads", "Новые квалифицированные лиды", "Нові кваліфіковані ліди", "عملاء مؤهلون جدد"), K("meetings", "number", "up", "Client meetings", "Встречи с клиентами", "Зустрічі з клієнтами", "اجتماعات العملاء"), K("proposals_sent", "number", "up", "Proposals sent", "КП отправлено", "КП надіслано", "عروض مرسلة"), K("proposals_value", "money", "up", "Value of proposals sent", "Сумма отправленных КП", "Сума надісланих КП", "قيمة العروض"), K("won_deals", "number", "up", "Deals won", "Выиграно сделок", "Виграно угод", "صفقات رابحة"), K("won_value", "money", "up", "Value won", "Сумма выигранных сделок", "Сума виграних угод", "القيمة الرابحة"), K("lost_deals", "number", "down", "Deals lost", "Проиграно сделок", "Програно угод", "صفقات خاسرة"), K("pipeline_value", "money", "up", "Open pipeline at month end", "Открытая воронка на конец месяца", "Відкрита воронка на кінець місяця", "الصفقات المفتوحة")],
+  operations: [K("builds_completed", "number", "up", "Containers completed", "Контейнеров собрано", "Контейнерів зібрано", "حاويات مكتملة"), K("on_time_pct", "number", "up", "On-time delivery, %", "Поставки в срок, %", "Поставки вчасно, %", "التسليم في الموعد، %"), K("shipments", "number", "up", "Shipments", "Отгрузки", "Відвантаження", "الشحنات"), K("installs", "number", "up", "Installations", "Монтажи", "Монтажі", "التركيبات"), K("open_tickets", "number", "down", "Open support tickets", "Открытые заявки сервиса", "Відкриті заявки сервісу", "تذاكر الدعم المفتوحة"), K("resolution_days", "number", "down", "Average resolution, days", "Среднее время решения, дней", "Середній час вирішення, днів", "متوسط الحل، أيام"), K("ncr_open", "number", "down", "Open non-conformances", "Открытые несоответствия", "Відкриті невідповідності", "حالات عدم المطابقة"), K("po_value", "money", "down", "Purchase orders placed", "Сумма заказов поставщикам", "Сума замовлень постачальникам", "قيمة أوامر الشراء")],
+  hr: [K("headcount", "number", "up", "Headcount at month end", "Численность на конец месяца", "Чисельність на кінець місяця", "عدد الموظفين"), K("hires", "number", "up", "Hires", "Принято", "Прийнято", "التعيينات"), K("leavers", "number", "down", "Leavers", "Уволилось", "Звільнилося", "المغادرون"), K("open_positions", "number", "down", "Open positions", "Открытые вакансии", "Відкриті вакансії", "الوظائف الشاغرة"), K("time_to_hire", "number", "down", "Average time to hire, days", "Среднее время найма, дней", "Середній час найму, днів", "متوسط مدة التوظيف"), K("training_hours", "number", "up", "Training hours", "Часов обучения", "Годин навчання", "ساعات التدريب"), K("absence_days", "number", "down", "Sick and unplanned absence, days", "Больничные и незапланированные отсутствия, дней", "Лікарняні та незаплановані відсутності, днів", "أيام الغياب غير المخطط"), K("reviews_done", "number", "up", "Performance reviews done", "Проведено оценок", "Проведено оцінок", "تقييمات الأداء")],
+  legal: [K("contracts_signed", "number", "up", "Contracts signed", "Договоров подписано", "Договорів підписано", "عقود موقعة"), K("open_matters", "number", "down", "Open legal matters", "Открытые юридические вопросы", "Відкриті юридичні питання", "المسائل القانونية المفتوحة"), K("requests_answered", "number", "up", "Legal requests answered", "Отвечено на запросы", "Відповіді на запити", "طلبات تمت الإجابة عنها"), K("turnaround_days", "number", "down", "Average answer time, days", "Среднее время ответа, дней", "Середній час відповіді, днів", "متوسط زمن الرد"), K("filings_due", "number", "down", "Filings and renewals due in 60 days", "Подачи и продления в ближайшие 60 дней", "Подання та продовження в найближчі 60 днів", "إيداعات خلال 60 يوماً"), K("matrix_cleared", "number", "up", "Equipment items cleared by counsel", "Позиций оборудования одобрено юристом", "Позицій обладнання схвалено юристом", "بنود معتمدة من المستشار"), K("legal_spend", "money", "down", "External legal spend", "Расходы на внешних юристов", "Витрати на зовнішніх юристів", "تكلفة المحامين الخارجيين")],
+};
+const metricsSection = (dept, en, ru, uk, ar, extra = {}) => ({ key: "metrics", label: L(en, ru, uk, ar), statuses: ["Draft", "Final"],
+  fields: [period, ...METRIC_KPIS[dept].map((k) => f(k.key, k.type, k.label)), notes], columns: ["period", ...METRIC_KPIS[dept].slice(0, 4).map((k) => k.key)], ...extra });
+
 export const DEPARTMENTS = [
   {
     key: "technical", icon: "d_tech",
@@ -160,7 +174,7 @@ export const DEPARTMENTS = [
         columns: ["serial", "model", "location", "build"] },
       { key: "logistics", label: L("Logistics & customs", "Логистика и таможня", "Логістика та митниця", "الخدمات اللوجستية والجمارك"),
         statuses: ["Planned", "Docs in prep", "In transit", "Customs", "Delivered"],
-        fields: [f("from", "text", L("From", "Откуда", "Звідки", "من")), f("to", "text", L("To", "Куда", "Куди", "إلى")), f("incoterms", "select", L("Incoterms", "Инкотермс", "Інкотермс", "إنكوترمز"), { options: ["EXW", "FCA", "FOB", "CIF", "DAP", "DDP"] }), f("hs", "text", L("HS code", "Код ТН ВЭД (HS)", "Код УКТЗЕД (HS)", "رمز النظام المنسق")), f("license", "text", L("Export licence / exception", "Экспортная лицензия / исключение", "Експортна ліцензія / виняток", "رخصة التصدير / الاستثناء")), due, link],
+        fields: [f("from", "text", L("From", "Откуда", "Звідки", "من")), f("to", "text", L("To", "Куда", "Куди", "إلى")), f("incoterms", "select", L("Incoterms", "Инкотермс", "Інкотермс", "إنكوترمز"), { options: ["EXW", "FCA", "FOB", "CIF", "DAP", "DDP"] }), f("carrier", "select", L("Carrier", "Перевозчик", "Перевізник", "الناقل"), { options: ["Maersk", "Hapag-Lloyd", "MSC", "CMA CGM", "DHL", "FedEx", "UPS", "Aramex", "Other"] }), f("tracking", "text", L("Tracking / container / AWB number", "Номер отслеживания / контейнера / AWB", "Номер відстеження / контейнера / AWB", "رقم التتبع / الحاوية")), f("hs", "text", L("HS code", "Код ТН ВЭД (HS)", "Код УКТЗЕД (HS)", "رمز النظام المنسق")), f("license", "text", L("Export licence / exception", "Экспортная лицензия / исключение", "Експортна ліцензія / виняток", "رخصة التصدير / الاستثناء")), due, link],
         columns: ["from", "to", "incoterms", "hs", "due"] },
       { key: "installation", label: L("Installation & commissioning", "Монтаж и ввод в эксплуатацию", "Монтаж і введення в експлуатацію", "التركيب والتشغيل"),
         statuses: ["Planned", "Approvals", "On site", "Commissioned"],
@@ -183,6 +197,7 @@ export const DEPARTMENTS = [
         statuses: ["Active", "Maintenance due", "Warranty claim", "Decommissioned"],
         fields: [f("client", "text", L("Client", "Клиент", "Клієнт", "العميل")), f("site", "text", L("Site / vessel", "Объект / судно", "Об'єкт / судно", "الموقع / السفينة")), config, f("serial", "text", L("Container serial", "Серийный номер контейнера", "Серійний номер контейнера", "الرقم التسلسلي للحاوية")), f("commissioned", "date", L("Commissioned", "Введён в эксплуатацию", "Введено в експлуатацію", "تاريخ التشغيل")), f("warranty_end", "date", L("Warranty until", "Гарантия до", "Гарантія до", "الضمان حتى")), f("sla", "select", L("Service plan", "Сервисный план", "Сервісний план", "خطة الخدمة"), { options: ["Basic", "Standard", "Premium 24/7"] }), f("next_service", "date", L("Next service", "Следующее ТО", "Наступне ТО", "الخدمة القادمة")), notes],
         columns: ["client", "site", "config", "sla", "next_service"] },
+      metricsSection("operations", "Operations metrics", "Метрики операций", "Метрики операцій", "مقاييس العمليات"),
     ],
   },
   {
@@ -228,6 +243,7 @@ export const DEPARTMENTS = [
         statuses: ["Quote", "Active", "Renewal due", "Expired"],
         fields: [f("type", "select", L("Policy type", "Вид полиса", "Вид поліса", "نوع الوثيقة"), { options: ["Product liability", "General liability", "Marine cargo", "Professional / E&O", "Cyber", "D&O", "Property", "Workers' comp"] }), f("insurer", "text", L("Insurer / broker", "Страховщик / брокер", "Страховик / брокер", "شركة التأمين / الوسيط")), f("coverage", "money", L("Coverage limit", "Лимит покрытия", "Ліміт покриття", "حد التغطية")), f("premium", "money", L("Annual premium", "Годовая премия", "Річна премія", "القسط السنوي")), f("renewal", "date", L("Renewal date", "Дата продления", "Дата продовження", "تاريخ التجديد")), link],
         columns: ["type", "insurer", "coverage", "premium", "renewal"] },
+      metricsSection("finance", "Monthly financials", "Финансы по месяцам", "Фінанси по місяцях", "الماليات الشهرية", { read: ["management", "finance"] }),
     ],
   },
   {
@@ -265,6 +281,7 @@ export const DEPARTMENTS = [
         statuses: ["Draft", "Active", "Retired"],
         fields: [config, f("list_price", "money", L("List price", "Цена по прайсу", "Ціна за прайсом", "السعر المعلن")), f("lease_month", "money", L("Lease per month", "Лизинг в месяц", "Лізинг на місяць", "الإيجار الشهري")), currency, f("valid_until", "date", L("Valid until", "Действует до", "Дійсно до", "صالح حتى")), notes],
         columns: ["config", "list_price", "lease_month", "currency", "valid_until"] },
+      metricsSection("sales", "Sales metrics", "Метрики продаж", "Метрики продажів", "مقاييس المبيعات"),
     ],
   },
   {
@@ -431,6 +448,7 @@ export const DEPARTMENTS = [
         statuses: ["Planned", "In progress", "Findings open", "Closed"],
         fields: [f("standard", "select", L("Standard", "Стандарт", "Стандарт", "المعيار"), { options: ["Export compliance (EMCP)", "ISO 27001", "NIST CSF", "SOC 2", "ISO 9001", "Internal"] }), f("area", "text", L("Area", "Область", "Область", "المجال")), f("date", "date", L("Date", "Дата", "Дата", "التاريخ")), f("findings", "long", L("Findings", "Замечания", "Зауваження", "الملاحظات")), owner],
         columns: ["standard", "area", "date", "owner"] },
+      metricsSection("security", "Security metrics", "Метрики безопасности", "Метрики безпеки", "مقاييس الأمن"),
     ],
   },
   {
@@ -550,6 +568,7 @@ export const DEPARTMENTS = [
         statuses: ["Identify", "Applied", "Granted", "Renewal due", "Expired"],
         fields: [f("permit", "select", L("Permit", "Разрешение", "Дозвіл", "التصريح"), { options: ["Workshop / industrial permit", "Civil Defence fire approval", "Battery / ESS storage", "Generator & fuel storage", "Environmental permit", "Noise / emissions", "Laser safety (FDA / local)", "Smoke equipment assessment", "Occupational safety"] }), f("site", "text", L("Site", "Площадка", "Майданчик", "الموقع")), f("authority", "text", L("Authority", "Орган", "Орган", "الجهة")), f("expires", "date", L("Expires", "Действует до", "Діє до", "ينتهي في")), owner, link],
         columns: ["permit", "site", "authority", "expires"] },
+      metricsSection("legal", "Legal metrics", "Юридические метрики", "Юридичні метрики", "المقاييس القانونية"),
     ],
   },
   {
@@ -608,6 +627,7 @@ export const DEPARTMENTS = [
         statuses: ["Planned", "In progress", "Done"],
         fields: [f("person", "text", L("Employee", "Сотрудник", "Співробітник", "الموظف")), f("due", "date", L("Last working day", "Последний рабочий день", "Останній робочий день", "آخر يوم عمل")), f("reason", "select", L("Reason", "Причина", "Причина", "السبب"), { options: ["Resignation", "End of contract", "Termination", "Mutual agreement", "Retirement"] }), f("steps", "checklist", L("Offboarding checklist", "Чек-лист увольнения", "Чек-лист звільнення", "قائمة إنهاء الخدمة"), { list: "offboard" }), f("exit_notes", "long", L("Exit interview notes", "Итоги выходного интервью", "Підсумки вихідного інтерв'ю", "ملاحظات مقابلة الخروج")), owner],
         columns: ["person", "due", "reason", "steps"] },
+      metricsSection("hr", "People metrics", "HR-метрики", "HR-метрики", "مقاييس الموارد البشرية", { read: ["management", "hr"] }),
     ],
   },
   {
@@ -663,7 +683,7 @@ export const DEPT_COLORS = {
 // Section icons
 export const SECTION_ICONS = {
   "technical.equipment": "radar", "technical.rnd": "flask", "technical.software": "code", "technical.integration": "plug", "technical.testing": "check",
-  "technical.certification": "badge", "technical.docs": "file", "technical.it": "server", "technical.bom": "layers", "technical.changes": "git", "technical.systems": "pulse", "technical.metrics": "trend",
+  "technical.certification": "badge", "technical.docs": "file", "technical.it": "server", "technical.bom": "layers", "technical.changes": "git", "technical.systems": "pulse", "technical.metrics": "trend", "security.metrics": "trend", "finance.metrics": "trend", "sales.metrics": "trend", "operations.metrics": "trend", "hr.metrics": "trend", "legal.metrics": "trend",
   "marketing.channels": "link", "marketing.metrics": "trend",
   "operations.builds": "container", "operations.procurement": "cart", "operations.vendors": "store", "operations.inventory": "box", "operations.logistics": "truck",
   "operations.installation": "anchor", "operations.support": "headset", "operations.comms": "megaphone", "operations.quality": "check", "operations.fleet": "map",
