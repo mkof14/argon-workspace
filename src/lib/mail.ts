@@ -276,7 +276,7 @@ export type Sender = { name: string; title?: string | null; email?: string; phon
 /** All emails are signed by the company, never by a person. */
 export const COMPANY: Sender = { name: "AGRON Inc.", email: "info@agron1.com" };
 
-export function renderEmail(o: { subject: string; pre?: string; heading?: string; body: string; cta?: { label: string; url: string } | null; lang: string; sender?: Sender | null; accent?: string; draft?: boolean }) {
+export function renderEmail(o: { subject: string; pre?: string; heading?: string; body: string; html?: string; cta?: { label: string; url: string } | null; lang: string; sender?: Sender | null; accent?: string; draft?: boolean }) {
   const rtl = o.lang === "ar";
   const dir = rtl ? "rtl" : "ltr", align = rtl ? "right" : "left";
   const acc = o.accent || "#FF6A2B";
@@ -299,7 +299,7 @@ export function renderEmail(o: { subject: string; pre?: string; heading?: string
 <tr><td style="height:4px;background:${acc};background-image:linear-gradient(90deg,${acc},#FFB15C);font-size:0;line-height:0">&nbsp;</td></tr>
 <tr><td style="padding:34px 36px 8px;text-align:${align}">
 ${o.heading ? `<h1 style="margin:0 0 18px;font-size:26px;line-height:1.25;color:#0E141A;font-weight:700;letter-spacing:-.01em">${inline(o.heading, o.draft)}</h1>` : ""}
-${bodyHtml(o.body, !!o.draft)}
+${o.html ?? bodyHtml(o.body, !!o.draft)}
 ${cta}
 ${o.sender ? `<p style="margin:8px 0 10px;font-size:16px;color:#2A3440">${L("Best regards,", "С уважением,", "З повагою,", "مع أطيب التحيات،")}</p>${sig}` : ""}
 </td></tr>

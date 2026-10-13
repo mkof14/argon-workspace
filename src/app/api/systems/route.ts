@@ -1,5 +1,5 @@
 import { currentProfile, userClient } from "@/lib/server/supabase";
-import { timedGet } from "@/lib/server/safefetch";
+import { checkSystems } from "@/lib/server/systems";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,23 +16,7 @@ export async function POST(req: Request) {
   const b = await req.json().catch(() => ({}));
   const sb = await userClient();
 
-  if (b.action === "check") {
-    let q = sb.from("records").select("id,title,status,data").eq("section", "technical.systems").neq("status", "Retired");
-    if (Array.isArray(b.ids) && b.ids.length) q = q.in("id", b.ids.slice(0, 40));
-    const { data: rows } = await q.limit(40);
-    const now = new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC";
-    const out = await Promise.all((rows || []).map(async (r: any) => {
-      const url = r.data?.health_url || r.data?.url;
-      if (!url) return { id: r.id, status: r.status, skipped: true };
-      const res = await timedGet(url);
-      const status = !res.ok ? (res.status >= 500 || !res.status ? "Down" : "Degraded") : res.ms > 3000 ? "Degraded" : "Operational";
-      const last = `${now} · ${res.ok ? `HTTP ${res.status}` : res.error || `HTTP ${res.status}`}`;
-      // Saved only where the user may edit; everyone still sees the live result
-      await sb.from("records").update({ status, data: { ...r.data, last_check: last, latency: res.ms }, updated_at: new Date().toISOString() }).eq("id", r.id);
-      return { id: r.id, status, http: res.status, ms: res.ms, error: res.error || null, last_check: last };
-    }));
-    return Response.json(out);
-  }
+  if (b.action === "check") return Response.json(await checkSystems(sb, Array.isArray(b.ids) ? b.ids : undefined));
 
   if (b.action === "github") {
     const m = String(b.repo || "").match(/github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git|\/|$)/i) || String(b.repo || "").match(/^([\w.-]+)\/([\w.-]+)$/);

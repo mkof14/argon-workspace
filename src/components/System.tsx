@@ -5,6 +5,7 @@ import { useApp } from "./App";
 import { t } from "@/lib/i18n";
 import { DEMO, sb } from "@/lib/sb";
 import { FullExport } from "./DataTools";
+import BackupCenter from "./BackupCenter";
 
 type Health = { ok: boolean; checks: Record<string, boolean>; ms: number; at: string };
 type Err = { id: number; created_at: string; user_id: string | null; source: string; message: string; stack: string | null; url: string | null; agent: string | null; version: string | null; resolved: boolean };
@@ -84,6 +85,7 @@ export default function System() {
           </div>))}</div> : <div className="empty">{t("sys_no_errors", lang)}</div>}
       </section>
 
+      {["owner", "admin"].includes(me.role) && <BackupCenter />}
       {me.role === "owner" && <FullExport />}
     </div>
   );

@@ -6,9 +6,12 @@ import { useApp } from "./App";
 import { t, tx, type Lang } from "@/lib/i18n";
 import { DEMO, Rec, store } from "@/lib/store";
 import { PORTALS } from "@/config/portals";
-import { METRIC_KPIS } from "@/config/workspace.config.mjs";
+import { METRIC_KPIS, DEPARTMENTS } from "@/config/workspace.config.mjs";
+const DEPTS: Record<string, any> = Object.fromEntries((DEPARTMENTS as any[]).map((d) => [d.key, d.label]));
 import { delta } from "@/lib/channels";
 import { trackUrl, usptoUrl } from "@/lib/links";
+import { collectMonth, type Auto } from "@/lib/kpiAuto";
+import { thisMonth, prevMonth } from "@/lib/channels";
 
 type T4 = { en: string; ru: string; uk: string; ar: string };
 const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk, ar });
@@ -32,19 +35,42 @@ export function PortalsCard({ dept }: { dept: string }) {
 }
 
 /* ---------------- Monthly KPIs ---------------- */
+const EXTRA: Record<string, string[]> = { sales: ["marketing.leads"], technical: ["security.incidents"] };
 export function MetricsCard({ dept, recs }: { dept: string; recs: Rec[] }) {
-  const T = useT(); const { lang, access } = useApp();
+  const T = useT(); const { lang, access, toast, reload } = useApp();
+  const [col, setCol] = useState<{ period: string; auto: Auto } | null>(null); const [busy, setBusy] = useState(false);
   const kpis: any[] = (METRIC_KPIS as any)[dept] || []; const sec = `${dept}.metrics`;
   if (!kpis.length || !access.read.has(sec)) return null;
   const rows = recs.filter((r) => r.section === sec && /^\d{4}-\d{2}$/.test(r.data?.period || "")).sort((a, b) => a.data.period.localeCompare(b.data.period));
   const cur = rows[rows.length - 1], prev = rows[rows.length - 2];
   const fmt = (k: any, v: number) => (k.type === "money" ? usd(v) : v.toLocaleString("en-US"));
+  const collect = async (period: string) => {
+    setBusy(true);
+    try { const extra = (EXTRA[dept] || []).filter((x) => access.read.has(x)); const more = extra.length ? await store.listMany(extra) : []; setCol({ period, auto: collectMonth(dept, [...recs, ...more], period) }); }
+    catch (e: any) { toast(e.message, true); } finally { setBusy(false); }
+  };
+  const saveCol = async () => {
+    if (!col) return; setBusy(true);
+    try {
+      const ex = rows.find((r) => r.data?.period === col.period);
+      await store.save({ id: ex?.id, section: sec, title: ex?.title || `${tx((DEPTS as any)[dept], "en" as Lang) || dept} · ${col.period}`, status: ex?.status || "Draft", data: { ...(ex?.data || {}), ...col.auto.values, period: col.period } });
+      toast(t("saved", lang)); setCol(null); reload();
+    } catch (e: any) { toast(e.message, true); } finally { setBusy(false); }
+  };
   return (
     <div className="card hub-card wide">
       <div className="card-h"><h2><Icon n="trend" />{T(L("Monthly KPIs", "Показатели за месяц", "Показники за місяць", "المؤشرات الشهرية"))}{cur ? <span className="chip mono" style={{ marginInlineStart: 8 }}>{cur.data.period}</span> : null}</h2>
         <span className="toolbar" style={{ marginInlineStart: "auto" }}>
           <Link href={`/${dept}/metrics`} className="btn ghost sm">{t("open", lang)}</Link>
-          {access.write.has(sec) && <Link href={`/${dept}/metrics?new=1`} className="btn sm"><Icon n="plus" />{T(L("Add month", "Добавить месяц", "Додати місяць", "إضافة شهر"))}</Link>}</span></div>
+          {access.write.has(sec) && <button className="btn sm" disabled={busy} onClick={() => collect(thisMonth())}><Icon n="spark" />{T(L("Collect the month", "Собрать месяц", "Зібрати місяць", "اجمع الشهر"))}</button>}
+          {access.write.has(sec) && <Link href={`/${dept}/metrics?new=1`} className="btn ghost sm"><Icon n="plus" />{T(L("Add month", "Добавить месяц", "Додати місяць", "إضافة شهر"))}</Link>}</span></div>
+      {col && <div className="card-b kpi-collect">
+        <div className="toolbar"><b>{T(L("From Workspace records", "Из записей Workspace", "Із записів Workspace", "من سجلات مساحة العمل"))}</b>
+          <div className="seg">{[thisMonth(), prevMonth(thisMonth())].map((p) => <button key={p} className={col.period === p ? "on" : ""} onClick={() => collect(p)}>{p}</button>)}</div></div>
+        <table className="tb"><tbody>{kpis.filter((k) => col.auto.values[k.key] !== undefined).map((k) => <tr key={k.key}><td>{tx(k.label, lang as Lang)}</td><td className="mono" style={{ textAlign: "end" }}>{fmt(k, col.auto.values[k.key])}</td><td className="faint" style={{ fontSize: 12.5 }}>{col.auto.how[k.key]}</td></tr>)}</tbody></table>
+        <small className="faint">{T(L("Other numbers (bank balance, phishing test, deploys…) are entered by hand in the month record. Saving keeps what is already there and updates these.", "Остальные цифры (остаток на счёте, фишинг-тест, выкатки…) вносятся вручную в запись месяца. При сохранении уже внесённое остаётся, эти цифры обновляются.", "Інші цифри (залишок на рахунку, фішинг-тест, викатки…) вносяться вручну в запис місяця. Під час збереження вже внесене залишається, ці цифри оновлюються.", "الأرقام الأخرى تُدخل يدوياً في سجل الشهر. الحفظ يُبقي الموجود ويحدّث هذه."))}</small>
+        <div className="toolbar"><button className="btn primary sm" disabled={busy} onClick={saveCol}><Icon n="check" />{T(L("Save to the month", "Сохранить в месяц", "Зберегти в місяць", "احفظ في الشهر"))} {col.period}</button><button className="btn ghost sm" onClick={() => setCol(null)}>{t("cancel", lang)}</button></div>
+      </div>}
       <div className="card-b kpi-grid">
         {!cur && <div className="empty" style={{ gridColumn: "1/-1" }}>{T(L("No months yet. Add this month's numbers once a month; trends and reports use them.", "Месяцев пока нет. Вносите цифры раз в месяц — по ним строятся тренды и отчёты.", "Місяців поки немає. Вносьте цифри раз на місяць — за ними будуються тренди та звіти.", "لا أشهر بعد. أدخل الأرقام شهرياً لتُبنى عليها الاتجاهات والتقارير."))}</div>}
         {cur && kpis.map((k) => { const v = cur.data?.[k.key]; if (v === undefined || v === "") return null; const pv = prev?.data?.[k.key];
