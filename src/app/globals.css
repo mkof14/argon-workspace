@@ -1,4 +1,4 @@
-/* AGRON Workspace — design tokens. Dark steel rail (brand, always dark) + themed working canvas. */
+/* AGRON Workspace — design tokens. The menu (rail) follows the light/dark theme; brand plates (hero, logo) stay dark. */
 :root{
   --bg:#F1EFEA; --surface:#FDFCFA; --surface-2:#F6F4F0; --ink:#111820; --ink-2:#4B5867; --ink-3:#7A8796;
   --line:#DAD6CE; --line-2:#E8E4DD; --accent:#C2410C; --accent-soft:#FDE8DC; --accent-ink:#FFFFFF;
@@ -883,3 +883,15 @@ a.hub-row:hover{background:var(--surface-2)}
 .rail .nav-label.nav-depts svg{width:15px;height:15px;color:var(--rail-hi)}
 .rail .nav-label.nav-depts::after{content:"";flex:1;height:1px;background:color-mix(in srgb,var(--rail-hi) 35%,transparent);order:2}
 .rail .nav-label.nav-depts b{order:3;margin-inline-start:0;background:none;border:0;padding:0;color:var(--rail-dim);font-weight:400}
+
+/* Menu follows the theme: rail tokens are redefined inside .rail only, so dark brand plates elsewhere keep var(--rail) */
+.rail{--rail:#FBFAF7;--rail-2:#EFEBE4;--rail-ink:#34414E;--rail-dim:#6B7785;--rail-line:#E3DFD7;--rail-strong:#121820}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .rail{--rail:#141B24;--rail-2:#1D2734;--rail-ink:#C7D0DA;--rail-dim:#8592A0;--rail-line:#2A3543;--rail-strong:#F2F5F8}}
+:root[data-theme="dark"] .rail{--rail:#141B24;--rail-2:#1D2734;--rail-ink:#C7D0DA;--rail-dim:#8592A0;--rail-line:#2A3543;--rail-strong:#F2F5F8}
+.rail-brand img{background:#141A21;border-radius:10px;padding:10px 12px}
+.rail-brand .prod{color:var(--rail-dim)}
+.rail .nav-dept>button,.rail .nav-dept>button:hover{color:var(--rail-strong)}
+.rail .nav-sub .nav-item{color:var(--rail-ink)}
+.rail .nav-item.active,.rail .nav-item.top.active,.rail .nav-item.top:hover,.rail .nav-sub .nav-item:hover,.rail .nav-sub .nav-item.active{color:var(--rail-strong)}
+.rail .nav-sub .nav-item.active{font-weight:500}
+.rail .me b{color:var(--rail-strong)}

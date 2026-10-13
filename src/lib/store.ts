@@ -223,11 +223,11 @@ export const store = {
     if (DEMO) return demoFaq(demoLoad());
     const get = async () => (await sb().from("faq").select("*").order("verified", { ascending: false }).order("hits", { ascending: false }).limit(500)).data || [];
     let rows = await get();
-    if (!rows.length) { // first run: load the starter FAQ (allowed for owner, admin, management, legal)
-      const seed = SEED_FAQ.flatMap((f) => (["en", "ru", "uk", "ar"] as const).map((l) => ({ question: l2(f.q, l), answer: l2(f.a, l), lang: l, section: f.section || null, verified: true, source: "seed" })));
-      const { error } = await sb().from("faq").insert(seed);
-      if (!error) rows = await get();
-    }
+    // Starter answers: loaded on first run and topped up when new ones ship (insert is allowed for owner, admin, management, legal)
+    const have = new Set(rows.map((r: any) => `${r.lang}|${r.question}`));
+    const seed = SEED_FAQ.flatMap((f) => (["en", "ru", "uk", "ar"] as const).map((l) => ({ question: l2(f.q, l), answer: l2(f.a, l), lang: l, section: f.section || null, verified: true, source: "seed" })))
+      .filter((x) => !have.has(`${x.lang}|${x.question}`));
+    if (seed.length) { const { error } = await sb().from("faq").insert(seed); if (!error) rows = await get(); }
     return rows as Faq[];
   },
   async faqSave(f: Partial<Faq> & { question: string; answer: string; lang: string }) {
