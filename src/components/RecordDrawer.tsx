@@ -1,6 +1,8 @@
 "use client";
 import Approval from "./Approval";
+import MarketingStudio from "./MarketingStudio";
 import { APPROVALS } from "@/config/approvals";
+import { gateBlocks } from "@/config/workspace.config.mjs";
 import { useEffect, useRef, useState } from "react";
 import Icon from "./Icon";
 import { useApp } from "./App";
@@ -45,7 +47,7 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
   const [confirmDel, setConfirmDel] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
   const gate = section.gate;
-  const gateBlocked = gate && status === gate.status && data[gate.field] !== gate.equals;
+  const gateBlocked = gateBlocks(gate, status, data);
 
   useEffect(() => {
     if (!rec) return;
@@ -137,6 +139,7 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
               </span></summary>
             <div className="md tpl-paper" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(data.document) as string) }} />
           </details>}
+          {section.dept === "marketing" && <MarketingStudio section={section} title={title} data={data} setData={setData} canWrite={canWrite} saved={!!rec} />}
           <datalist id="people-list">{people.map((p) => <option key={p.id} value={p.full_name || p.email} />)}</datalist>
           {rec && APPROVALS[section.id] && <Approval rec={rec} canWrite={canWrite} onChanged={onSaved} />}
           {section.id !== "mail.outbox" && <Attachments section={section} rec={rec} canWrite={canWrite} title={title} />}

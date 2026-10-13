@@ -44,6 +44,23 @@ const priority = f("priority", "select", L("Priority", "Приоритет", "П
 
 const INTERNAL = ["management", "engineering", "operations", "finance", "sales", "marketing", "hr", "legal", "security"];
 
+// ---------- Marketing ----------
+export const CHECK_OPTIONS = ["Not checked", "Fix needed", "Legal review needed", "Passed (AI check)", "Cleared by legal"];
+export const CHECK_OK = ["Passed (AI check)", "Cleared by legal"];
+const SOCIAL = ["LinkedIn", "X", "YouTube", "Instagram", "Facebook", "Telegram", "TikTok"];
+const PILLARS = ["Product", "Use case", "Company news", "Thought leadership", "Events", "Team & culture", "Trust & compliance", "Partners"];
+const BRAND_KINDS = ["Company description", "Key message", "Approved claim", "Do not say", "Tone of voice", "Spokesperson bio", "Logo", "Colours & fonts", "Template", "Photo"];
+const product = f("product", "select", L("Product", "Продукт", "Продукт", "المنتج"), { options: ["AGRON (company)", "StarDome", "AGRON 1", "StarDome + AGRON 1"] });
+const segment = f("segment", "select", L("Audience segment", "Сегмент аудитории", "Сегмент аудиторії", "شريحة الجمهور"), { options: ["Superyachts", "Marinas", "Ports & terminals", "Tankers & commercial vessels", "Private islands & estates", "Offshore & industrial", "Government", "Investors & partners", "General"] });
+const mktLang = f("language", "select", L("Language", "Язык", "Мова", "اللغة"), { options: ["EN", "AR", "RU", "EN + AR"] });
+const mktArea = f("area", "select", L("Area", "Направление", "Напрям", "المجال"), { options: ["Social media", "Press & PR", "Interviews & podcasts", "Video", "Presentations & sales kit", "Advertising", "Email", "Events", "Website", "Agencies", "Other"] });
+const publish = f("publish", "date", L("Publish date", "Дата публикации", "Дата публікації", "تاريخ النشر"));
+const check = f("check", "select", L("Compliance check", "Проверка комплаенса", "Перевірка комплаєнсу", "فحص الامتثال"), { options: CHECK_OPTIONS });
+const check_note = f("check_note", "long", L("Check notes", "Замечания проверки", "Зауваження перевірки", "ملاحظات الفحص"));
+const GATE_MSG = L("Run the compliance check first: “Passed (AI check)” or “Cleared by legal” is needed before Approved or Published.", "Сначала пройдите проверку комплаенса: до «Утверждено» или «Опубликовано» нужен статус проверки «Passed (AI check)» или «Cleared by legal».", "Спочатку пройдіть перевірку комплаєнсу: до «Затверджено» чи «Опубліковано» потрібен статус «Passed (AI check)» або «Cleared by legal».", "شغّل فحص الامتثال أولاً: يلزم «Passed (AI check)» أو «Cleared by legal» قبل الاعتماد أو النشر.");
+const PUBLISH_GATE = { statuses: ["Approved", "Scheduled", "Recorded", "Published"], field: "check", in: CHECK_OK, msg: GATE_MSG };
+const APPROVE_GATE = { statuses: ["Approved"], field: "check", in: CHECK_OK, msg: GATE_MSG };
+
 // ---------- Departments ----------
 // Each section: key, label, statuses (board columns), fields, columns (table), read/write roles,
 // optional gate (a status that requires a condition), controlled (shows US-persons-only flag).
@@ -232,31 +249,105 @@ export const DEPARTMENTS = [
     label: L("Marketing", "Маркетинг", "Маркетинг", "التسويق"),
     read: ["management", "marketing", "sales"], write: ["marketing"],
     sections: [
-      { key: "media", label: L("Media library", "Медиатека", "Медіатека", "مكتبة الوسائط"), external: ["partner"], view: "gallery",
-        statuses: ["Draft", "Approved", "Archived"],
-        fields: [f("kind", "select", L("Type", "Тип", "Тип", "النوع"), { options: ["Presentation", "Brochure", "Document", "Video", "Image", "Logo", "Link"] }), f("audience", "select", L("Audience", "Аудитория", "Аудиторія", "الجمهور"), { options: ["Clients", "Partners", "Investors", "Press", "Internal"] }), f("languages", "text", L("Languages", "Языки", "Мови", "اللغات")), f("url", "url", L("External link (YouTube, Drive, website)", "Внешняя ссылка (YouTube, Drive, сайт)", "Зовнішнє посилання (YouTube, Drive, сайт)", "رابط خارجي")), f("tags", "text", L("Tags", "Теги", "Теги", "الوسوم")), notes],
-        columns: ["kind", "audience", "languages", "tags"] },
-      { key: "events", label: L("Events & exhibitions", "Выставки и события", "Виставки та події", "المعارض والفعاليات"),
-        statuses: ["Considering", "Booked", "Done"],
-        fields: [f("city", "text", L("City", "Город", "Місто", "المدينة")), f("date", "date", L("Date", "Дата", "Дата", "التاريخ")), f("budget", "money", L("Budget", "Бюджет", "Бюджет", "الميزانية")), owner, f("leads", "number", L("Leads collected", "Собрано лидов", "Зібрано лідів", "العملاء المحتملون")), notes],
-        columns: ["city", "date", "budget", "leads"] },
-      { key: "content", label: L("Content & PR", "Контент и PR", "Контент і PR", "المحتوى والعلاقات العامة"),
-        statuses: ["Idea", "Writing", "Review", "Published"],
-        fields: [f("channel", "select", L("Channel", "Канал", "Канал", "القناة"), { options: ["LinkedIn", "X", "YouTube", "Instagram", "Press", "Website", "Email"] }), f("date", "date", L("Publish date", "Дата публикации", "Дата публікації", "تاريخ النشر")), owner, f("review", "select", L("Legal review", "Юридическая проверка", "Юридична перевірка", "المراجعة القانونية"), { options: ["Not needed", "Pending", "Approved"] }), link],
-        columns: ["channel", "date", "review"] },
-      { key: "web", label: L("Websites", "Сайты", "Сайти", "المواقع"),
-        statuses: ["Backlog", "In progress", "Live"],
-        fields: [f("site", "select", L("Site", "Сайт", "Сайт", "الموقع"), { options: ["agron1.com", "stardome.life", "workspace"] }), owner, link, notes],
-        columns: ["site", "owner"] },
+      { key: "plan", label: L("Plan & budget", "План и бюджет", "План і бюджет", "الخطة والميزانية"),
+        read: ["management", "marketing", "finance"], write: ["marketing", "management"],
+        statuses: ["Planned", "Approved", "Active", "Done"],
+        fields: [f("kind", "select", L("Type", "Тип", "Тип", "النوع"), { options: ["Goal", "Budget line", "Campaign theme"] }), f("period", "text", L("Quarter / period", "Квартал / период", "Квартал / період", "الربع / الفترة")), mktArea,
+          f("planned", "money", L("Planned budget", "Бюджет по плану", "Бюджет за планом", "الميزانية المخططة")), f("actual", "money", L("Spent", "Потрачено", "Витрачено", "المصروف")), currency,
+          f("kpi", "text", L("Target (KPI)", "Цель (KPI)", "Ціль (KPI)", "الهدف (KPI)")), f("result", "text", L("Result", "Результат", "Результат", "النتيجة")), owner, notes],
+        columns: ["kind", "period", "area", "planned", "actual"] },
+      { key: "brand", label: L("Brand center", "Бренд-центр", "Бренд-центр", "مركز العلامة التجارية"), external: ["partner"],
+        read: [...INTERNAL], write: ["marketing", "management"],
+        statuses: ["Draft", "Approved", "Retired"],
+        fields: [f("kind", "select", L("Type", "Тип", "Тип", "النوع"), { options: BRAND_KINDS }), mktLang,
+          f("text", "long", L("Text / rule", "Текст / правило", "Текст / правило", "النص / القاعدة")), f("usage", "long", L("Where and how to use", "Где и как использовать", "Де і як використовувати", "أين وكيف يُستخدم")), link, owner],
+        columns: ["kind", "language", "owner"] },
+      { key: "social", label: L("Social media", "Соцсети", "Соцмережі", "وسائل التواصل الاجتماعي"), board: true, gate: PUBLISH_GATE,
+        statuses: ["Idea", "Draft", "Review", "Approved", "Scheduled", "Published"],
+        fields: [f("channel", "select", L("Channel", "Канал", "Канал", "القناة"), { options: SOCIAL }), f("account", "select", L("Account", "Аккаунт", "Акаунт", "الحساب"), { options: ["Company page", "CEO profile", "StarDome page"] }),
+          publish, f("pillar", "select", L("Topic type", "Тип темы", "Тип теми", "نوع الموضوع"), { options: PILLARS }), product, segment, mktLang,
+          f("text", "long", L("Post text", "Текст поста", "Текст допису", "نص المنشور")), f("hashtags", "text", L("Hashtags", "Хэштеги", "Хештеги", "الوسوم")), f("media_link", "url", L("Image or video link", "Ссылка на картинку или видео", "Посилання на зображення або відео", "رابط الصورة أو الفيديو")),
+          f("source", "text", L("Based on", "Основано на", "Базується на", "مستند إلى")), check, check_note, f("post_url", "url", L("Published post link", "Ссылка на опубликованный пост", "Посилання на опублікований допис", "رابط المنشور")),
+          f("reach", "number", L("Reach / impressions", "Охват / показы", "Охоплення / покази", "الوصول / المشاهدات")), f("engagement", "number", L("Reactions, comments, shares", "Реакции, комментарии, репосты", "Реакції, коментарі, поширення", "التفاعلات والتعليقات والمشاركات")), f("clicks", "number", L("Clicks", "Клики", "Кліки", "النقرات")), owner],
+        columns: ["channel", "publish", "pillar", "check", "reach"] },
+      { key: "press", label: L("Press & publications", "СМИ и публикации", "ЗМІ та публікації", "الصحافة والمنشورات"), board: true, gate: PUBLISH_GATE,
+        statuses: ["Target", "Pitched", "Accepted", "Writing", "Review", "Approved", "Published", "Declined"],
+        fields: [f("outlet", "text", L("Magazine / outlet", "Журнал / издание", "Журнал / видання", "المجلة / الوسيلة")), f("format", "select", L("Format", "Формат", "Формат", "الصيغة"), { options: ["Bylined article", "Press release", "News story", "Case study", "Opinion column", "Print interview", "Advertorial"] }),
+          f("topic", "text", L("Topic / angle", "Тема / угол подачи", "Тема / кут подачі", "الموضوع / الزاوية")), product, segment, mktLang,
+          f("deadline", "date", L("Editor deadline", "Срок редакции", "Термін редакції", "موعد المحرر")), publish,
+          f("pitch", "long", L("Pitch to the editor", "Питч редактору", "Пітч редактору", "العرض للمحرر")), f("text", "long", L("Draft text", "Текст материала", "Текст матеріалу", "نص المسودة")), check, check_note,
+          f("post_url", "url", L("Published link", "Ссылка на публикацию", "Посилання на публікацію", "رابط المنشور")), f("audience", "number", L("Audience (readers)", "Аудитория (читатели)", "Аудиторія (читачі)", "الجمهور (القراء)")), owner],
+        columns: ["outlet", "format", "deadline", "publish", "check"] },
+      { key: "interviews", label: L("Interviews & podcasts", "Интервью и подкасты", "Інтерв'ю та подкасти", "المقابلات والبودكاست"), board: true, gate: PUBLISH_GATE,
+        statuses: ["Target", "Requested", "Confirmed", "Preparing", "Approved", "Recorded", "Published", "Declined"],
+        fields: [f("type", "select", L("Type", "Тип", "Тип", "النوع"), { options: ["Podcast", "Video interview", "Print interview", "TV", "Radio", "Panel discussion", "Webinar", "Live stream"] }),
+          f("outlet", "text", L("Show / outlet", "Шоу / издание", "Шоу / видання", "البرنامج / الوسيلة")), f("host", "text", L("Host / journalist", "Ведущий / журналист", "Ведучий / журналіст", "المقدم / الصحفي")),
+          f("spokesperson", "text", L("Our speaker", "Наш спикер", "Наш спікер", "المتحدث باسمنا")), f("session", "date", L("Recording date", "Дата записи", "Дата запису", "تاريخ التسجيل")), publish, mktLang,
+          f("pitch", "long", L("Guest pitch", "Заявка на участие", "Заявка на участь", "طلب المشاركة")), f("topics", "long", L("Agreed topics", "Согласованные темы", "Узгоджені теми", "المواضيع المتفق عليها")), f("prep", "long", L("Preparation pack: questions and answers", "Пакет подготовки: вопросы и ответы", "Пакет підготовки: питання та відповіді", "حزمة التحضير: الأسئلة والأجوبة")),
+          check, check_note, f("post_url", "url", L("Recording link", "Ссылка на запись", "Посилання на запис", "رابط التسجيل")), f("audience", "number", L("Audience (listeners / viewers)", "Аудитория (слушатели / зрители)", "Аудиторія (слухачі / глядачі)", "الجمهور (المستمعون / المشاهدون)")), owner],
+        columns: ["type", "outlet", "spokesperson", "session", "check"] },
+      { key: "outlets", label: L("Media & podcast list", "База СМИ и подкастов", "База ЗМІ та подкастів", "قائمة وسائل الإعلام والبودكاست"),
+        statuses: ["To research", "To contact", "In contact", "Relationship", "Not relevant"],
+        fields: [f("type", "select", L("Type", "Тип", "Тип", "النوع"), { options: ["Trade magazine", "Business media", "News agency", "Online publication", "Newsletter", "Podcast", "YouTube channel", "TV / radio", "Conference organiser"] }),
+          f("topics", "select", L("Main topic", "Основная тема", "Основна тема", "الموضوع الرئيسي"), { options: ["Maritime & ports", "Yachting", "Security & defence", "Drones & counter-UAS", "Energy & offshore", "Technology & AI", "Business & investment", "Gulf region"] }),
+          country, mktLang, f("audience", "number", L("Audience size", "Размер аудитории", "Розмір аудиторії", "حجم الجمهور")),
+          f("person", "text", L("Editor / host", "Редактор / ведущий", "Редактор / ведучий", "المحرر / المقدم")), f("email", "text", L("Email", "Email", "Email", "البريد الإلكتروني")), f("website", "url", L("Website", "Сайт", "Сайт", "الموقع")),
+          f("last_contact", "date", L("Last contact", "Последний контакт", "Останній контакт", "آخر تواصل")), notes, owner],
+        columns: ["type", "topics", "country", "audience", "last_contact"] },
+      { key: "video", label: L("Video", "Видео", "Відео", "الفيديو"), board: true, gate: PUBLISH_GATE,
+        statuses: ["Brief", "Script", "Pre-production", "Shooting", "Editing", "Review", "Approved", "Published"],
+        fields: [f("type", "select", L("Video type", "Тип видео", "Тип відео", "نوع الفيديو"), { options: ["Product presentation", "Advertising spot", "Demo", "Explainer / animation", "Customer story", "Interview / talk", "Event recap", "Training", "Social short"] }),
+          product, segment, f("platform", "select", L("Where it will be shown", "Где покажем", "Де покажемо", "أين سيُعرض"), { options: ["YouTube", "LinkedIn", "Website", "Exhibition screen", "Sales meetings", "Instagram / Reels", "All channels"] }),
+          f("length", "number", L("Length (seconds)", "Длительность (секунды)", "Тривалість (секунди)", "المدة (ثوانٍ)")), mktLang, f("vendor", "text", L("Production partner", "Студия / подрядчик", "Студія / підрядник", "شريك الإنتاج")),
+          f("budget", "money", L("Budget", "Бюджет", "Бюджет", "الميزانية")), currency, f("due", "date", L("Final cut due", "Срок финальной версии", "Термін фінальної версії", "موعد النسخة النهائية")), publish,
+          f("brief", "long", L("Brief", "Бриф", "Бриф", "الموجز")), f("script", "long", L("Script and storyboard", "Сценарий и раскадровка", "Сценарій і розкадрування", "السيناريو ولوحة القصة")),
+          check, check_note, f("post_url", "url", L("Video link (YouTube, Vimeo, Drive)", "Ссылка на видео (YouTube, Vimeo, Drive)", "Посилання на відео (YouTube, Vimeo, Drive)", "رابط الفيديو")), f("views", "number", L("Views", "Просмотры", "Перегляди", "المشاهدات")), owner],
+        columns: ["type", "product", "vendor", "due", "check"] },
+      { key: "media", label: L("Presentations & sales kit", "Презентации и материалы", "Презентації та матеріали", "العروض ومواد المبيعات"), external: ["partner"], view: "gallery", gate: APPROVE_GATE,
+        statuses: ["Draft", "Review", "Approved", "Archived"],
+        fields: [f("kind", "select", L("Type", "Тип", "Тип", "النوع"), { options: ["Presentation", "One-pager", "Brochure", "Public datasheet", "Case study", "Document", "Video", "Image", "Logo", "Link"] }), product,
+          f("audience", "select", L("Audience", "Аудитория", "Аудиторія", "الجمهور"), { options: ["Clients", "Partners", "Investors", "Press", "Government", "Internal"] }), segment,
+          f("languages", "text", L("Languages", "Языки", "Мови", "اللغات")), f("version", "text", L("Version", "Версия", "Версія", "الإصدار")),
+          f("url", "url", L("External link (YouTube, Drive, website)", "Внешняя ссылка (YouTube, Drive, сайт)", "Зовнішнє посилання (YouTube, Drive, сайт)", "رابط خارجي")), f("tags", "text", L("Tags", "Теги", "Теги", "الوسوم")), f("content", "long", L("Content / outline", "Содержание / структура", "Зміст / структура", "المحتوى / الهيكل")), check, check_note, owner, notes],
+        columns: ["kind", "product", "audience", "version", "check"] },
+      { key: "campaigns", label: L("Advertising & campaigns", "Реклама и кампании", "Реклама та кампанії", "الإعلانات والحملات"), gate: { ...APPROVE_GATE, statuses: ["Approved", "Running"] },
+        statuses: ["Draft", "Approved", "Running", "Completed", "Analyzed"],
+        fields: [f("channel", "select", L("Channel", "Канал", "Канал", "القناة"), { options: ["Email", "LinkedIn Ads", "Google Ads", "YouTube Ads", "Meta Ads", "X Ads", "Print ad", "Sponsorship", "Retargeting"] }),
+          f("goal", "select", L("Goal", "Цель", "Ціль", "الهدف"), { options: ["Awareness", "Leads", "Meetings", "Event registrations", "Website traffic"] }),
+          f("audience", "text", L("Audience / list", "Аудитория / список", "Аудиторія / список", "الجمهور / القائمة")), segment, f("start_date", "date", L("Start", "Старт", "Старт", "البداية")), f("end_date", "date", L("End", "Окончание", "Завершення", "النهاية")),
+          f("template", "text", L("Email template / ad copy", "Шаблон письма / текст объявления", "Шаблон листа / текст оголошення", "قالب البريد / نص الإعلان")), f("copy", "long", L("Copy: email or ad text", "Текст письма или объявления", "Текст листа або оголошення", "نص البريد أو الإعلان")), f("landing", "url", L("Landing page", "Посадочная страница", "Посадкова сторінка", "صفحة الهبوط")),
+          f("budget", "money", L("Budget", "Бюджет", "Бюджет", "الميزانية")), f("spent", "money", L("Spent", "Потрачено", "Витрачено", "المصروف")), currency,
+          f("impressions", "number", L("Impressions", "Показы", "Покази", "مرات الظهور")), f("clicks", "number", L("Clicks", "Клики", "Кліки", "النقرات")),
+          f("sent_count", "number", L("Emails sent", "Отправлено писем", "Надіслано листів", "الرسائل المرسلة")), f("replies", "number", L("Replies", "Ответы", "Відповіді", "الردود")),
+          f("leads", "number", L("Leads", "Лиды", "Ліди", "العملاء المحتملون")), f("meetings", "number", L("Meetings booked", "Назначено встреч", "Призначено зустрічей", "الاجتماعات المحجوزة")), check, check_note, owner],
+        columns: ["channel", "goal", "start_date", "budget", "leads"] },
+      { key: "events", label: L("Events & speaking", "Выставки и выступления", "Виставки та виступи", "الفعاليات والمشاركات"), board: true,
+        statuses: ["Considering", "Applied", "Booked", "Preparing", "Done", "Cancelled"],
+        fields: [f("type", "select", L("Type", "Тип", "Тип", "النوع"), { options: ["Exhibition (booth)", "Exhibition (visit)", "Conference talk", "Panel", "Customer demo", "Webinar", "Own event", "Award"] }),
+          f("city", "text", L("City", "Город", "Місто", "المدينة")), country, f("starts", "date", L("Event date", "Дата события", "Дата події", "تاريخ الفعالية")),
+          f("book_by", "date", L("Registration / booth deadline", "Срок регистрации / бронирования стенда", "Термін реєстрації / бронювання стенду", "موعد التسجيل / حجز الجناح")),
+          f("speaker", "text", L("Our speaker / team", "Наш спикер / команда", "Наш спікер / команда", "المتحدث / الفريق")), f("budget", "money", L("Budget", "Бюджет", "Бюджет", "الميزانية")), currency,
+          f("leads", "number", L("Leads collected", "Собрано лидов", "Зібрано лідів", "العملاء المحتملون")), f("meetings", "number", L("Meetings held", "Проведено встреч", "Проведено зустрічей", "الاجتماعات المنعقدة")),
+          f("abstract", "long", L("Talk abstract / booth message", "Тезисы доклада / идея стенда", "Тези доповіді / ідея стенду", "ملخص الكلمة / رسالة الجناح")), f("website", "url", L("Event website", "Сайт события", "Сайт події", "موقع الفعالية")), owner, notes],
+        columns: ["type", "city", "starts", "budget", "leads"] },
       { key: "leads", label: L("Leads", "Лиды", "Ліди", "العملاء المحتملون"),
         read: ["management", "marketing", "sales"], write: ["marketing", "sales"],
         statuses: ["New", "Contacted", "Qualified", "To pipeline", "Dropped"],
-        fields: [f("source", "text", L("Source", "Источник", "Джерело", "المصدر")), contact, f("segment", "text", L("Segment", "Сегмент", "Сегмент", "القطاع")), notes],
-        columns: ["source", "contact", "segment"] },
-      { key: "campaigns", label: L("Email campaigns", "Email-рассылки", "Email-розсилки", "حملات البريد"),
-        statuses: ["Draft", "Scheduled", "Sent", "Analyzed"],
-        fields: [f("audience", "text", L("Audience / list", "Аудитория / список", "Аудиторія / список", "الجمهور / القائمة")), f("template", "text", L("Template", "Шаблон", "Шаблон", "القالب")), f("date", "date", L("Send date", "Дата отправки", "Дата надсилання", "تاريخ الإرسال")), f("sent_count", "number", L("Sent", "Отправлено", "Надіслано", "المرسلة")), f("replies", "number", L("Replies", "Ответов", "Відповідей", "الردود")), f("meetings", "number", L("Meetings booked", "Назначено встреч", "Призначено зустрічей", "الاجتماعات المحجوزة")), owner, notes],
-        columns: ["audience", "date", "sent_count", "replies", "meetings"] },
+        fields: [f("source", "select", L("Source", "Источник", "Джерело", "المصدر"), { options: ["Website", "LinkedIn", "Event", "Press / interview", "Video", "Campaign", "Referral", "Partner", "Inbound email", "Other"] }),
+          contact, f("email", "text", L("Email", "Email", "Email", "البريد الإلكتروني")), country, segment, product, owner, notes],
+        columns: ["source", "contact", "segment", "country"] },
+      { key: "agencies", label: L("Agencies & freelancers", "Подрядчики", "Підрядники", "الوكالات والمستقلون"),
+        read: ["management", "marketing", "finance"], write: ["marketing", "management"],
+        statuses: ["Candidate", "Active", "Paused", "Ended"],
+        fields: [f("service", "select", L("Service", "Услуга", "Послуга", "الخدمة"), { options: ["PR agency", "Video production", "Design", "Photography", "Copywriting", "Translation", "Media buying", "Event & booth", "Podcast booking", "Social media management", "Web development"] }),
+          contact, f("email", "text", L("Email", "Email", "Email", "البريد الإلكتروني")), country, f("rate", "text", L("Rate / price", "Ставка / цена", "Ставка / ціна", "السعر")),
+          f("agreement", "select", L("Agreement", "Договор", "Договір", "الاتفاقية"), { options: ["None", "NDA signed", "Contract signed"] }), f("screening", "select", L("Sanctions screening", "Санкционная проверка", "Санкційна перевірка", "فحص العقوبات"), { options: SCREEN }),
+          f("portfolio", "url", L("Portfolio", "Портфолио", "Портфоліо", "الأعمال السابقة")), f("rating", "select", L("Rating", "Оценка", "Оцінка", "التقييم"), { options: ["5", "4", "3", "2", "1"] }), owner, notes],
+        columns: ["service", "country", "agreement", "rating"] },
+      { key: "web", label: L("Websites", "Сайты", "Сайти", "المواقع"),
+        statuses: ["Backlog", "In progress", "Live"],
+        fields: [f("site", "select", L("Site", "Сайт", "Сайт", "الموقع"), { options: ["agron1.com", "stardome.life", "workspace", "Landing page"] }), owner, due, link, notes],
+        columns: ["site", "owner", "due"] },
       { key: "competitors", label: L("Competitors & market", "Конкуренты и рынок", "Конкуренти та ринок", "المنافسون والسوق"),
         statuses: ["Watching", "Analyzed", "Archived"],
         fields: [f("company", "text", L("Company", "Компания", "Компанія", "الشركة")), country, f("products", "long", L("Products & offer", "Продукты и предложение", "Продукти та пропозиція", "المنتجات والعرض")), f("pricing", "text", L("Pricing", "Цены", "Ціни", "الأسعار")), f("strengths", "long", L("Strengths / weaknesses", "Сильные / слабые стороны", "Сильні / слабкі сторони", "نقاط القوة والضعف")), f("website", "url", L("Website", "Сайт", "Сайт", "الموقع"))],
@@ -537,8 +628,9 @@ export const SECTION_ICONS = {
   "finance.investors": "trend", "finance.tax": "landmark", "finance.cashflow": "trend", "finance.insurance": "umbrella",
   "sales.pipeline": "funnel", "sales.clients": "users", "sales.proposals": "file", "sales.partners": "handshake", "sales.activities": "calendar",
   "sales.tenders": "flag", "sales.pricelist": "tag",
-  "marketing.media": "image", "marketing.events": "calendar", "marketing.content": "pen", "marketing.web": "globe", "marketing.leads": "target",
-  "marketing.campaigns": "mail", "marketing.competitors": "eye",
+  "marketing.plan": "pie", "marketing.brand": "badge", "marketing.social": "share", "marketing.press": "pen", "marketing.interviews": "mic", "marketing.outlets": "contact",
+  "marketing.video": "video", "marketing.media": "image", "marketing.campaigns": "megaphone", "marketing.events": "calendar", "marketing.leads": "target",
+  "marketing.agencies": "handshake", "marketing.web": "globe", "marketing.competitors": "eye",
   "security.tcp": "lock", "security.access": "key", "security.cyber": "shield", "security.physical": "building", "security.incidents": "alert",
   "security.screening": "search", "security.audits": "clipboard",
   "legal.matrix": "grid", "legal.issues": "alert", "legal.contracts": "pen", "legal.corporate": "building", "legal.trademarks": "badge",
@@ -550,6 +642,15 @@ export const SECTION_ICONS = {
   "company.tasks": "bell", "company.wiki": "book", "company.contacts": "contact", "company.meetings": "calendar", "company.decisions": "check",
   "mail.templates": "mail", "mail.outbox": "send",
 };
+
+/** Does a gate stop this record from entering `status`? Supports {status, equals} and {statuses, in}. */
+export function gateBlocks(gate, status, data) {
+  if (!gate) return false;
+  const hit = gate.statuses ? gate.statuses.includes(status) : status === gate.status;
+  if (!hit) return false;
+  const v = data?.[gate.field];
+  return gate.in ? !gate.in.includes(v) : v !== gate.equals;
+}
 
 // Flattened helpers
 export const sectionId = (d, s) => `${d}.${s}`;
@@ -588,7 +689,7 @@ export const ROLE_DESC = {
   operations: L("Builds, procurement, logistics, installation, service.", "Сборка, закупки, логистика, монтаж, сервис.", "Збирання, закупівлі, логістика, монтаж, сервіс.", "التجميع والمشتريات واللوجستيات والتركيب والخدمة."),
   finance: L("Budget, invoices, costing, leasing, investors, tax.", "Бюджет, счета, себестоимость, лизинг, инвесторы, налоги.", "Бюджет, рахунки, собівартість, лізинг, інвестори, податки.", "الميزانية والفواتير والتكاليف والتأجير والمستثمرون والضرائب."),
   sales: L("Pipeline, clients, proposals, tenders, partners.", "Воронка, клиенты, КП, тендеры, партнёры.", "Воронка, клієнти, КП, тендери, партнери.", "الصفقات والعملاء والعروض والمناقصات والشركاء."),
-  marketing: L("Media library, events, content, campaigns, leads.", "Медиатека, выставки, контент, рассылки, лиды.", "Медіатека, виставки, контент, розсилки, ліди.", "مكتبة الوسائط والفعاليات والمحتوى والحملات."),
+  marketing: L("Brand, social media, press, interviews, video, presentations, ads, events, leads.", "Бренд, соцсети, СМИ, интервью, видео, презентации, реклама, выставки, лиды.", "Бренд, соцмережі, ЗМІ, інтерв'ю, відео, презентації, реклама, виставки, ліди.", "العلامة التجارية والتواصل الاجتماعي والصحافة والمقابلات والفيديو والعروض والإعلانات والفعاليات."),
   hr: L("Team, hiring, onboarding, training, policies.", "Команда, найм, онбординг, обучение, политики.", "Команда, найм, онбординг, навчання, політики.", "الفريق والتوظيف والتأهيل والتدريب والسياسات."),
   legal: L("Compliance matrix, contracts, licences, entities.", "Матрица комплаенса, договоры, лицензии, юрлица.", "Матриця комплаєнсу, договори, ліцензії, юрособи.", "مصفوفة الامتثال والعقود والتراخيص والكيانات."),
   security: L("Technology control, screening, cyber, incidents.", "Контроль технологий, проверки, кибер, инциденты.", "Контроль технологій, перевірки, кібер, інциденти.", "الرقابة التقنية والفحص والأمن السيبراني والحوادث."),

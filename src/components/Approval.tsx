@@ -4,7 +4,7 @@ import Icon from "./Icon";
 import { useApp } from "./App";
 import { t } from "@/lib/i18n";
 import { DEMO, sb } from "@/lib/sb";
-import { APPROVALS } from "@/config/approvals";
+import { APPROVALS, approvalNeeds } from "@/config/approvals";
 import type { Rec } from "@/lib/store";
 
 type A = { id: string; status: string; approver_id: string; requested_by: string; note: string | null; comment: string | null; created_at: string; decided_at: string | null };
@@ -58,7 +58,8 @@ export default function Approval({ rec, canWrite, onChanged }: { rec: Rec; canWr
         <div className="toolbar"><button className="btn primary sm" disabled={busy} onClick={() => decide("approved")}><Icon n="check" />{t("appr_approve", lang)}</button>
           <button className="btn sm danger" disabled={busy} onClick={() => decide("rejected")}>{t("appr_reject", lang)}</button></div></div>}
       {pending && a!.requested_by === me.id && a!.approver_id !== me.id && <button className="linkbtn" onClick={cancel}>{t("appr_cancel", lang)}</button>}
-      {canSend && !form && <><p className="appr-p faint">{t("appr_hint", lang)}</p><button className="btn sm" onClick={open}><Icon n="send" />{t("appr_send", lang)}</button></>}
+      {canSend && !form && approvalNeeds(rec.section, rec.data) && <p className="appr-p faint">{t("mk_need_check", lang)}</p>}
+      {canSend && !form && !approvalNeeds(rec.section, rec.data) && <><p className="appr-p faint">{t("appr_hint", lang)}</p><button className="btn sm" onClick={open}><Icon n="send" />{t("appr_send", lang)}</button></>}
       {!canSend && !a && canWrite && <p className="appr-p faint">{t("appr_when", lang).replace("{s}", rule.wait.join(" / "))}</p>}
       {form && <div className="appr-form">
         <label className="field"><span>{t("appr_who", lang)}</span>

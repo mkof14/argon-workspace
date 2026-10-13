@@ -4,6 +4,8 @@ import Link from "next/link";
 import Icon from "./Icon";
 import { useApp, findSection, SECTIONS } from "./App";
 import StageBoard from "./StageBoard";
+import MktCalendar from "./MktCalendar";
+import { MktIdeas } from "./MarketingStudio";
 import { DEPARTMENTS, DEPT_COLORS } from "@/config/workspace.config.mjs";
 import { TEMPLATES } from "@/config/templates";
 import { CHECKLISTS } from "./RecordDrawer";
@@ -28,14 +30,14 @@ const INTRO: Record<string, T2> = {
   operations: L("Container builds, procurement, logistics, installation, service and the installed StarDome base.", "Сборка контейнеров, закупки, логистика, монтаж, сервис и установленные системы StarDome."),
   finance: L("Cash, invoices, budget, costing and margins, leasing, investors, tax and insurance.", "Деньги, счета, бюджет, себестоимость и маржа, лизинг, инвесторы, налоги и страхование."),
   sales: L("StarDome pipeline, clients, proposals, tenders, partners and the weighted forecast.", "Воронка StarDome, клиенты, КП, тендеры, партнёры и взвешенный прогноз."),
-  marketing: L("Leads, campaigns, events, content and the AGRON media library.", "Лиды, рассылки, выставки, контент и медиатека AGRON."),
+  marketing: L("Everything that tells the world about AGRON: brand, social media, press, interviews and podcasts, video, presentations, advertising and events. Nothing goes public without a compliance check and approval.", "Всё, что рассказывает миру об AGRON: бренд, соцсети, СМИ, интервью и подкасты, видео, презентации, реклама и выставки. Ничего не публикуется без проверки комплаенса и согласования."),
   security: L("Sanctions screening, technology control, cyber risks, access reviews, incidents and audits.", "Санкционные проверки, контроль технологий, киберриски, доступы, инциденты и аудиты."),
   company: L("Tasks and reminders, meetings, decisions, procedures and contacts shared across AGRON.", "Задачи и напоминания, встречи, решения, регламенты и контакты AGRON."),
 };
 const checklistPct = (r: Rec, key = "steps", list = "onboard") => { const items = CHECKLISTS[list] || []; const v = r.data?.[key] || {}; const done = items.filter((_, i) => v[i]).length; return items.length ? Math.round((done / items.length) * 100) : 0; };
 
 export default function DeptHub({ dept }: { dept: string }) {
-  const { lang, access, tick } = useApp();
+  const { lang, access, tick, reload } = useApp();
   const [recs, setRecs] = useState<Rec[] | null>(null);
   const secs = SECTIONS.filter((s) => s.dept === dept && access.read.has(s.id));
   useEffect(() => { store.listMany(secs.map((s) => s.id)).then(setRecs).catch(() => setRecs([])); }, [dept, tick, access]); // eslint-disable-line
@@ -186,17 +188,35 @@ export default function DeptHub({ dept }: { dept: string }) {
 
     /* ------------------------------ Marketing ------------------------------ */
     if (dept === "marketing") {
-      const leads = of("marketing.leads"), camps = of("marketing.campaigns"), ev = of("marketing.events");
-      const sent = camps.reduce((a, r) => a + n(r.data?.sent_count), 0), rep = camps.reduce((a, r) => a + n(r.data?.replies), 0), meet = camps.reduce((a, r) => a + n(r.data?.meetings), 0);
-      kpis.push({ l: L("New leads", "Новые лиды"), v: String(leads.filter((r) => r.status === "New").length), s: `${leads.filter((r) => r.status === "To pipeline").length} ${T(L("passed to sales", "передано в продажи"))}`, href: "/marketing/leads" });
-      kpis.push({ l: L("Email reply rate", "Доля ответов на рассылки"), v: sent ? `${((rep / sent) * 100).toFixed(1)}%` : "—", s: `${meet} ${T(L("meetings from campaigns", "встреч из рассылок"))}`, href: "/marketing/campaigns" });
-      const evDone = ev.filter((r) => r.status === "Done"); const evCost = evDone.reduce((a, r) => a + n(r.data?.budget), 0), evLeads = evDone.reduce((a, r) => a + n(r.data?.leads), 0);
-      kpis.push({ l: L("Cost per lead at events", "Цена лида на выставках"), v: evLeads ? usd(evCost / evLeads) : "—", s: `${evLeads} ${T(L("leads", "лидов"))} · ${usd(evCost)}`, href: "/marketing/events" });
+      const all = (recs || []).filter((r) => r.section.startsWith("marketing."));
+      const leads = of("marketing.leads"), camps = of("marketing.campaigns"), ev = of("marketing.events"), plan = of("marketing.plan");
+      const FINAL = /^(published|declined|archived|done|cancelled|completed|analyzed|retired)$/i;
+      const CHECKED = ["Passed (AI check)", "Cleared by legal"];
+      const when = (r: Rec) => String(r.data?.publish || r.data?.session || r.data?.starts || r.data?.start_date || r.data?.due || "").slice(0, 10);
+      const upcoming = all.filter((r) => !FINAL.test(r.status || "") && when(r) && dayDiff(when(r)) >= 0 && dayDiff(when(r)) <= 14);
+      const needs = all.filter((r) => r.data && "check" in r.data && !FINAL.test(r.status || "") && !CHECKED.includes(r.data.check) && !["Idea", "Target", "Brief", "Considering"].includes(r.status || ""));
+      const published30 = all.filter((r) => r.status === "Published" && (dayDiff(String(r.data?.publish || r.updated_at || "").slice(0, 10)) >= -30));
+      const newLeads = leads.filter((r) => dayDiff(String(r.created_at || "").slice(0, 10)) >= -30);
+      const planned = plan.filter((r) => r.data?.kind === "Budget line" && r.status !== "Done").reduce((a, r) => a + n(r.data?.planned), 0);
+      const spent = plan.filter((r) => r.data?.kind === "Budget line" && r.status !== "Done").reduce((a, r) => a + n(r.data?.actual), 0);
+      kpis.push({ l: L("Going out in 14 days", "Выходит за 14 дней"), v: String(upcoming.length), s: `${upcoming.filter((r) => r.section === "marketing.social").length} ${T(L("posts", "постов"))}`, href: "/marketing/social" });
+      kpis.push({ l: L("Waiting for compliance check", "Ждут проверки комплаенса"), v: String(needs.length), s: `${needs.filter((r) => r.data?.check === "Legal review needed").length} ${T(L("with legal", "у юриста"))}`, tone: "bad" });
+      kpis.push({ l: L("Published in 30 days", "Опубликовано за 30 дней"), v: String(published30.length), s: `${published30.reduce((a, r) => a + n(r.data?.reach) + n(r.data?.views) + n(r.data?.audience), 0).toLocaleString("en-US")} ${T(L("reach", "охват"))}` });
+      kpis.push({ l: L("New leads in 30 days", "Новые лиды за 30 дней"), v: String(newLeads.length), s: `${leads.filter((r) => r.status === "To pipeline").length} ${T(L("passed to sales", "передано в продажи"))}`, href: "/marketing/leads" });
+      if (has("marketing.plan")) kpis.push({ l: L("Budget: spent / plan", "Бюджет: потрачено / план"), v: planned ? `${Math.round((spent / planned) * 100)}%` : "—", s: `${usd(spent)} / ${usd(planned)}`, href: "/marketing/plan", tone: planned && spent > planned ? "bad" : "" });
+
+      cards.push(<MktCalendar key="cal" recs={all} lang={lang} />);
+      if (has("marketing.social") && access.write.has("marketing.social")) cards.push(<MktIdeas key="ideas" onDone={reload} />);
+      cards.push(<List key="need" title={L("Needs a compliance check or approval", "Нужна проверка комплаенса или согласование")} icon="shield" items={needs.sort((a, b) => (when(a) || "9").localeCompare(when(b) || "9")).map((r) => ({ title: r.title, sub: `${tx(findSection(r.section)?.label, lang)} · ${r.status}${when(r) ? " · " + when(r) : ""}`, right: r.data?.check || "Not checked", tone: r.data?.check === "Fix needed" ? "bad" : r.data?.check === "Legal review needed" ? "warn" : "info", href: href(r) }))} empty={L("Everything in progress has passed the check.", "Всё в работе прошло проверку.")} />);
+      cards.push(<Bars key="prod" title={L("Work in progress by type", "В работе по направлениям")} icon="layers" rows={["marketing.social", "marketing.press", "marketing.interviews", "marketing.video", "marketing.media", "marketing.campaigns"].filter(has).map((id) => ({ l: tx(findSection(id)?.label, lang), v: of(id).filter((r) => !FINAL.test(r.status || "") && r.status !== "Approved" ? true : false).length, sub: `${of(id).filter((r) => r.status === "Published").length} ${T(L("published", "опубликовано"))}` }))} />);
+      cards.push(<List key="talk" title={L("Interviews, podcasts and events ahead", "Ближайшие интервью, подкасты и события")} icon="mic" items={[...of("marketing.interviews").filter((r) => r.data?.session && dayDiff(r.data.session) >= 0 && !FINAL.test(r.status || "")).map((r) => ({ title: r.title, sub: [r.data?.type, r.data?.outlet, r.data?.spokesperson].filter(Boolean).join(" · "), right: rel(dayDiff(r.data.session), lang), tone: "info" as const, href: href(r), d: r.data.session })),
+        ...ev.filter((r) => r.data?.starts && dayDiff(r.data.starts) >= 0 && !FINAL.test(r.status || "")).map((r) => ({ title: r.title, sub: [r.data?.type, r.data?.city, r.status].filter(Boolean).join(" · "), right: rel(dayDiff(r.data.starts), lang), tone: "warn" as const, href: href(r), d: r.data.starts }))].sort((a, b) => a.d.localeCompare(b.d))} empty={L("Nothing booked yet. Add targets in Interviews & podcasts.", "Пока ничего не назначено. Добавьте цели в «Интервью и подкасты».")} />);
+      cards.push(<List key="vid" title={L("Video production", "Производство видео")} icon="video" more="/marketing/video" items={of("marketing.video").filter((r) => r.status !== "Published").map((r) => ({ title: r.title, sub: [r.data?.type, r.data?.vendor, r.data?.length && `${r.data.length} s`].filter(Boolean).join(" · "), right: r.data?.due ? `${r.status} · ${rel(dayDiff(r.data.due), lang)}` : r.status || "", tone: r.data?.due && dayDiff(r.data.due) < 0 ? "bad" as const : "info" as const, href: href(r) }))} empty={L("No videos in production.", "Видео в производстве нет.")} />);
+      const reach: Record<string, number> = {}; for (const r of of("marketing.social").filter((x) => x.status === "Published")) { const k = r.data?.channel || "Other"; reach[k] = (reach[k] || 0) + n(r.data?.reach); }
+      cards.push(<Bars key="reach" title={L("Reach of published posts by channel", "Охват опубликованных постов по каналам")} icon="share" more="/marketing/social" rows={Object.entries(reach).map(([l, v]) => ({ l, v })).sort((a, b) => b.v - a.v)} fmt={(v) => v.toLocaleString("en-US")} />);
+      if (has("marketing.plan")) cards.push(<Bars key="bud" title={L("Budget by area: spent / plan", "Бюджет по направлениям: потрачено / план")} icon="pie" fmt={usd} more="/marketing/plan" rows={Object.entries(plan.filter((r) => r.data?.kind === "Budget line" && r.status !== "Done").reduce((a: any, r) => { const k = r.data?.area || "Other"; a[k] = a[k] || { v: 0, v2: 0 }; a[k].v += n(r.data?.actual); a[k].v2 += n(r.data?.planned); return a; }, {})).map(([l, x]: any) => ({ l, v: x.v, v2: x.v2 }))} />);
       cards.push(<Bars key="src" title={L("Leads by source", "Лиды по источникам")} icon="target" more="/marketing/leads" rows={Object.entries(leads.reduce((a: any, r) => { const k = r.data?.source || "Other"; a[k] = (a[k] || 0) + 1; return a; }, {})).map(([l, v]) => ({ l, v: v as number })).sort((a, b) => b.v - a.v)} />);
-      cards.push(<Bars key="funnel" title={L("Lead funnel", "Воронка лидов")} icon="funnel" more="/marketing/leads" rows={(findSection("marketing.leads")?.statuses || []).map((st: string) => ({ l: st, v: leads.filter((r) => r.status === st).length }))} />);
-      cards.push(<List key="ev" title={L("Upcoming events", "Ближайшие выставки и события")} icon="calendar" more="/marketing/events" items={ev.filter((r) => r.data?.date && dayDiff(r.data.date) >= 0).sort((a, b) => a.data.date.localeCompare(b.data.date)).map((r) => ({ title: r.title, sub: `${r.data?.city || ""} · ${usd(n(r.data?.budget))}`, right: rel(dayDiff(r.data.date), lang), tone: "info" as const, href: href(r) }))} empty={L("No upcoming events.", "Ближайших событий нет.")} />);
-      cards.push(<List key="cal" title={L("Content calendar, next 30 days", "Контент-план на 30 дней")} icon="pen" more="/marketing/content" items={of("marketing.content").filter((r) => r.data?.date && dayDiff(r.data.date) >= -3 && dayDiff(r.data.date) <= 30 && r.status !== "Published").map((r) => ({ title: r.title, sub: `${r.data?.channel || ""} · ${r.status}${r.data?.review ? " · " + T(L("review", "проверка")) + ": " + r.data.review : ""}`, right: rel(dayDiff(r.data.date), lang), tone: "info" as const, href: href(r) }))} empty={L("Nothing scheduled in the next 30 days.", "На 30 дней ничего не запланировано.")} />);
-      cards.push(<List key="camp" title={L("Campaign results", "Результаты рассылок")} icon="mail" more="/marketing/campaigns" items={camps.filter((r) => n(r.data?.sent_count)).map((r) => ({ title: r.title, sub: `${n(r.data?.sent_count)} ${T(L("sent", "отправлено"))} · ${n(r.data?.replies)} ${T(L("replies", "ответов"))} · ${n(r.data?.meetings)} ${T(L("meetings", "встреч"))}`, right: `${((n(r.data?.replies) / n(r.data?.sent_count)) * 100).toFixed(1)}%`, href: href(r) }))} empty={L("Enter sent, replies and meetings for each campaign.", "Укажите отправлено, ответы и встречи по каждой рассылке.")} />);
+      cards.push(<List key="camp" title={L("Campaign results", "Результаты кампаний")} icon="megaphone" more="/marketing/campaigns" items={camps.filter((r) => ["Running", "Completed", "Analyzed"].includes(r.status || "")).map((r) => ({ title: r.title, sub: [r.data?.channel, n(r.data?.spent) ? `${usd(n(r.data.spent))} ${T(L("spent", "потрачено"))}` : "", n(r.data?.clicks) ? `${n(r.data.clicks)} ${T(L("clicks", "кликов"))}` : "", n(r.data?.sent_count) ? `${n(r.data.sent_count)} ${T(L("sent", "отправлено"))}` : ""].filter(Boolean).join(" · "), right: `${n(r.data?.leads)} ${T(L("leads", "лидов"))} · ${n(r.data?.meetings)} ${T(L("meetings", "встреч"))}`, tone: "ok" as const, href: href(r) }))} empty={L("No campaigns running yet.", "Кампаний пока нет.")} />);
     }
 
     /* ------------------------------ Security ------------------------------ */

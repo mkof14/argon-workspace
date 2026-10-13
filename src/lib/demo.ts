@@ -9,6 +9,7 @@ const r = (section: string, title: string, status: string, data: Record<string, 
   id: `demo-${++n}`, section, title, status, data, company: null, controlled: false, created_by: "p1", created_at: iso(age), updated_at: iso(age), ...extra,
 });
 const S = (o: Record<string, any>) => ({ ...o, sample: true });
+const fut = (d: number) => new Date(Date.now() + d * 86400000).toISOString().slice(0, 10);
 
 export const DEMO_PEOPLE: Profile[] = [
   { id: "p1", email: "owner@agron1.com", full_name: "AGRON Owner", role: "owner", company: null, us_person: true, lang: "ru", ai_monthly_tokens: 1000000 },
@@ -59,7 +60,17 @@ export function demoSeed(): Rec[] {
     r("technical.software", "AGRON 1 · radar adapter v0.2", "In progress", S({ type: "Feature", component: "Device adapters", priority: "High", owner: "Sample Engineer" }), { controlled: true }),
     r("technical.testing", "Bench test · radar + EO/IR fusion", "Planned", S({ type: "Bench", config: "C20 Enhanced", equipment: "Radar + LWIR camera", date: "2026-11-20", owner: "Sample Engineer" }), { controlled: true }),
     r("technical.certification", "TDRA type approval · surveillance radar", "Not started", S({ scheme: "TDRA type approval", equipment: "Short-range surveillance radar" })),
-    r("marketing.events", "Monaco Yacht Show 2026", "Done", S({ city: "Monaco", date: "2026-09-23", leads: 0 }), {}, 15),
+    r("marketing.social", "Why one picture beats ten screens", "Approved", S({ channel: "LinkedIn", publish: fut(2), pillar: "Thought leadership", check: "Passed (AI check)", reach: 0 })),
+    r("marketing.social", "Night watch on a superyacht", "Draft", S({ channel: "Instagram", publish: fut(6), pillar: "Use case", check: "Fix needed" })),
+    r("marketing.social", "AGRON at the boat show", "Published", S({ channel: "LinkedIn", publish: fut(-5), pillar: "Events", check: "Passed (AI check)", reach: 4200 })),
+    r("marketing.social", "Evidence you can trust", "Published", S({ channel: "X", publish: fut(-9), pillar: "Product", check: "Passed (AI check)", reach: 1300 })),
+    r("marketing.press", "Port security in the Gulf: what changes in 2027", "Writing", S({ outlet: "Industry magazine (sample)", format: "Bylined article", deadline: fut(9), publish: fut(20), check: "Not checked" })),
+    r("marketing.interviews", "Maritime security podcast (sample)", "Confirmed", S({ type: "Podcast", outlet: "Sample show", spokesperson: "Michael Kofman", session: fut(12), check: "Legal review needed" })),
+    r("marketing.video", "StarDome presentation video", "Script", S({ type: "Product presentation", vendor: "Sample studio", length: 90, due: fut(25), check: "Not checked" })),
+    r("marketing.campaigns", "Marinas outreach (sample)", "Running", S({ channel: "Email", goal: "Meetings", start_date: fut(-3), sent_count: 120, replies: 9, leads: 4, meetings: 2, spent: 0 })),
+    r("marketing.plan", "Q4 2026 · Social media", "Approved", S({ kind: "Budget line", period: "2026-Q4", area: "Social media", planned: 6000, actual: 1500, currency: "USD" })),
+    r("marketing.plan", "Q4 2026 · Video", "Approved", S({ kind: "Budget line", period: "2026-Q4", area: "Video", planned: 15000, actual: 4000, currency: "USD" })),
+    r("marketing.events", "Monaco Yacht Show 2026", "Done", S({ type: "Exhibition (visit)", city: "Monaco", starts: "2026-09-23", leads: 0 }), {}, 15),
     r("hr.team", "Chief Executive Officer", "Active", { position: "CEO & President", department: "Management", location: "United States", type: "Employee", us_person: true }, {}, 20),
     r("finance.costing", "C20 Enhanced · cost model (sample)", "Draft", S({ config: "C20 Enhanced" })),
     r("company.wiki", "How we work: where things live", "Published", S({ topic: "Onboarding", body: "Workspace = records, approvals, status. Teams = chat and calls. SharePoint = files. Xero = accounting." }), { company: "*" }),

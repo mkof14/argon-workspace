@@ -7,11 +7,10 @@ import { DEPT_COLORS } from "@/config/workspace.config.mjs";
 import { t, tx } from "@/lib/i18n";
 import { Activity, Rec, store } from "@/lib/store";
 import { tone } from "@/lib/format";
-import { DUE_KEYS } from "./SectionView";
+import { DUE_KEYS, dueItems } from "@/lib/insights";
 import StageBoard from "./StageBoard";
 
 const KEYS = ["operations.builds", "sales.pipeline", "legal.issues", "operations.procurement", "operations.comms", "sales.tenders", "operations.support"];
-const DONE = /(done|paid|closed|resolved|installed|signed|filed|delivered|received|cancelled|passed|approved|granted|retired|won|lost|awarded|commissioned|taken|returned|settled|released|registered)/i;
 const dayDiff = (d: string) => Math.round((new Date(d).getTime() - new Date(new Date().toISOString().slice(0, 10)).getTime()) / 86400000);
 
 export default function Dashboard({ depts }: { depts: any[] }) {
@@ -25,9 +24,7 @@ export default function Dashboard({ depts }: { depts: any[] }) {
     // Deadlines across every section the user can open (except the large compliance matrix)
     const secs = SECTIONS.filter((s) => access.read.has(s.id) && s.id !== "legal.matrix" && s.fields.some((f: any) => DUE_KEYS.includes(f.key))).map((s) => s.id);
     store.listMany(secs).then((all) => {
-      const out: { r: Rec; k: string; d: number }[] = [];
-      for (const r of all) { if (DONE.test(r.status || "")) continue; for (const k of DUE_KEYS) { const v = r.data?.[k]; if (v) { const d = dayDiff(v); if (d <= 30) out.push({ r, k, d }); } } }
-      setDue(out.sort((a, b) => a.d - b.d).slice(0, 10));
+      setDue(dueItems(all, 30).slice(0, 10));
     }).catch(() => {});
   }, [tick, access]);
 

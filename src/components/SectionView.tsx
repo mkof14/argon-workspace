@@ -8,17 +8,18 @@ const MailCenter = dynamic(() => import("./Mail"), { ssr: false });
 const LegalHub = dynamic(() => import("./LegalHub"), { ssr: false });
 import { SectionTemplates } from "./Templates";
 import { CsvImport } from "./DataTools";
-import { DEPARTMENTS } from "@/config/workspace.config.mjs";
+import { DEPARTMENTS, gateBlocks } from "@/config/workspace.config.mjs";
 import { HELP, l2 } from "@/config/learn";
 import Link from "next/link";
 import { t, tx } from "@/lib/i18n";
 import { Rec, store } from "@/lib/store";
 import { fmt, saveBlob, toCsv, tone } from "@/lib/format";
 
-export const DUE_KEYS = ["due", "deadline", "expires", "renewal", "next_service", "valid_until", "eta", "warranty_end"];
+export const DUE_KEYS = ["due", "deadline", "expires", "renewal", "next_service", "valid_until", "eta", "warranty_end", "publish", "session", "starts", "book_by"];
 export const KIND: Record<string, { icon: string; c: string }> = {
   Presentation: { icon: "file", c: "#F26B1D" }, Brochure: { icon: "book", c: "#8B5CF6" }, Document: { icon: "file", c: "#2F7DF6" },
   Video: { icon: "video", c: "#E5484D" }, Image: { icon: "image", c: "#12A06B" }, Logo: { icon: "badge", c: "#C9971C" }, Link: { icon: "link", c: "#0EA5E9" },
+  "One-pager": { icon: "file", c: "#E0458B" }, "Public datasheet": { icon: "layers", c: "#2F7DF6" }, "Case study": { icon: "book", c: "#0FA3A3" },
 };
 const days = (d: string) => Math.round((new Date(d).getTime() - new Date(new Date().toISOString().slice(0, 10)).getTime()) / 86400000);
 
@@ -64,7 +65,7 @@ export default function SectionView({ section }: { section: any }) {
   const moveTo = async (r: Rec, status: string) => {
     if (!canWrite || r.status === status) return;
     const g = section.gate;
-    if (g && status === g.status && r.data?.[g.field] !== g.equals) { toast(tx(g.msg, lang), true); return; }
+    if (gateBlocks(g, status, r.data)) { toast(tx(g.msg, lang), true); return; }
     try { await store.save({ ...r, status }); toast(t("saved", lang)); load(); } catch (e: any) { toast(e.message || "Error", true); }
   };
 

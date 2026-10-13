@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { adminClient, currentProfile, userClient } from "@/lib/server/supabase";
 import { sendMail } from "@/lib/server/mailer";
 import { renderEmail, plainText, COMPANY, SITE } from "@/lib/mail";
-import { APPROVALS } from "@/config/approvals";
+import { APPROVALS, approvalNeeds } from "@/config/approvals";
 import { allSections } from "@/config/workspace.config.mjs";
 
 export const runtime = "nodejs";
@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
  */
 const SECS: any[] = allSections() as any[];
 const sec = (id: string) => SECS.find((s) => s.id === id);
-const fmt = (f: any, v: any) => (v == null || v === "" ? "" : f?.type === "money" || f?.type === "number" ? Number(v).toLocaleString("en-US") : String(v));
+const fmt = (f: any, v: any) => (v == null || v === "" ? "" : f?.type === "money" || f?.type === "number" ? Number(v).toLocaleString("en-US") : String(v).length > 1500 ? String(v).slice(0, 1500) + "…" : String(v));
 const L = (lang: string, en: string, ru: string) => (lang === "ru" || lang === "uk" ? ru : en);
 
 function details(r: any) {
@@ -104,6 +104,7 @@ export async function POST(req: Request) {
     const rule = APPROVALS[r.section];
     if (!rule) return new Response("This section has no approvals", { status: 400 });
     if (!rule.wait.includes(r.status)) return new Response(`Only records in status ${rule.wait.join(" / ")} can be sent for approval`, { status: 400 });
+    if (approvalNeeds(r.section, r.data)) return new Response("Run the compliance check first (Passed or Cleared by legal), then send for approval", { status: 400 });
     const ap = (await approversFor(db, r, me.id)).find((p: any) => p.id === b.approver_id);
     if (!ap) return new Response("Choose an approver from the list", { status: 400 });
     await db.from("approvals").update({ status: "cancelled" }).eq("record_id", r.id).eq("status", "pending");
