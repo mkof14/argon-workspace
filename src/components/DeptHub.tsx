@@ -5,6 +5,9 @@ import Icon from "./Icon";
 import { useApp, findSection, SECTIONS } from "./App";
 import StageBoard from "./StageBoard";
 import MktCalendar from "./MktCalendar";
+import ChannelsBoard from "./ChannelsBoard";
+import SystemsBoard from "./SystemsBoard";
+import DeptReport from "./DeptReport";
 import { MktIdeas } from "./MarketingStudio";
 import { DEPARTMENTS, DEPT_COLORS } from "@/config/workspace.config.mjs";
 import { TEMPLATES } from "@/config/templates";
@@ -133,7 +136,10 @@ export default function DeptHub({ dept }: { dept: string }) {
       cards.push(<List key="cert" title={L("Certifications and failed tests", "Сертификация и проваленные тесты")} icon="badge" items={[...of("technical.certification").filter(OPEN).map((r) => ({ title: r.title, sub: [r.data?.scheme, r.data?.body].filter(Boolean).join(" · "), right: r.data?.due ? rel(dayDiff(r.data.due), lang) : r.status || "", tone: (r.data?.due && dayDiff(r.data.due) < 0 ? "bad" : "info") as any, href: href(r) })), ...tests.filter((r) => r.status === "Failed" || r.status === "Blocked").map((r) => ({ title: r.title, sub: r.data?.equipment, right: r.status || "", tone: "bad" as const, href: href(r) }))]} empty={L("No open certifications or failed tests.", "Нет открытой сертификации и проваленных тестов.")} />);
       if (has("technical.it")) cards.push(<List key="it" title={L("IT renewals in 60 days", "Продления ИТ за 60 дней")} icon="server" more="/technical/it" items={it.filter((r) => r.data?.renewal && dayDiff(r.data.renewal) <= 60 && r.status !== "Retired").map((r) => ({ title: r.title, sub: `${r.data?.vendor || ""} · ${usd(n(r.data?.monthly_cost))}/mo`, right: rel(dayDiff(r.data.renewal), lang), tone: "warn" as const, href: href(r) }))} empty={L("No renewals in the next 60 days.", "Продлений в ближайшие 60 дней нет.")} />);
       cards.push(<Bars key="sw" title={L("Software backlog by component", "Бэклог ПО по компонентам")} icon="code" more="/technical/software" rows={Object.entries(of("technical.software").filter(OPEN).reduce((a: any, r) => { const k = r.data?.component || "Other"; a[k] = (a[k] || 0) + 1; return a; }, {})).map(([l, v]) => ({ l, v: v as number }))} />);
-      strip = tplStrip(["test_report", "ecr", "purchase_order"]);
+      if (has("technical.systems")) { const sys = of("technical.systems").filter((r) => r.status !== "Retired"); kpis.unshift({ l: L("Systems operational", "Системы работают"), v: `${sys.filter((r) => r.status === "Operational").length}/${sys.length}`, s: `${sys.filter((r) => ["Down", "Degraded"].includes(r.status || "")).length} ${T(L("need attention", "требуют внимания"))}`, href: "/technical/systems", tone: sys.some((r) => r.status === "Down") ? "bad" : "" }); cards.unshift(<SystemsBoard key="sys" compact />); }
+      const em = of("technical.metrics").sort((a, b) => String(a.data?.period).localeCompare(String(b.data?.period))).slice(-6);
+      if (em.length) cards.push(<Bars key="em" title={L("Deploys and incidents by month", "Выкатки и инциденты по месяцам")} icon="trend" more="/technical/metrics" rows={em.map((r) => ({ l: r.data?.period || r.title, v: n(r.data?.deploys), v2: n(r.data?.incidents), sub: r.data?.uptime ? `${T(L("uptime", "доступность"))} ${r.data.uptime}%` : "" }))} />);
+      strip = <div className="toolbar" style={{ gap: 10 }}><DeptReport dept="technical" recs={recs || []} />{tplStrip(["test_report", "ecr", "purchase_order"])}</div>;
     }
 
     /* ------------------------------ Operations ------------------------------ */
@@ -205,7 +211,9 @@ export default function DeptHub({ dept }: { dept: string }) {
       kpis.push({ l: L("New leads in 30 days", "Новые лиды за 30 дней"), v: String(newLeads.length), s: `${leads.filter((r) => r.status === "To pipeline").length} ${T(L("passed to sales", "передано в продажи"))}`, href: "/marketing/leads" });
       if (has("marketing.plan")) kpis.push({ l: L("Budget: spent / plan", "Бюджет: потрачено / план"), v: planned ? `${Math.round((spent / planned) * 100)}%` : "—", s: `${usd(spent)} / ${usd(planned)}`, href: "/marketing/plan", tone: planned && spent > planned ? "bad" : "" });
 
+      if (has("marketing.channels")) cards.push(<ChannelsBoard key="chan" compact />);
       cards.push(<MktCalendar key="cal" recs={all} lang={lang} />);
+      strip = <div className="toolbar"><DeptReport dept="marketing" recs={all} /></div>;
       if (has("marketing.social") && access.write.has("marketing.social")) cards.push(<MktIdeas key="ideas" onDone={reload} />);
       cards.push(<List key="need" title={L("Needs a compliance check or approval", "Нужна проверка комплаенса или согласование")} icon="shield" items={needs.sort((a, b) => (when(a) || "9").localeCompare(when(b) || "9")).map((r) => ({ title: r.title, sub: `${tx(findSection(r.section)?.label, lang)} · ${r.status}${when(r) ? " · " + when(r) : ""}`, right: r.data?.check || "Not checked", tone: r.data?.check === "Fix needed" ? "bad" : r.data?.check === "Legal review needed" ? "warn" : "info", href: href(r) }))} empty={L("Everything in progress has passed the check.", "Всё в работе прошло проверку.")} />);
       cards.push(<Bars key="prod" title={L("Work in progress by type", "В работе по направлениям")} icon="layers" rows={["marketing.social", "marketing.press", "marketing.interviews", "marketing.video", "marketing.media", "marketing.campaigns"].filter(has).map((id) => ({ l: tx(findSection(id)?.label, lang), v: of(id).filter((r) => !FINAL.test(r.status || "") && r.status !== "Approved" ? true : false).length, sub: `${of(id).filter((r) => r.status === "Published").length} ${T(L("published", "опубликовано"))}` }))} />);

@@ -895,3 +895,30 @@ a.hub-row:hover{background:var(--surface-2)}
 .rail .nav-item.active,.rail .nav-item.top.active,.rail .nav-item.top:hover,.rail .nav-sub .nav-item:hover,.rail .nav-sub .nav-item.active{color:var(--rail-strong)}
 .rail .nav-sub .nav-item.active{font-weight:500}
 .rail .me b{color:var(--rail-strong)}
+
+/* Channels and systems boards */
+.chan-p{margin:0;padding:12px 18px 0;font-size:13.5px;line-height:1.5}
+.chan-grid,.sys-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.chan-card,.sys-card{border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:grid;gap:8px;background:var(--surface);min-width:0;align-content:start}
+.chan-top,.sys-top{display:flex;align-items:center;gap:10px;min-width:0}
+.chan-top b,.sys-top b{display:block;font-size:15px}
+.chan-top small,.sys-top small{display:block;color:var(--ink-3);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chan-top .chip,.sys-top .chip{margin-inline-start:auto}
+.chan-mono{flex:none;width:36px;height:36px;border-radius:9px;display:grid;place-items:center;background:var(--pc);color:#fff;font-weight:700;font-size:13px;letter-spacing:-.02em}
+.chan-num{display:flex;align-items:baseline;gap:8px}
+.chan-num b{font-size:24px;font-weight:600}
+.chan-num span{color:var(--ink-2);font-size:13px}
+.chan-num em{font-style:normal;font-weight:600}.chan-num em.up{color:var(--ok)}.chan-num em.down{color:var(--bad)}
+.chan-mini{font-size:12.5px}
+.chan-act{display:flex;flex-wrap:wrap;gap:6px}
+.chan-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding-top:8px;border-top:1px solid var(--line-2)}
+.chan-form .field span{font-size:12px}
+.chan-imp{display:grid;gap:8px;padding-top:8px;border-top:1px solid var(--line-2);overflow:auto}
+.sys-dot{flex:none;width:10px;height:10px;border-radius:50%}
+.sys-meta{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12.5px}
+.sys-gh{display:grid;gap:4px;font-size:13px;padding:8px 10px;border-radius:9px;background:var(--surface-2)}
+.sys-gh>div{display:flex;gap:8px;align-items:center;justify-content:space-between;min-width:0}
+.sys-gh>div>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:end}
+.ai.rep{width:min(860px,100vw)}
+.rep-md table{font-size:13px}
+.rep-md h1{font-size:20px}.rep-md h2{font-size:16px;margin-top:18px}

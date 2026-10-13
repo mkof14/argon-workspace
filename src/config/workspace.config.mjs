@@ -44,6 +44,11 @@ const priority = f("priority", "select", L("Priority", "Приоритет", "П
 
 const INTERNAL = ["management", "engineering", "operations", "finance", "sales", "marketing", "hr", "legal", "security"];
 
+// ---------- Channels, statistics, systems ----------
+export const PLATFORMS = ["LinkedIn", "X", "YouTube", "Instagram", "Facebook", "TikTok", "Telegram", "Website", "Google Analytics", "Google Search Console", "Google Business Profile", "Meta Business Suite", "Newsletter"];
+const period = f("period", "text", L("Month (YYYY-MM)", "Месяц (ГГГГ-ММ)", "Місяць (РРРР-ММ)", "الشهر (YYYY-MM)"));
+const num = (key, en, ru, uk, ar) => f(key, "number", L(en, ru, uk, ar));
+
 // ---------- Marketing ----------
 export const CHECK_OPTIONS = ["Not checked", "Fix needed", "Legal review needed", "Passed (AI check)", "Cleared by legal"];
 export const CHECK_OK = ["Passed (AI check)", "Cleared by legal"];
@@ -98,6 +103,24 @@ export const DEPARTMENTS = [
         statuses: ["Draft", "In review", "Released", "Superseded"],
         fields: [f("doc_type", "select", L("Document type", "Тип документа", "Тип документа", "نوع المستند"), { options: ["Specification", "Drawing", "ICD", "Wiring diagram", "BOM", "Manual", "SOP"] }), config, f("version", "text", L("Version", "Версия", "Версія", "الإصدار")), owner, link],
         columns: ["doc_type", "config", "version", "owner"] },
+      { key: "systems", label: L("Systems & monitoring", "Системы и мониторинг", "Системи та моніторинг", "الأنظمة والمراقبة"),
+        read: ["management", "engineering", "operations", "security"], write: ["engineering", "security"],
+        statuses: ["Operational", "Degraded", "Down", "Unknown", "Retired"],
+        fields: [f("type", "select", L("Type", "Тип", "Тип", "النوع"), { options: ["Website / app", "Code repository", "Hosting / deploy", "Database", "Cloud console", "Monitoring / uptime", "Email & identity", "AI service", "Vendor portal", "Test bench / lab", "Documentation"] }),
+          f("environment", "select", L("Environment", "Среда", "Середовище", "البيئة"), { options: ["Production", "Staging", "Development", "Lab", "Business"] }),
+          f("url", "url", L("Main link", "Основная ссылка", "Основне посилання", "الرابط الرئيسي")), f("console_url", "url", L("Admin console", "Консоль управления", "Консоль керування", "لوحة الإدارة")),
+          f("health_url", "url", L("Health / status check URL", "Адрес проверки работы", "Адреса перевірки роботи", "رابط فحص الحالة")),
+          f("provider", "text", L("Provider", "Провайдер", "Провайдер", "المزوّد")), f("tier", "text", L("Plan / tier", "Тариф", "Тариф", "الخطة")),
+          f("last_check", "text", L("Last check", "Последняя проверка", "Остання перевірка", "آخر فحص")), num("latency", "Response time (ms)", "Время ответа (мс)", "Час відповіді (мс)", "زمن الاستجابة (مللي ثانية)"),
+          owner, notes],
+        columns: ["type", "environment", "provider", "last_check", "latency"] },
+      { key: "metrics", label: L("Engineering metrics", "Инженерные метрики", "Інженерні метрики", "المقاييس الهندسية"),
+        statuses: ["Draft", "Final"],
+        fields: [period, num("deploys", "Production deploys", "Выкатки в продакшн", "Викатки в продакшн", "عمليات النشر"), num("incidents", "Incidents", "Инциденты", "Інциденти", "الحوادث"),
+          num("uptime", "Uptime, %", "Доступность, %", "Доступність, %", "التوفر، %"), num("open_bugs", "Open bugs at month end", "Открытые баги на конец месяца", "Відкриті баги на кінець місяця", "الأخطاء المفتوحة"),
+          num("closed_tasks", "Tasks closed", "Закрыто задач", "Закрито задач", "المهام المغلقة"), num("tests_passed", "Tests passed", "Тестов пройдено", "Тестів пройдено", "الاختبارات الناجحة"), num("tests_failed", "Tests failed", "Тестов провалено", "Тестів провалено", "الاختبارات الفاشلة"),
+          num("response_ms", "Average response time (ms)", "Среднее время ответа (мс)", "Середній час відповіді (мс)", "متوسط زمن الاستجابة"), notes],
+        columns: ["period", "deploys", "incidents", "uptime", "open_bugs"] },
       { key: "it", label: L("IT & infrastructure", "ИТ и инфраструктура", "ІТ та інфраструктура", "تقنية المعلومات والبنية التحتية"),
         read: ["management", "engineering", "operations", "security"], write: ["engineering", "security"],
         statuses: ["Active", "Planned", "Renewal due", "Retired"],
@@ -249,6 +272,25 @@ export const DEPARTMENTS = [
     label: L("Marketing", "Маркетинг", "Маркетинг", "التسويق"),
     read: ["management", "marketing", "sales"], write: ["marketing"],
     sections: [
+      { key: "channels", label: L("Channels & accounts", "Каналы и аккаунты", "Канали та акаунти", "القنوات والحسابات"),
+        statuses: ["Planned", "Active", "Paused"],
+        fields: [f("platform", "select", L("Platform", "Платформа", "Платформа", "المنصة"), { options: PLATFORMS }), f("handle", "text", L("Account name / handle", "Название / @аккаунт", "Назва / @акаунт", "اسم الحساب")),
+          f("url", "url", L("Profile link", "Ссылка на профиль", "Посилання на профіль", "رابط الحساب")), f("admin_url", "url", L("Analytics / admin page", "Страница аналитики / админки", "Сторінка аналітики / адмінки", "صفحة التحليلات / الإدارة")),
+          f("connection", "select", L("How statistics arrive", "Как поступает статистика", "Як надходить статистика", "كيف تصل الإحصاءات"), { options: ["Link only", "Manual", "CSV export", "API"] }),
+          f("api_id", "text", L("Channel / page ID (for API)", "ID канала / страницы (для API)", "ID каналу / сторінки (для API)", "معرّف القناة / الصفحة")),
+          num("followers", "Followers / subscribers", "Подписчики", "Підписники", "المتابعون"), f("as_of", "date", L("Followers as of", "Подписчики на дату", "Підписники на дату", "المتابعون بتاريخ")),
+          f("admins", "text", L("Who has admin access", "У кого админ-доступ", "У кого адмін-доступ", "من لديه صلاحية الإدارة")), f("two_fa", "select", L("Two-step verification", "Двухэтапная проверка", "Двоетапна перевірка", "التحقق بخطوتين"), { options: ["Yes", "No", "Unknown"] }), owner, notes],
+        columns: ["platform", "handle", "followers", "connection"] },
+      { key: "metrics", label: L("Channel statistics", "Статистика каналов", "Статистика каналів", "إحصاءات القنوات"),
+        statuses: ["Draft", "Final"],
+        fields: [f("channel", "select", L("Platform", "Платформа", "Платформа", "المنصة"), { options: PLATFORMS }), f("account", "text", L("Account", "Аккаунт", "Акаунт", "الحساب")), period,
+          num("followers", "Followers at month end", "Подписчики на конец месяца", "Підписники на кінець місяця", "المتابعون نهاية الشهر"), num("new_followers", "New followers", "Новые подписчики", "Нові підписники", "متابعون جدد"),
+          num("posts", "Posts / videos published", "Опубликовано постов / видео", "Опубліковано дописів / відео", "المنشورات / الفيديوهات"), num("impressions", "Impressions", "Показы", "Покази", "مرات الظهور"),
+          num("reach", "Reach (unique)", "Охват (уникальный)", "Охоплення (унікальне)", "الوصول (فريد)"), num("engagements", "Engagements", "Вовлечённость (реакции, комментарии, репосты)", "Залученість (реакції, коментарі, поширення)", "التفاعلات"),
+          num("clicks", "Clicks", "Клики", "Кліки", "النقرات"), num("video_views", "Video views", "Просмотры видео", "Перегляди відео", "مشاهدات الفيديو"),
+          num("sessions", "Website sessions", "Сессии на сайте", "Сесії на сайті", "جلسات الموقع"), num("leads", "Leads", "Лиды", "Ліди", "العملاء المحتملون"),
+          f("source", "select", L("Source", "Источник данных", "Джерело даних", "مصدر البيانات"), { options: ["Manual", "CSV export", "API"] }), notes],
+        columns: ["account", "period", "followers", "impressions", "engagements"] },
       { key: "plan", label: L("Plan & budget", "План и бюджет", "План і бюджет", "الخطة والميزانية"),
         read: ["management", "marketing", "finance"], write: ["marketing", "management"],
         statuses: ["Planned", "Approved", "Active", "Done"],
@@ -621,7 +663,8 @@ export const DEPT_COLORS = {
 // Section icons
 export const SECTION_ICONS = {
   "technical.equipment": "radar", "technical.rnd": "flask", "technical.software": "code", "technical.integration": "plug", "technical.testing": "check",
-  "technical.certification": "badge", "technical.docs": "file", "technical.it": "server", "technical.bom": "layers", "technical.changes": "git",
+  "technical.certification": "badge", "technical.docs": "file", "technical.it": "server", "technical.bom": "layers", "technical.changes": "git", "technical.systems": "pulse", "technical.metrics": "trend",
+  "marketing.channels": "link", "marketing.metrics": "trend",
   "operations.builds": "container", "operations.procurement": "cart", "operations.vendors": "store", "operations.inventory": "box", "operations.logistics": "truck",
   "operations.installation": "anchor", "operations.support": "headset", "operations.comms": "megaphone", "operations.quality": "check", "operations.fleet": "map",
   "finance.budget": "pie", "finance.expenses": "receipt", "finance.invoices": "file", "finance.costing": "calc", "finance.leasing": "key",
