@@ -1,7 +1,7 @@
 /* AGRON Workspace — design tokens. Dark steel rail (brand, always dark) + themed working canvas. */
 :root{
-  --bg:#ECEFF3; --surface:#FFFFFF; --surface-2:#F5F7F9; --ink:#111820; --ink-2:#4B5867; --ink-3:#7A8796;
-  --line:#D5DCE4; --line-2:#E6EBF0; --accent:#C2410C; --accent-soft:#FDE8DC; --accent-ink:#FFFFFF;
+  --bg:#F1EFEA; --surface:#FDFCFA; --surface-2:#F6F4F0; --ink:#111820; --ink-2:#4B5867; --ink-3:#7A8796;
+  --line:#DAD6CE; --line-2:#E8E4DD; --accent:#C2410C; --accent-soft:#FDE8DC; --accent-ink:#FFFFFF;
   --rail:#141A21; --rail-2:#1C242D; --rail-ink:#C7D0DA; --rail-dim:#7D8A98; --rail-hi:#FF6A2B; --rail-line:#26303B;
   --ok:#1F7A4D; --ok-bg:#DDF2E6; --info:#1F5F99; --info-bg:#DDEAF7; --warn:#A15C00; --warn-bg:#FBEBCF; --bad:#B4232F; --bad-bg:#F9DADC; --vio:#4A1D5C; --vio-bg:#EBDDF1;
   --shadow:0 1px 1px rgba(17,24,32,.04); --shadow-lg:0 18px 50px rgba(17,24,32,.22);
@@ -11,14 +11,14 @@
   color-scheme:light;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --bg:#0C1015; --surface:#141A21; --surface-2:#1A212A; --ink:#E6EBF0; --ink-2:#9AA6B3; --ink-3:#6E7B89; --line:#26303B; --line-2:#1F2731;
-  --accent:#FF6A2B; --accent-soft:#3A1E12; --accent-ink:#140A05; --rail:#090C10; --rail-2:#121820; --rail-line:#1E2630;
-  --ok:#5FD39A; --ok-bg:#123222; --info:#7DB7F0; --info-bg:#13263A; --warn:#F2B54A; --warn-bg:#33250C; --bad:#FF7A84; --bad-bg:#3A1418; --vio:#D9A6F0; --vio-bg:#2B1736;
+  --bg:#171F28; --surface:#202934; --surface-2:#26303D; --ink:#E6EBF0; --ink-2:#9AA6B3; --ink-3:#7F8C9A; --line:#323F4E; --line-2:#2B3644;
+  --accent:#FF6A2B; --accent-soft:#512A19; --accent-ink:#140A05; --rail:#141B24; --rail-2:#1D2734; --rail-line:#2A3543;
+  --ok:#5FD39A; --ok-bg:#1A4831; --info:#7DB7F0; --info-bg:#1B3551; --warn:#F2B54A; --warn-bg:#4C3712; --bad:#FF7A84; --bad-bg:#511C21; --vio:#D9A6F0; --vio-bg:#3C204B;
   --shadow:0 1px 1px rgba(0,0,0,.3); --shadow-lg:0 20px 60px rgba(0,0,0,.6); color-scheme:dark}}
 :root[data-theme="dark"]{
-  --bg:#0C1015; --surface:#141A21; --surface-2:#1A212A; --ink:#E6EBF0; --ink-2:#9AA6B3; --ink-3:#6E7B89; --line:#26303B; --line-2:#1F2731;
-  --accent:#FF6A2B; --accent-soft:#3A1E12; --accent-ink:#140A05; --rail:#090C10; --rail-2:#121820; --rail-line:#1E2630;
-  --ok:#5FD39A; --ok-bg:#123222; --info:#7DB7F0; --info-bg:#13263A; --warn:#F2B54A; --warn-bg:#33250C; --bad:#FF7A84; --bad-bg:#3A1418; --vio:#D9A6F0; --vio-bg:#2B1736;
+  --bg:#171F28; --surface:#202934; --surface-2:#26303D; --ink:#E6EBF0; --ink-2:#9AA6B3; --ink-3:#7F8C9A; --line:#323F4E; --line-2:#2B3644;
+  --accent:#FF6A2B; --accent-soft:#512A19; --accent-ink:#140A05; --rail:#141B24; --rail-2:#1D2734; --rail-line:#2A3543;
+  --ok:#5FD39A; --ok-bg:#1A4831; --info:#7DB7F0; --info-bg:#1B3551; --warn:#F2B54A; --warn-bg:#4C3712; --bad:#FF7A84; --bad-bg:#511C21; --vio:#D9A6F0; --vio-bg:#3C204B;
   --shadow:0 1px 1px rgba(0,0,0,.3); --shadow-lg:0 20px 60px rgba(0,0,0,.6); color-scheme:dark}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
@@ -864,3 +864,8 @@ a.hub-row:hover{background:var(--surface-2)}
 .sd-brand{background:var(--rail);border-radius:14px;padding:20px 24px;display:grid;gap:12px}
 .sd-brand img{width:min(420px,100%);height:auto}
 .sd-brand p{margin:0;color:var(--rail-ink);font-size:15px;line-height:1.55;max-width:900px}
+
+/* Departments heading in the menu */
+.rail .nav-label.nav-depts{display:flex;align-items:center;gap:10px;margin:14px 2px 6px;padding:10px 12px;border-radius:10px;background:var(--rail-2);border:1px solid var(--rail-line);color:#F2F5F8;font-size:14.5px;font-weight:700;letter-spacing:0;text-transform:none;position:sticky;top:-10px;z-index:2}
+.rail .nav-label.nav-depts svg{width:18px;height:18px;color:var(--rail-hi);flex:none}
+.rail .nav-label.nav-depts b{margin-inline-start:auto;font-family:var(--f-mono);font-size:12px;font-weight:600;color:var(--rail-dim);background:var(--rail);border:1px solid var(--rail-line);border-radius:20px;padding:1px 8px}

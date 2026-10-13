@@ -53,6 +53,19 @@ export default function App({ slug }: { slug: string[] }) {
   const [railOpen, setRailOpen] = useState(false);
   const [langOpen, setLangOpen] = useState(false);
   const [openDepts, setOpenDepts] = useState<Record<string, boolean>>({});
+  const navRef = useRef<HTMLElement>(null);
+  const [focusDept, setFocusDept] = useState<{ k: string; n: number }>({ k: "", n: 0 });
+  // Opening a department brings it to the top of the menu so its sections are in view
+  useEffect(() => {
+    if (!focusDept.k) return;
+    const id = requestAnimationFrame(() => {
+      const nav = navRef.current; const el = nav?.querySelector<HTMLElement>(`[data-dept="${focusDept.k}"]`); if (!nav || !el) return;
+      const head = nav.querySelector<HTMLElement>(".nav-depts")?.offsetHeight || 0; // the sticky "Departments" heading stays above it
+      const top = nav.scrollTop + el.getBoundingClientRect().top - nav.getBoundingClientRect().top - head - 6;
+      nav.scrollTo({ top, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [focusDept]);
   const [ai, setAi] = useState<AiContext | null>(null);
   const [tick, setTick] = useState(0);
   const [mail, setMail] = useState<MailInit | null>(null);
@@ -115,7 +128,7 @@ export default function App({ slug }: { slug: string[] }) {
     }
   }, [me?.id]); // eslint-disable-line
   useEffect(() => { const st = navStack.current; if (st.length > 1 && st[st.length - 2] === route) st.pop(); else if (st[st.length - 1] !== route) st.push(route); }, [route]);
-  useEffect(() => { const dk = section?.dept || hubDept; if (dk) setOpenDepts((o) => ({ ...o, [dk]: true })); setRailOpen(false); }, [route]); // eslint-disable-line
+  useEffect(() => { const dk = section?.dept || hubDept; if (dk) { setOpenDepts((o) => (o[dk] ? o : { [dk]: true })); setFocusDept((f) => (f.k === dk ? f : { k: dk, n: f.n + 1 })); } setRailOpen(false); }, [route]); // eslint-disable-line
 
   const toast = useCallback((m: string, err?: boolean) => {
     const id = Date.now() + Math.random(); setToasts((x) => [...x, { id, m, err }]);
@@ -194,7 +207,7 @@ export default function App({ slug }: { slug: string[] }) {
         <aside className={`rail ${railOpen ? "open" : ""}`} aria-label={t("menu", lang)}>
           <div className="rail-brand"><img src="/logo-full.webp" alt="AGRON — Aerial-Ground Robotics Operations Network" width={640} height={187} />
             <div className="prod"><i />{t("workspace", lang)}</div></div>
-          <nav>
+          <nav ref={navRef}>
             <Link href="/" className={`nav-item top ${!route ? "active" : ""}`} style={{ ["--dc" as any]: "#FF6A2B" }}><Icon n="stardome" /><span>{t("overview", lang)}</span></Link>
             {!isExternal(me.role) && <Link href="/stardome" className={`nav-item top ${route === "stardome" ? "active" : ""}`} style={{ ["--dc" as any]: "#FF6A2B" }}><Icon n="container" /><span>{t("sd_title", lang)}</span></Link>}
             {!isExternal(me.role) && <Link href="/ask" className={`nav-item top ${route === "ask" ? "active" : ""}`} style={{ ["--dc" as any]: "#7C5CFF" }}><Icon n="spark" /><span>{t("ask_docs", lang)}</span></Link>}
@@ -202,12 +215,12 @@ export default function App({ slug }: { slug: string[] }) {
             <Link href="/templates" className={`nav-item top ${route === "templates" ? "active" : ""}`} style={{ ["--dc" as any]: "#C9971C" }}><Icon n="file" /><span>{t("templates", lang)}</span></Link>
             {access.read.has("company.tasks") && <Link href="/company/tasks" className={`nav-item top ${route === "company/tasks" ? "active" : ""}`} style={{ ["--dc" as any]: "#5B6CF0" }}><Icon n="bell" /><span>{tx(findSection("company.tasks")?.label, lang)}</span></Link>}
             <Link href="/learn" className={`nav-item top ${route === "learn" ? "active" : ""}`} style={{ ["--dc" as any]: "#14B8A6" }}><Icon n="lifebuoy" /><span>{t("learn", lang)}</span></Link>
-            <div className="nav-label">{t("departments", lang)}</div>
+            <div className="nav-label nav-depts"><Icon n="layers" /><span>{t("departments", lang)}</span><b>{depts.length}</b></div>
             {depts.map((d: any) => {
               const open = !!openDepts[d.key];
               return (
-                <div key={d.key} className={`nav-dept ${open ? "open" : ""}`} style={{ ["--dc" as any]: (DEPT_COLORS as any)[d.key] }}>
-                  <button className="nav-item" aria-expanded={open} onClick={() => setOpenDepts((o) => ({ ...o, [d.key]: !open }))}>
+                <div key={d.key} data-dept={d.key} className={`nav-dept ${open ? "open" : ""}`} style={{ ["--dc" as any]: (DEPT_COLORS as any)[d.key] }}>
+                  <button className="nav-item" aria-expanded={open} onClick={() => { if (open) setOpenDepts((o) => ({ ...o, [d.key]: false })); else { setOpenDepts({ [d.key]: true }); setFocusDept((f) => ({ k: d.key, n: f.n + 1 })); } }}>
                     <Icon n={d.icon} /><span>{tx(d.label, lang)}</span><Icon n="chev" className="chev" />
                   </button>
                   {open && <div className="nav-sub">{HUBS.includes(d.key) && <Link href={`/${d.key}/overview`} className={`nav-item ${hubDept === d.key ? "active" : ""}`}><Icon n="grid" /><span>{t("dept_overview", lang)}</span></Link>}{d.secs.map((s: any) => (
