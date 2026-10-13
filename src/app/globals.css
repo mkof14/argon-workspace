@@ -877,3 +877,9 @@ a.hub-row:hover{background:var(--surface-2)}
 .rail .nav-item.top:hover,.rail .nav-item.top.active{color:#fff}
 .rail .nav-dept>button{font-weight:400;font-size:16px;letter-spacing:.01em;color:#F2F5F8}
 .rail .nav-label.nav-depts{font-weight:500}
+
+/* "Departments" is a section caption, not an item: small orange text with a rule, on the menu background */
+.rail .nav-label.nav-depts{margin:16px 0 4px;padding:8px 12px 8px;border:0;border-radius:0;background:var(--rail);color:var(--rail-hi);font-size:12.5px;font-weight:500;letter-spacing:.06em;gap:8px}
+.rail .nav-label.nav-depts svg{width:15px;height:15px;color:var(--rail-hi)}
+.rail .nav-label.nav-depts::after{content:"";flex:1;height:1px;background:color-mix(in srgb,var(--rail-hi) 35%,transparent);order:2}
+.rail .nav-label.nav-depts b{order:3;margin-inline-start:0;background:none;border:0;padding:0;color:var(--rail-dim);font-weight:400}
