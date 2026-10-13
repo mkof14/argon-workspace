@@ -851,3 +851,16 @@ a.hub-row:hover{background:var(--surface-2)}
   .mcal-li small{font-weight:400;color:var(--ink-3);font-size:12.5px}
   .mcal-nav{margin-inline-start:0;width:100%}.mcal-nav b{flex:1;min-width:0}
 }
+
+/* Brand logos */
+.brand-logos{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.brand-logo{margin:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;display:grid;background:var(--surface)}
+.brand-plate{height:150px;display:grid;place-items:center;padding:18px;background:#EEF1F4}
+.brand-plate.dark{background:var(--rail)}
+.brand-plate img{max-width:100%;max-height:100%;object-fit:contain}
+.brand-logo figcaption{padding:12px 14px;display:grid;gap:4px}
+.brand-logo figcaption small{color:var(--ink-3);font-size:12.5px;line-height:1.4}
+.brand-logo .toolbar{margin-top:6px}
+.sd-brand{background:var(--rail);border-radius:14px;padding:20px 24px;display:grid;gap:12px}
+.sd-brand img{width:min(420px,100%);height:auto}
+.sd-brand p{margin:0;color:var(--rail-ink);font-size:15px;line-height:1.55;max-width:900px}

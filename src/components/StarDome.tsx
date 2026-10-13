@@ -79,7 +79,7 @@ export default function StarDome() {
 
   return (
     <div style={{ display: "grid", gap: 16, ["--dc" as any]: "#FF6A2B" }}>
-      <p className="muted" style={{ margin: 0, fontSize: 15.5 }}>{t("sd_intro", lang)}</p>
+      <div className="sd-brand"><img src="/brand/stardome-logo.webp" alt="StarDome" width={1200} height={222} /><p>{t("sd_intro", lang)}</p></div>
       <nav className="sd-cfgs" aria-label={t("sd_title", lang)}>
         {CONFIGS.map((c) => <button key={c} className={`sd-cfg ${cfg === c ? "on" : ""}`} onClick={() => pick(c)} aria-pressed={cfg === c}>
           <b>{c}</b><span className="faint">{ABOUT[c].size}</span>{view && <span className="chip mono">{view.counts[c]}</span>}</button>)}

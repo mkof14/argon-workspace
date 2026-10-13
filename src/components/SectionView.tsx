@@ -8,6 +8,7 @@ const MailCenter = dynamic(() => import("./Mail"), { ssr: false });
 const LegalHub = dynamic(() => import("./LegalHub"), { ssr: false });
 import { SectionTemplates } from "./Templates";
 import { CsvImport } from "./DataTools";
+import BrandLogos from "./BrandLogos";
 import { DEPARTMENTS, gateBlocks } from "@/config/workspace.config.mjs";
 import { HELP, l2 } from "@/config/learn";
 import Link from "next/link";
@@ -101,6 +102,7 @@ export default function SectionView({ section }: { section: any }) {
       </section>
 
       {section.view === "desks" && <LegalHub />}
+      {section.id === "marketing.brand" && <BrandLogos />}
       {canWrite && <SectionTemplates sectionId={section.id} />}
       <div className="toolbar">
         {canWrite && <button className="btn primary" onClick={() => setOpen("new")}><Icon n="plus" />{t("new", lang)}</button>}
