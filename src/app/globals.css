@@ -869,3 +869,11 @@ a.hub-row:hover{background:var(--surface-2)}
 .rail .nav-label.nav-depts{display:flex;align-items:center;gap:10px;margin:14px 2px 6px;padding:10px 12px;border-radius:10px;background:var(--rail-2);border:1px solid var(--rail-line);color:#F2F5F8;font-size:14.5px;font-weight:700;letter-spacing:0;text-transform:none;position:sticky;top:-10px;z-index:2}
 .rail .nav-label.nav-depts svg{width:18px;height:18px;color:var(--rail-hi);flex:none}
 .rail .nav-label.nav-depts b{margin-inline-start:auto;font-family:var(--f-mono);font-size:12px;font-weight:600;color:var(--rail-dim);background:var(--rail);border:1px solid var(--rail-line);border-radius:20px;padding:1px 8px}
+
+/* Menu hierarchy without bold: general pages are quiet links, departments are the main entries */
+.rail .nav-item.top{font-size:14.5px;font-weight:400;color:var(--rail-dim);padding:7px 12px}
+.rail .nav-item.top>svg{width:20px;height:20px;padding:0;border-radius:0;background:none;color:var(--dc,var(--rail-hi));opacity:.85}
+.rail .nav-item.top:hover>svg,.rail .nav-item.top.active>svg{background:none;color:var(--dc,var(--rail-hi));transform:none;opacity:1}
+.rail .nav-item.top:hover,.rail .nav-item.top.active{color:#fff}
+.rail .nav-dept>button{font-weight:400;font-size:16px;letter-spacing:.01em;color:#F2F5F8}
+.rail .nav-label.nav-depts{font-weight:500}
