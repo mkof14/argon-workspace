@@ -202,3 +202,24 @@ export function RecordTools({ section, data, setData, canWrite }: { section: any
     </section>
   );
 }
+
+/* ---------------- Access log for export-controlled data ---------------- */
+export function AccessLog() {
+  const T = useT(); const { access, me } = useApp();
+  const [rows, setRows] = useState<any[] | null>(null);
+  const can = ["owner", "admin"].includes(me.role) || access.read.has("security.tcp");
+  useEffect(() => { if (can && !DEMO) store.activity({ log: true, limit: 60 }).then(setRows).catch(() => setRows([])); else setRows([]); }, []); // eslint-disable-line
+  if (!can || !rows) return null;
+  const people = new Set(rows.map((r) => r.actor)).size;
+  return (
+    <div className="card hub-card wide">
+      <div className="card-h"><h2><Icon n="lock" />{T(L("Who opened export-controlled data", "Кто открывал данные под экспортным контролем", "Хто відкривав дані під експортним контролем", "من فتح البيانات الخاضعة للرقابة"))}</h2>
+        <span className="faint" style={{ fontSize: 13 }}>{T(L("Technology control plan log: every view of a controlled record or file", "Журнал плана контроля технологий: каждый просмотр контролируемой записи или файла", "Журнал плану контролю технологій: кожен перегляд контрольованого запису або файлу", "سجل خطة الرقابة التقنية"))} · {rows.length} / {people}</span></div>
+      <div className="card-b">{!rows.length ? <div className="empty" style={{ padding: 14 }}>{T(L("No views yet. Opening any record marked US persons only is logged here.", "Просмотров пока нет. Здесь записывается открытие любой записи с пометкой «только US persons».", "Переглядів поки немає. Тут записується відкриття будь-якого запису з позначкою «лише US persons».", "لا مشاهدات بعد."))}</div>
+        : <div className="tablewrap"><table className="tb"><thead><tr><th>{T(L("When", "Когда", "Коли", "متى"))}</th><th>{T(L("Who", "Кто", "Хто", "من"))}</th><th>{T(L("What", "Что", "Що", "ماذا"))}</th><th>US</th></tr></thead>
+          <tbody>{rows.map((r) => <tr key={r.id}><td className="mono" style={{ whiteSpace: "nowrap" }}>{String(r.created_at).slice(0, 16).replace("T", " ")}</td><td>{r.detail?.name || r.detail?.email}<br /><small className="faint">{r.detail?.role}</small></td>
+            <td><Link href={`/${String(r.detail?.section || "").replace(".", "/")}?r=${r.record_id}`}>{r.detail?.title}</Link>{r.detail?.file ? <><br /><small className="faint">{r.detail.file}</small></> : null}</td>
+            <td>{r.detail?.us_person ? "✓" : <span className="chip c-bad">no</span>}</td></tr>)}</tbody></table></div>}</div>
+    </div>
+  );
+}

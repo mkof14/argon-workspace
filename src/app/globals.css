@@ -947,3 +947,12 @@ a.hub-row:hover{background:var(--surface-2)}
 .bk-box{border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:grid;gap:8px;align-content:start;min-width:0}
 .bk-box>p{margin:0;font-size:13.5px;line-height:1.5}
 .bk-list{margin:0;padding-inline-start:18px;font-size:13px;display:grid;gap:4px}
+.ref-chip{display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--line);border-radius:9px;min-height:42px;min-width:0}
+.ref-chip>svg{width:15px;height:15px;color:var(--dc,var(--accent));flex:none}.ref-chip a{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ref-chip .faint{font-size:12.5px;margin-inline-start:auto;white-space:nowrap}.ref-chip .iconbtn{width:28px;height:28px}
+.ref-menu{position:absolute;top:calc(100% + 4px);inset-inline:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow-lg);z-index:30;display:grid;max-height:280px;overflow:auto}
+.ref-menu button{display:flex;align-items:center;gap:8px;justify-content:space-between;padding:8px 10px;border:0;background:none;text-align:start;cursor:pointer;color:var(--ink);font:inherit}
+.ref-menu button:hover{background:var(--surface-2)}
+.chain{margin:0;padding-inline-start:20px;display:grid;gap:6px}
+.chain li{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:14px}
+.chain li .faint{font-size:12.5px;min-width:150px}.chain li.me b{color:var(--dc,var(--accent))}

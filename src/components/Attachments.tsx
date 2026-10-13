@@ -52,8 +52,9 @@ export default function Attachments({ section, rec, canWrite, title }: { section
       toast(t("uploaded", lang)); load();
     } catch (e: any) { toast(e.message || "Upload failed", true); } finally { setBusy(false); }
   };
-  const open = async (f: FileItem) => { try { setView({ f, url: await store.fileUrl(f.path) }); } catch (e: any) { toast(e.message, true); } };
-  const dl = async (f: FileItem) => { try { const u = await store.fileUrl(f.path, 600, f.name); const a = document.createElement("a"); a.href = u; a.download = f.name; a.click(); } catch (e: any) { toast(e.message, true); } };
+  const logFile = (f: FileItem) => { if (rec?.controlled && !DEMO) fetch("/api/log", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ record_id: rec.id, file: f.name }) }).catch(() => {}); };
+  const open = async (f: FileItem) => { logFile(f); try { setView({ f, url: await store.fileUrl(f.path) }); } catch (e: any) { toast(e.message, true); } };
+  const dl = async (f: FileItem) => { logFile(f); try { const u = await store.fileUrl(f.path, 600, f.name); const a = document.createElement("a"); a.href = u; a.download = f.name; a.click(); } catch (e: any) { toast(e.message, true); } };
   const share = async (f: FileItem) => { try { const u = await store.fileUrl(f.path, 7 * 86400); await navigator.clipboard.writeText(u); toast(t("link_copied", lang)); } catch (e: any) { toast(e.message, true); } };
   const mail = async (list: FileItem[]) => {
     try {

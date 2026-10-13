@@ -2,13 +2,14 @@
 import Approval from "./Approval";
 import MarketingStudio from "./MarketingStudio";
 import { RecordTools } from "./DeptTools";
+import { RefField, ChainPanel } from "./Links";
 import { APPROVALS } from "@/config/approvals";
 import { gateBlocks } from "@/config/workspace.config.mjs";
 import { useEffect, useRef, useState } from "react";
 import Icon from "./Icon";
 import { useApp } from "./App";
 import { t, tx } from "@/lib/i18n";
-import { Activity, Comment, Rec, isExternal, store } from "@/lib/store";
+import { Activity, Comment, DEMO, Rec, isExternal, store } from "@/lib/store";
 import { fmt, printHtml, recordMarkdown, saveBlob, slug, tone } from "@/lib/format";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
@@ -50,6 +51,8 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
   const gate = section.gate;
   const gateBlocked = gateBlocks(gate, status, data);
 
+  // Opening an export-controlled record is written to the access log (technology control plan)
+  useEffect(() => { if (rec?.controlled && !DEMO) fetch("/api/log", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ record_id: rec.id }) }).catch(() => {}); }, [rec?.id]); // eslint-disable-line
   useEffect(() => {
     if (!rec) return;
     store.comments(rec.id).then(setComments).catch(() => {});
@@ -92,6 +95,7 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
         <span className="bar" style={{ display: "inline-block", width: 120, verticalAlign: "middle", marginInlineStart: 8 }}><span style={{ width: `${(done / items.length) * 100}%` }} /></span></summary>
         <div className="cl-grid">{items.map((it, i) => <label key={i} className="check"><input type="checkbox" disabled={ro} checked={!!val[i]} onChange={(e) => set({ ...val, [i]: e.target.checked })} /><span className="mono faint" style={{ minWidth: 22 }}>{i + 1}.</span>{it}</label>)}</div></details>;
     }
+    if (f.type === "ref") return <RefField key={f.key} f={f} data={data} setData={setData} ro={ro} />;
     if (f.type === "html") return v ? <div key={f.key} className="field wide"><label>{tx(f.label, lang)}</label><iframe title={tx(f.label, lang)} className="mailframe" style={{ height: 560 }} srcDoc={String(v)} sandbox="" /></div> : null;
     if (f.type === "select") ctl = <select id={id} className="input" value={v} disabled={ro} onChange={(e) => set(e.target.value)}><option value="" />{f.options.map((o: string) => <option key={o}>{o}</option>)}</select>;
     else if (f.type === "long") ctl = <textarea id={id} className="input" value={v} readOnly={ro} rows={3} onChange={(e) => set(e.target.value)} />;
@@ -140,6 +144,7 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
               </span></summary>
             <div className="md tpl-paper" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(data.document) as string) }} />
           </details>}
+          {rec && <ChainPanel rec={current} />}
           <RecordTools section={section} data={data} setData={setData} canWrite={canWrite} />
           {section.dept === "marketing" && <MarketingStudio section={section} title={title} data={data} setData={setData} canWrite={canWrite} saved={!!rec} />}
           <datalist id="people-list">{people.map((p) => <option key={p.id} value={p.full_name || p.email} />)}</datalist>
@@ -173,7 +178,7 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
           <h1 style={{ fontFamily: "Unbounded, sans-serif", fontSize: 19, margin: "4px 0 6px" }}>{title}</h1>
           <div style={{ color: "#4B5867", marginBottom: 14 }}>{status}{controlled ? " · CONTROLLED — US persons only" : ""}</div>
           <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12 }}><tbody>
-            {section.fields.filter((f: any) => f.type !== "html" && data[f.key] !== undefined && data[f.key] !== "").map((f: any) => <tr key={f.key}><td style={{ border: "1px solid #D5DCE4", padding: "6px 8px", background: "#F5F7F9", width: "34%" }}>{tx(f.label, lang)}</td><td style={{ border: "1px solid #D5DCE4", padding: "6px 8px", whiteSpace: "pre-wrap" }}>{fmt(f, data[f.key], lang)}</td></tr>)}
+            {section.fields.filter((f: any) => f.type !== "html" && data[f.key] !== undefined && data[f.key] !== "").map((f: any) => <tr key={f.key}><td style={{ border: "1px solid #D5DCE4", padding: "6px 8px", background: "#F5F7F9", width: "34%" }}>{tx(f.label, lang)}</td><td style={{ border: "1px solid #D5DCE4", padding: "6px 8px", whiteSpace: "pre-wrap" }}>{fmt(f, data[f.key], lang, data)}</td></tr>)}
           </tbody></table>
         </div>
         <div style={{ margin: "0 36px 24px", paddingTop: 10, borderTop: "1px solid #D5DCE4", color: "#7A8796", fontSize: 10 }}>© 2026 AGRON Inc. All rights reserved. · {t("foot_conf", lang)} · www.agron1.com</div>

@@ -13,8 +13,9 @@ export function tone(v?: string | null) {
   return "";
 }
 
-export function fmt(field: any, v: any, lang: Lang): string {
+export function fmt(field: any, v: any, lang: Lang, data?: Record<string, any>): string {
   if (v === undefined || v === null || v === "") return "";
+  if (field?.type === "ref") return String(data?.[`${field.key}_title`] || "linked record");
   if (field?.type === "money" || field?.type === "number") {
     const n = Number(v); if (Number.isNaN(n)) return String(v);
     return n.toLocaleString(lang === "ar" ? "ar-AE" : lang === "ru" ? "ru-RU" : lang === "uk" ? "uk-UA" : "en-US");
@@ -26,7 +27,7 @@ export function fmt(field: any, v: any, lang: Lang): string {
 }
 
 export function recordMarkdown(section: any, r: Rec, lang: Lang) {
-  const rows = section.fields.filter((f: any) => f.type !== "html" && r.data?.[f.key] !== undefined && r.data?.[f.key] !== "").map((f: any) => `| ${tx(f.label, lang)} | ${fmt(f, r.data[f.key], lang).replace(/\|/g, "/").replace(/\n/g, " ")} |`);
+  const rows = section.fields.filter((f: any) => f.type !== "html" && r.data?.[f.key] !== undefined && r.data?.[f.key] !== "").map((f: any) => `| ${tx(f.label, lang)} | ${fmt(f, r.data[f.key], lang, r.data).replace(/\|/g, "/").replace(/\n/g, " ")} |`);
   return `# ${r.title}\n\n**${tx(section.label, lang)}** · ${r.status || ""}${r.controlled ? " · CONTROLLED (US persons only)" : ""}\n\n| | |\n|---|---|\n${rows.join("\n")}\n\n---\n_AGRON Workspace · ${new Date().toISOString().slice(0, 10)} · © 2026 AGRON Inc. · Confidential_\n`;
 }
 

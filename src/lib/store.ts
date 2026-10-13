@@ -125,10 +125,11 @@ export const store = {
     const { data: u } = await sb().auth.getUser();
     const { error } = await sb().from("comments").insert({ record_id: recordId, body, author: u?.user?.id }); if (error) throw error;
   },
-  async activity(opts: { recordId?: string; limit?: number } = {}): Promise<Activity[]> {
+  async activity(opts: { recordId?: string; limit?: number; log?: boolean } = {}): Promise<Activity[]> {
     if (DEMO) { const db = demoLoad(); const acc = accessFor(demoMe(db).role, db.rules); return db.activity.filter((a) => (!opts.recordId || a.record_id === opts.recordId) && acc.read.has(a.section)).slice(0, opts.limit || 20); }
     let q = sb().from("activity").select("*").order("created_at", { ascending: false }).limit(opts.limit || 20);
     if (opts.recordId) q = q.eq("record_id", opts.recordId);
+    q = opts.log ? q.eq("section", "security.log") : q.neq("section", "security.log"); // the access log is shown only on the Security overview
     const { data } = await q; return (data || []) as Activity[];
   },
   /** Comments that mention a person with @Name (last 30 days). */
