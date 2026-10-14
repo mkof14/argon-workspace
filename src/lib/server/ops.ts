@@ -7,6 +7,8 @@ import { renderEmail, SITE } from "@/lib/mail";
 import { departmentReport } from "@/lib/reports";
 import { prevMonth, thisMonth } from "@/lib/channels";
 import { DEPARTMENTS } from "@/config/workspace.config.mjs";
+import { withDefaults } from "@/lib/automation";
+const roles = async (db: any) => withDefaults(await readState(db, "settings").catch(() => null)).notify;
 
 /** Scheduled company jobs: weekly backup, daily monitoring with alerts, monthly department reports. */
 const people = async (db: any, roles: string[]) => ((await db.from("profiles").select("email,full_name,role,lang").in("role", roles)).data || []).filter((p: any) => p.email);
@@ -44,7 +46,7 @@ export async function monitorJob(db: any, opts: { alwaysEmail?: boolean } = {}) 
   let emailed = 0;
   // Alert when something is wrong and the picture changed since yesterday (no daily repeats), or when asked
   if ((problems.length && changed) || opts.alwaysEmail) {
-    const to = await people(db, ["owner", "admin", "security"]);
+    const to = await people(db, (await roles(db)).monitor_roles);
     const subject = problems.length ? `AGRON monitoring: ${problems.length} issue${problems.length > 1 ? "s" : ""}` : "AGRON monitoring: all systems OK";
     const list = problems.length ? `<ul style="padding-left:18px;font-size:15px;line-height:1.6;color:#2A3440">${problems.map((p) => `<li><b style="color:${p.level === "fail" ? "#B4232F" : "#A15C00"}">${esc(p.what)}</b> — ${esc(p.detail)}</li>`).join("")}</ul>` : `<p style="font-size:16px;color:#1F7A4D">All monitored systems and domains are fine.</p>`;
     const html = `${list}<p style="font-size:14px;color:#7A8796">Checked ${(systems as any[]).filter((s) => !s.skipped).length} systems and ${scans.length} domains. Details: <a href="${SITE}/technical/overview">Technical</a> · <a href="${SITE}/security/overview">Security</a>.</p>`;
@@ -67,7 +69,7 @@ export async function reportsJob(db: any, period?: string) {
   const md = depts.map((d) => departmentReport(d, recs, [p])).join("\n\n");
   const html = `<p style="font-size:15px;line-height:1.6;color:#2A3440">Department reports for <b>${p}</b>, built from Workspace records (export-controlled records are not included in email). Open any department overview → Report for AI conclusions and PDF.</p>${tableStyle(await marked.parse(md))}`;
   const subject = `AGRON monthly report — ${p}`;
-  const to = await people(db, ["owner", "admin", "management"]);
+  const to = await people(db, (await roles(db)).report_roles);
   let sent = 0; for (const x of to) if (!(await sendMail({ to: x.email, subject, html: page(subject, html), text: md }))) sent++;
   await saveState(db, "reports", { at: new Date().toISOString(), period: p, sent, departments: depts.length });
   return { period: p, sent, departments: depts.length };

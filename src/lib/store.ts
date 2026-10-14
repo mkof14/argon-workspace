@@ -66,6 +66,11 @@ function demoFaq(db: DemoDB): Faq[] {
 const words = (s: string) => new Set(s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((w) => w.length > 2));
 export function textSim(a: string, b: string) { const A = words(a), B = words(b); if (!A.size || !B.size) return 0; let n = 0; A.forEach((w) => { if ([...B].some((x) => x.startsWith(w.slice(0, 5)) || w.startsWith(x.slice(0, 5)))) n++; }); return n / Math.max(A.size, B.size); }
 
+/** Tells the automation rules about a new record or a status change (in the background; never blocks saving). */
+function automate(ev: { id: string; kind: "created" | "status"; from?: string | null }) {
+  try { fetch("/api/automation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "event", ...ev }), keepalive: true }).catch(() => {}); } catch {}
+}
+
 /* ---------------- Public API ---------------- */
 export const store = {
   async me(): Promise<Profile | null> {
@@ -105,12 +110,15 @@ export const store = {
     }
     const body: any = { section: r.section, title: r.title, status: r.status ?? null, data: r.data || {}, company: r.company || null, controlled: !!r.controlled };
     if (r.id) {
+      const { data: before } = await sb().from("records").select("status").eq("id", r.id).maybeSingle();
       const { data, error } = await sb().from("records").update(body).eq("id", r.id).select().single();
-      if (error) throw error; return data as Rec;
+      if (error) throw error;
+      if ((before?.status || "") !== (data.status || "")) automate({ id: data.id, kind: "status", from: before?.status ?? null });
+      return data as Rec;
     }
     const { data: u } = await sb().auth.getUser();
     const { data, error } = await sb().from("records").insert({ ...body, created_by: u?.user?.id }).select().single();
-    if (error) throw error; return data as Rec;
+    if (error) throw error; automate({ id: data.id, kind: "created" }); return data as Rec;
   },
   async remove(id: string) {
     if (DEMO) { const db = demoLoad(); const r = db.records.find((x) => x.id === id); db.records = db.records.filter((x) => x.id !== id); if (r) db.activity.unshift({ id: Date.now(), record_id: id, section: r.section, actor: demoMe(db).id, action: "deleted", detail: { title: r.title }, created_at: new Date().toISOString() }); demoSave(db); return; }

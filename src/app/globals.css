@@ -956,3 +956,14 @@ a.hub-row:hover{background:var(--surface-2)}
 .chain{margin:0;padding-inline-start:20px;display:grid;gap:6px}
 .chain li{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:14px}
 .chain li .faint{font-size:12.5px;min-width:150px}.chain li.me b{color:var(--dc,var(--accent))}
+/* Automation (System → Automation) */
+.auto-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.auto-card{display:grid;gap:8px;align-content:start;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.auto-card.off{opacity:.62}
+.auto-card p{margin:0;font-size:14px;line-height:1.5;color:var(--ink-2)}
+.auto-ic{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;background:var(--surface-2);color:var(--accent);flex:none}
+.auto-ic svg{width:18px;height:18px}
+.auto-q,.auto-rule{align-items:center;flex-wrap:wrap}
+.auto-act{display:grid;gap:8px;padding:12px;border:1px solid var(--line-2);border-radius:10px;background:var(--surface-2)}
+.tabs.card{padding:0 8px}
+@media (max-width:640px){.auto-rule .seg{order:3}.auto-q .toolbar{width:100%}}

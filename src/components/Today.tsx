@@ -6,6 +6,8 @@ import { useInbox } from "./Inbox";
 import { tx, type Lang } from "@/lib/i18n";
 import { OPEN, isMine } from "@/lib/insights";
 import { tone } from "@/lib/format";
+import { useEffect, useState } from "react";
+import { DEMO } from "@/lib/sb";
 
 type T4 = { en: string; ru: string; uk: string; ar: string };
 const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk, ar });
@@ -15,6 +17,9 @@ const href = (r: { id?: string; record_id?: string; section?: string }) => `/${S
 export default function Today() {
   const { lang, me, openIntake } = useApp(); const T = (x: T4) => tx(x, lang as Lang);
   const d = useInbox();
+  // Owners and administrators also see what the agents prepared for approval
+  const [auto, setAuto] = useState<{ n: number; items: { id: string; agent: string; title: string; at: string }[] } | null>(null);
+  useEffect(() => { if (DEMO || !["owner", "admin"].includes(me.role)) return; fetch("/api/automation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "pending" }) }).then((r) => (r.ok ? r.json() : null)).then(setAuto).catch(() => {}); }, [me.role]);
   const hour = new Date().getHours();
   const hello = hour < 12 ? L("Good morning", "Доброе утро", "Доброго ранку", "صباح الخير") : hour < 18 ? L("Good afternoon", "Добрый день", "Доброго дня", "مساء الخير") : L("Good evening", "Добрый вечер", "Доброго вечора", "مساء الخير");
   const tasks = d.recs.filter((r) => r.section === "company.tasks" && OPEN(r) && isMine(r, me)).sort((a, b) => String(a.data?.due || "9").localeCompare(String(b.data?.due || "9")));
@@ -49,6 +54,8 @@ export default function Today() {
           {tasks.slice(0, 12).map((r) => <Link key={r.id} href={href(r)} className="hub-row"><span><b>{r.title}</b><small>{r.data?.due || ""}</small></span><span className={`chip ${tone(r.status)}`}>{r.status}</span></Link>)}</Box></div>
         <div id="men"><Box icon="user" title={L("Mentions of me", "Упоминания меня", "Згадки про мене", "الإشارات إليّ")} n={d.mentions.length} empty={L("Nobody mentioned you in 30 days.", "За 30 дней вас не упоминали.", "За 30 днів вас не згадували.", "لم يُشر إليك أحد.")}>
           {d.mentions.slice(0, 10).map((m) => <Link key={m.id} href={href({ record_id: m.record_id, section: m.section })} className="hub-row"><span><b>{m.title}</b><small>{m.body.slice(0, 120)}</small></span><small className="faint">{m.created_at.slice(0, 10)}</small></Link>)}</Box></div>
+        {auto && auto.n > 0 && <div className="wide"><Box icon="cpu" title={L("Prepared by agents — approve in one click", "Подготовлено агентами — одобрите одним кликом", "Підготовлено агентами — схваліть одним кліком", "أعدّه الوكلاء — وافق بنقرة واحدة")} n={auto.n} empty={L("", "", "", "")}>
+          {auto.items.map((q) => <Link key={q.id} href="/admin/system?tab=auto" className="hub-row"><span><b>{q.title}</b><small>{q.agent} · {q.at.slice(0, 10)}</small></span><span className="chip c-warn">{T(L("Review", "Посмотреть", "Переглянути", "مراجعة"))}</span></Link>)}</Box></div>}
         {d.company.length > 0 && <div className="wide"><Box icon="alert" title={L("Company: overdue items (leaders)", "Компания: просрочено (для руководства)", "Компанія: прострочено (для керівництва)", "الشركة: متأخرات")} n={d.company.length} empty={L("", "", "", "")}>
           {d.company.slice(0, 15).map((x) => <Link key={x.r.id + x.k} href={href(x.r)} className="hub-row"><span><b>{x.r.title}</b><small>{tx(findSection(x.r.section)?.label, lang as Lang)}{x.r.data?.owner ? ` · ${x.r.data.owner}` : ""}</small></span><span className="chip c-bad">{rel(x.d)}</span></Link>)}</Box></div>}
       </div>

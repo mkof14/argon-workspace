@@ -3,6 +3,7 @@ import { adminClient, currentProfile } from "@/lib/server/supabase";
 import { allSections, defaultRules } from "@/config/workspace.config.mjs";
 import { dueItems, isMine } from "@/lib/insights";
 import { COMPANY, SITE, plainText, renderEmail } from "@/lib/mail";
+import { readState } from "@/lib/server/backup";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,6 +23,8 @@ export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET;
   if (!secret || req.headers.get("authorization") !== `Bearer ${secret}`) return new Response("Not allowed", { status: 401 });
   await cleanIntake().catch(() => {});
+  const st = await readState(adminClient(), "settings").catch(() => null);
+  if (st && st.notify?.digest === false) return Response.json({ ok: true, sent: 0, off: true }); // switched off in System → Settings
   return run(null);
 }
 export async function POST() {

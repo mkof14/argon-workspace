@@ -6,13 +6,45 @@ import { t } from "@/lib/i18n";
 import { DEMO, sb } from "@/lib/sb";
 import { FullExport } from "./DataTools";
 import BackupCenter from "./BackupCenter";
+import Automation, { useAuto, L } from "./Automation";
+import SysSettings from "./SysSettings";
+import Quality from "./Quality";
+import { tx, type Lang } from "@/lib/i18n";
+
+const TABS = [
+  { k: "health", icon: "pulse", t: L("Health", "Состояние", "Стан", "الحالة") },
+  { k: "auto", icon: "cpu", t: L("Automation", "Автоматизация", "Автоматизація", "الأتمتة") },
+  { k: "quality", icon: "check", t: L("Data quality & audit", "Качество данных и аудит", "Якість даних і аудит", "جودة البيانات والتدقيق") },
+  { k: "settings", icon: "gear", t: L("Settings", "Настройки", "Налаштування", "الإعدادات") },
+  { k: "backup", icon: "server", t: L("Backup", "Резервные копии", "Резервні копії", "النسخ الاحتياطي") },
+];
+
+/** Administration → System, in tabs. The tab is kept in the address (?tab=…), so email links open the right place. */
+export default function System() {
+  const { lang, me } = useApp();
+  const [tab, setTab] = useState("health");
+  const a = useAuto();
+  useEffect(() => { const q = new URLSearchParams(window.location.search).get("tab"); if (q && TABS.some((x) => x.k === q)) setTab(q); }, []);
+  const go = (k: string) => { setTab(k); try { const u = new URL(window.location.href); u.searchParams.set("tab", k); window.history.replaceState(window.history.state, "", u.toString()); } catch {} };
+  const pending = a.s?.queue.filter((q) => q.status === "pending").length || 0;
+  const isOwnerOrAdmin = ["owner", "admin"].includes(me.role);
+  return (<div style={{ display: "grid", gap: 16 }}>
+    <div className="tabs card" role="tablist" style={{ ["--dc" as any]: "#5B6CF0" }}>{TABS.filter((x) => x.k !== "backup" || isOwnerOrAdmin).map((x) => (
+      <button key={x.k} role="tab" aria-selected={tab === x.k} className={tab === x.k ? "on" : ""} onClick={() => go(x.k)}><Icon n={x.icon} />{tx(x.t, lang as Lang)}{x.k === "auto" && pending > 0 && <span className="chip c-warn" style={{ padding: "0 7px" }}>{pending}</span>}</button>))}</div>
+    {tab === "health" && <Health />}
+    {tab === "auto" && <Automation a={a} />}
+    {tab === "quality" && <Quality a={a} />}
+    {tab === "settings" && <SysSettings a={a} />}
+    {tab === "backup" && <div style={{ display: "grid", gap: 16 }}>{isOwnerOrAdmin && <BackupCenter />}{me.role === "owner" && <FullExport />}</div>}
+  </div>);
+}
 
 type Health = { ok: boolean; checks: Record<string, boolean>; ms: number; at: string };
 type Err = { id: number; created_at: string; user_id: string | null; source: string; message: string; stack: string | null; url: string | null; agent: string | null; version: string | null; resolved: boolean };
 
-/** Admin → System: live health of the services, the error log, and the backup. */
-export default function System() {
-  const { lang, toast, people, me } = useApp();
+/** Live health of the services and the error log. */
+function Health() {
+  const { lang, toast, people } = useApp();
   const [h, setH] = useState<Health | null>(null);
   const [errs, setErrs] = useState<Err[]>([]);
   const [all, setAll] = useState(false);
@@ -85,8 +117,6 @@ export default function System() {
           </div>))}</div> : <div className="empty">{t("sys_no_errors", lang)}</div>}
       </section>
 
-      {["owner", "admin"].includes(me.role) && <BackupCenter />}
-      {me.role === "owner" && <FullExport />}
     </div>
   );
 }
