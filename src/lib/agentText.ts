@@ -26,7 +26,7 @@ export const AGENT_TEXT: Record<string, T3> = {
   "sal-outcome": ["{type} «{title}» {date} — запишите итог и следующий шаг.", "{type} «{title}» {date} — запишіть підсумок і наступний крок.", "{type} «{title}» {date} — سجّل النتيجة والخطوة التالية."],
   "sal-next": ["Следующий шаг после «{title}»: {next_step}. Задача подготовлена.", "Наступний крок після «{title}»: {next_step}. Задачу підготовлено.", "الخطوة التالية بعد «{title}»: {next_step}. تم تجهيز مهمة."],
   // Operations
-  "ops-export": ["Сборка «{title}» на этапе {status}, а экспортная проверка «{export_check}». Отгружать нельзя до разрешения.", "Збирання «{title}» на етапі {status}, а експортна перевірка «{export_check}». Відвантажувати не можна до дозволу.", "التجميع «{title}» في مرحلة {status} وفحص التصدير «{export_check}». لا شحن قبل التصريح."],
+  "ops-export": ["Сборка «{title}» на этапе {status}, а экспортная проверка: {export_check|Not started}. Отгружать нельзя до разрешения.", "Збирання «{title}» на етапі {status}, а експортна перевірка: {export_check|Not started}. Відвантажувати не можна до дозволу.", "التجميع «{title}» في مرحلة {status} وفحص التصدير: {export_check|Not started}. لا شحن قبل التصريح."],
   "ops-ship-exp": ["Груз «{title}» в пути ({status}) без экспортного разрешения сборки.", "Вантаж «{title}» у дорозі ({status}) без експортного дозволу збирання.", "الشحنة «{title}» في الطريق ({status}) دون تصريح تصدير للتجميع."],
   "ops-late": ["Груз «{title}» ({carrier} {tracking}) должен был прийти {due}, всё ещё {status}.", "Вантаж «{title}» ({carrier} {tracking}) мав прийти {due}, досі {status}.", "الشحنة «{title}» ({carrier} {tracking}) كان موعدها {due} وما زالت {status}."],
   "ops-inst": ["Сборка «{title}» доставлена — подготовлена запись монтажа.", "Збирання «{title}» доставлено — підготовлено запис монтажу.", "تم تسليم التجميع «{title}» — تم تجهيز سجل التركيب."],
@@ -88,8 +88,8 @@ export const AGENT_TEXT: Record<string, T3> = {
   "mkt-over": ["Кампания «{title}» потратила {spent} из {budget} {currency}.", "Кампанія «{title}» витратила {spent} з {budget} {currency}.", "أنفقت الحملة «{title}» {spent} من {budget} {currency}."],
   "mkt-analyze": ["Кампания «{title}» завершена — запишите результаты и отметьте Analyzed.", "Кампанію «{title}» завершено — запишіть результати й позначте Analyzed.", "اكتملت الحملة «{title}» — سجّل النتائج وعلّمها محللة."],
   "mkt-plan": ["Маркетинговый бюджет «{title}» сверх плана ({actual} из {planned} {currency}).", "Маркетинговий бюджет «{title}» понад план ({actual} з {planned} {currency}).", "ميزانية التسويق «{title}» فوق الخطة ({actual} من {planned} {currency})."],
-  "mkt-2fa": ["У аккаунта «{title}» ({platform}) двухэтапная защита «{two_fa}» — включите её.", "В акаунта «{title}» ({platform}) двоетапний захист «{two_fa}» — увімкніть його.", "الحساب «{title}» ({platform}) التحقق بخطوتين «{two_fa}» — فعّله."],
-  "mkt-num": ["Подписчики «{title}» обновлялись {as_of} — обновите цифры.", "Підписників «{title}» оновлювали {as_of} — оновіть цифри.", "متابعو «{title}» حُدّثوا في {as_of} — حدّث الأرقام."],
+  "mkt-2fa": ["У аккаунта «{title}» ({platform}) двухэтапная защита: {two_fa|не указано} — включите её.", "В акаунта «{title}» ({platform}) двоетапний захист: {two_fa|не вказано} — увімкніть його.", "الحساب «{title}» ({platform}) التحقق بخطوتين: {two_fa|غير محدد} — فعّله."],
+  "mkt-num": ["Подписчики «{title}» обновлялись: {as_of|никогда} — обновите цифры.", "Підписників «{title}» оновлювали: {as_of|ніколи} — оновіть цифри.", "آخر تحديث لمتابعي «{title}»: {as_of|أبداً} — حدّث الأرقام."],
   "mkt-agscr": ["Агентство «{title}» работает без пройденной проверки.", "Агенція «{title}» працює без пройденої перевірки.", "الوكالة «{title}» تعمل دون فحص مُجتاز."],
   "mkt-agnda": ["Агентство «{title}» работает без NDA или договора.", "Агенція «{title}» працює без NDA чи договору.", "الوكالة «{title}» تعمل دون اتفاقية سرية أو عقد."],
   "mkt-outlet": ["Нет контакта с {title} с {last_contact} — отправьте новость или идею.", "Немає контакту з {title} з {last_contact} — надішліть новину чи ідею.", "لا تواصل مع {title} منذ {last_contact} — أرسل خبراً أو فكرة."],
@@ -132,5 +132,5 @@ export function agentText(f: { key: string; text: string; rec: { title: string; 
   const tpl = i === undefined ? null : AGENT_TEXT[f.key.split("|")[0]]?.[i];
   if (!tpl) return f.text;
   const v = (k: string) => { const x = k === "title" ? f.rec.title : k === "status" ? f.rec.status : f.rec.data?.[k]; return x === undefined || x === null || x === "" ? "" : typeof x === "number" ? x.toLocaleString("en-US") : String(x); };
-  return tpl.replace(/\{(\w+)\}/g, (_, k) => v(k)).replace(/\(\s*\)/g, "").replace(/\s+([.,])/g, "$1").replace(/\s{2,}/g, " ").trim();
+  return tpl.replace(/\{(\w+)(?:\|([^}]*))?\}/g, (_, k, fb) => v(k) || fb || "").replace(/«\s*»/g, "").replace(/\(\s*\)/g, "").replace(/\s+([.,])/g, "$1").replace(/\s{2,}/g, " ").trim();
 }

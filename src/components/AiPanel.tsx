@@ -26,6 +26,19 @@ export default function AiPanel({ ctx, onClose }: { ctx: AiContext; onClose: () 
   const [applied, setApplied] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<"ask" | "do">("ask");
+  // Voice: dictate a question or a command (browser speech recognition, in the interface language)
+  const [listening, setListening] = useState(false); const rec = useRef<any>(null);
+  useEffect(() => () => rec.current?.abort?.(), []);
+  const listen = () => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) { toast(t("voice_unsupported", lang), true); return; }
+    if (listening) { rec.current?.stop(); return; }
+    const r = new SR(); rec.current = r; r.lang = ({ en: "en-US", ru: "ru-RU", uk: "uk-UA", ar: "ar-AE" } as Record<string, string>)[lang] || "en-US"; r.interimResults = true; r.continuous = false;
+    const before = q.trim();
+    r.onresult = (e: any) => { const txt = Array.from(e.results).map((x: any) => x[0].transcript).join(" "); setQ((before ? before + " " : "") + txt); };
+    r.onend = () => setListening(false); r.onerror = () => setListening(false);
+    setListening(true); r.start();
+  };
   const T = (x: T4) => tx(x, lang as Lang);
   const [usage, setUsage] = useState("");
   const [sugg, setSugg] = useState<Faq[]>([]);
@@ -158,9 +171,11 @@ export default function AiPanel({ ctx, onClose }: { ctx: AiContext; onClose: () 
         <div className="ai-compose">
           {sugg.length > 0 && <div className="faq-sugg"><div className="eyebrow">{t("similar", lang)}</div>
             {sugg.map((f) => <button key={f.id} onClick={() => useFaq(f)}><Icon n="book" /><span>{f.question}</span>{f.verified && <span className="chip c-ok" style={{ marginInlineStart: "auto" }}>{t("verified", lang)}</span>}</button>)}</div>}
+          {listening && <div className="search-listen"><span className="pulse" />{t("listening", lang)}</div>}
           <textarea className="input" rows={3} value={q} placeholder={mode === "do" ? T(L("What should be done?", "Что сделать?", "Що зробити?", "ماذا يجب أن يُفعل؟")) : t("ai_ph", lang)} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send(); }} aria-label={t("ai_ph", lang)} />
           <div className="toolbar"><span className="faint" style={{ fontSize: 12.5 }}>{usage && `${t("ai_usage", lang)}: ${usage}`}</span><span style={{ flex: 1 }} />
             {busy && <button className="btn" onClick={() => ctl.current?.abort()}>Stop</button>}
+            <button className={`iconbtn mic ${listening ? "on" : ""}`} onClick={listen} title={t("voice", lang)} aria-label={t("voice", lang)} aria-pressed={listening}><Icon n="mic" /></button>
             <button id="ai-send" className="btn primary" disabled={busy || !q.trim()} onClick={send}><Icon n="spark" />{t("send", lang)}</button></div>
         </div>
       </aside>

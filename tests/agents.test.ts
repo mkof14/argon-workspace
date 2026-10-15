@@ -215,3 +215,10 @@ test("deal email: client card, then lead, then notes", async () => {
   assert.equal(dealEmail(r("D", "sales.pipeline", "Proposal", { lead_ref: "L1" }) as any, all as any), "lead@x.com");
   assert.equal(dealEmail(r("D", "sales.pipeline", "Proposal", { notes: "write to bob@yacht.mc" }) as any, all as any), "bob@yacht.mc");
 });
+
+test("agent notices fill missing values with a word, never empty quotes", async () => {
+  const { agentText } = await import("../src/lib/agentText.ts");
+  const f = { key: "mkt-2fa|C", text: "EN", rec: { title: "AGRON on LinkedIn", status: "Active", data: { platform: "LinkedIn" } } };
+  assert.equal(agentText(f, "ru"), "У аккаунта «AGRON on LinkedIn» (LinkedIn) двухэтапная защита: не указано — включите её.");
+  assert.match(agentText({ key: "mkt-num|C", text: "", rec: f.rec }, "uk"), /оновлювали: ніколи/);
+});

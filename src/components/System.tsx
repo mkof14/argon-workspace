@@ -89,7 +89,7 @@ function Health() {
               <span className="faint">{v ? t("sys_on", lang) : hints[k] || t("sys_off", lang)}</span>
             </div>)) : <div className="faint">…</div>}
         </div>
-        <div className="card-b" style={{ paddingTop: 0, display: "grid", gap: 10 }}>
+        <div className="card-b" style={{ paddingTop: 0, display: "grid", gridTemplateColumns: "minmax(0,1fr)", gap: 10 }}>
           <div className="toolbar"><button className="btn sm" disabled={mtBusy} onClick={testMail}><Icon n="mail" />{mtBusy ? "…" : t("sys_mail_test", lang)}</button>
             <span className="faint" style={{ fontSize: 13.5 }}>{t("sys_mail_test_p", lang)}</span></div>
           {mt && <div className={`sys-msg ${mt.ok ? "ok" : "bad"}`} role="status"><b>{mt.ok ? t("sys_on", lang) : t("sys_mail_fail", lang)}</b> {mt.message}</div>}
