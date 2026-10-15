@@ -30,7 +30,7 @@ const Bell = dynamic(() => import("./Inbox").then((m) => m.Bell), { ssr: false }
 const Intake = dynamic(() => import("./Intake"), { ssr: false });
 const DocsAsk = dynamic(() => import("./DocsAsk"), { ssr: false });
 const StarDome = dynamic(() => import("./StarDome"), { ssr: false });
-export const VERSION = "2.8";
+export const VERSION = "2.9";
 
 type Ctx = {
   lang: Lang; me: Profile; access: Access; toast: (m: string, err?: boolean) => void;

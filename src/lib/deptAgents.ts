@@ -300,3 +300,60 @@ export function legalFindings(all: R[], today: string, _th: Th): Finding[] {
   for (const b of of(all, "legal.board")) if (b.status === "Held" && age(b, today) >= 14) out.push({ rec: b, level: "warn", who: ["owner", "role:legal"], key: `leg-minutes|${b.id}`, text: `Minutes of “${b.title}” are not drafted ${age(b, today)} days after the meeting.` });
   return out;
 }
+
+/* ---------------- Marketing ---------------- */
+const CONTENT = ["marketing.social", "marketing.press", "marketing.interviews", "marketing.video", "marketing.media", "marketing.campaigns"];
+const LIVE = /^(published|done|archived|declined|completed|analyzed)$/i;
+export function marketingFindings(all: R[], today: string, _th: Th): Finding[] {
+  const out: Finding[] = [];
+  // Public-release check: nothing goes out without it
+  for (const r of all.filter((x) => CONTENT.includes(x.section) && !LIVE.test(x.status || ""))) {
+    const ck = r.data?.check || "Not checked";
+    if (ck === "Legal review needed") out.push({ rec: r, level: "warn", who: ["role:legal", "owner"], key: `mkt-legal|${r.id}`, repeat: 3, text: `“${r.title}” waits for legal review before it can be published.` });
+    else if (ck === "Fix needed") out.push({ rec: r, level: "warn", who: ["owner"], key: `mkt-fix|${r.id}`, repeat: 3, text: `“${r.title}” failed the release check: ${String(r.data?.check_note || "see the record").slice(0, 160)}` });
+    else if (ck === "Not checked" && ["Review", "Approved", "Scheduled"].includes(r.status || "")) out.push({ rec: r, level: "warn", who: ["owner"], key: `mkt-nock|${r.id}`, text: `“${r.title}” is at ${r.status} but has not passed the release check — open it and press Check.` });
+  }
+  // Publishing calendar
+  for (const s of of(all, "marketing.social")) {
+    const p = s.data?.publish; if (!isDate(p)) continue; const d = days(today, p);
+    if (["Approved", "Scheduled"].includes(s.status || "") && d < 0) out.push({ rec: s, level: "warn", who: ["owner"], key: `mkt-late|${s.id}`, repeat: 2, text: `Post “${s.title}” was planned for ${p} and is not marked Published.` });
+    if (["Idea", "Draft"].includes(s.status || "") && d >= 0 && d <= 2) out.push({ rec: s, level: "warn", who: ["owner", "role:marketing"], key: `mkt-notready|${s.id}`, text: `Post “${s.title}” goes out on ${p} but is still ${s.status}.` });
+  }
+  for (const r of all.filter((x) => ["marketing.social", "marketing.press", "marketing.interviews", "marketing.video"].includes(x.section) && x.status === "Published" && !x.data?.post_url && age(x, today) >= 2))
+    out.push({ rec: r, level: "info", who: ["owner"], key: `mkt-url|${r.id}`, repeat: 14, text: `“${r.title}” is published — add the link so reach and reports count it.` });
+  const soon = of(all, "marketing.social").filter((s) => isDate(s.data?.publish) && days(today, s.data.publish) >= 0 && days(today, s.data.publish) <= 7 && !["Idea"].includes(s.status || ""));
+  const anchor = of(all, "marketing.channels").find((c) => c.status === "Active") || of(all, "marketing.channels")[0];
+  if (anchor && !soon.length) out.push({ rec: anchor, level: "warn", who: ["role:marketing"], key: `mkt-empty|${addDays(today, -new Date(today).getUTCDay())}`, repeat: 7, text: `No posts are planned for the next 7 days. Use “AI plan for 4 weeks” on the Marketing overview.` });
+  // Press, interviews, video, events
+  for (const p of of(all, "marketing.press")) if (["Accepted", "Writing", "Review"].includes(p.status || "") && isDate(p.data?.deadline)) {
+    const st = stepFor(days(today, p.data.deadline), [7, 2]); if (st) out.push({ rec: p, level: st === "late" ? "bad" : "warn", who: ["owner"], key: `mkt-press|${p.id}|${st}`, repeat: st === "late" ? 2 : 365, text: st === "late" ? `Article “${p.title}” for ${p.data?.outlet || "the outlet"} missed its deadline ${p.data.deadline}.` : `Article “${p.title}” for ${p.data?.outlet || "the outlet"} is due on ${p.data.deadline}.` });
+  }
+  for (const i of of(all, "marketing.interviews")) if (["Confirmed", "Preparing"].includes(i.status || "") && isDate(i.data?.session)) {
+    const d = days(today, i.data.session);
+    if (d >= 0 && d <= 3 && (!String(i.data?.prep || "").trim() || i.data?.check === "Not checked" || !i.data?.check)) out.push({ rec: i, level: "warn", who: ["owner", "role:marketing"], key: `mkt-prep|${i.id}`, text: `${i.data?.type || "Interview"} “${i.title}” is on ${i.data.session} — the briefing is not ready${i.data?.spokesperson ? ` for ${i.data.spokesperson}` : ""}. Use “Prepare the speaker”.` });
+  }
+  for (const v of of(all, "marketing.video")) if (!LIVE.test(v.status || "") && !["Approved"].includes(v.status || "") && isDate(v.data?.due) && days(v.data.due, today) >= 1) out.push({ rec: v, level: "warn", who: ["owner"], key: `mkt-video|${v.id}`, repeat: 7, text: `Video “${v.title}” was due on ${v.data.due} and is at ${v.status}.` });
+  for (const e of of(all, "marketing.events")) {
+    if (["Considering", "Applied"].includes(e.status || "") && isDate(e.data?.book_by)) { const st = stepFor(days(today, e.data.book_by), [14, 3]); if (st && st !== "late") out.push({ rec: e, level: "warn", who: ["owner", "role:marketing"], key: `mkt-book|${e.id}|${st}`, repeat: 365, text: `Decide on “${e.title}” — booking closes on ${e.data.book_by}.` }); }
+    if (e.status === "Booked" && isDate(e.data?.starts) && days(today, e.data.starts) <= 21 && days(today, e.data.starts) >= 0) out.push({ rec: e, level: "info", who: ["owner"], key: `mkt-evprep|${e.id}`, text: `“${e.title}” starts on ${e.data.starts} — preparation begins now.`, action: { type: "set", field: "status", value: "Preparing" }, why: "Event in 3 weeks" });
+    if (e.status === "Done" && age(e, today) >= 7 && !Number(e.data?.leads) && !Number(e.data?.meetings)) out.push({ rec: e, level: "info", who: ["owner"], key: `mkt-evres|${e.id}`, repeat: 30, text: `“${e.title}” is over — record the leads and meetings it brought.` });
+  }
+  // Campaigns and budget
+  for (const c of of(all, "marketing.campaigns")) {
+    if (c.status === "Running" && isDate(c.data?.end_date) && days(c.data.end_date, today) >= 1) out.push({ rec: c, level: "info", who: ["owner"], key: `mkt-camp|${c.id}`, text: `Campaign “${c.title}” ended on ${c.data.end_date}.`, action: { type: "set", field: "status", value: "Completed" }, why: "End date passed" });
+    if (Number(c.data?.budget) > 0 && Number(c.data?.spent) > Number(c.data.budget)) out.push({ rec: c, level: "warn", who: ["owner", "role:marketing"], key: `mkt-over|${c.id}`, repeat: 14, text: `Campaign “${c.title}” spent ${money(c.data.spent, c.data?.currency)} of ${money(c.data.budget, c.data?.currency)}.` });
+    if (c.status === "Completed" && age(c, today) >= 7) out.push({ rec: c, level: "info", who: ["owner"], key: `mkt-analyze|${c.id}`, repeat: 30, text: `Campaign “${c.title}” is completed — record results and mark it Analyzed.` });
+  }
+  for (const p of of(all, "marketing.plan")) if (Number(p.data?.planned) > 0 && Number(p.data?.actual) > Number(p.data.planned)) out.push({ rec: p, level: "warn", who: ["role:marketing", "role:finance"], key: `mkt-plan|${p.id}`, repeat: 30, text: `Marketing budget “${p.title}” is over plan (${money(p.data.actual, p.data?.currency)} of ${money(p.data.planned, p.data?.currency)}).` });
+  // Accounts and vendors
+  for (const ch of of(all, "marketing.channels").filter((x) => x.status === "Active")) {
+    if (ch.data?.two_fa !== "Yes") out.push({ rec: ch, level: ch.data?.two_fa === "No" ? "bad" : "warn", who: ["role:marketing", "role:security"], key: `mkt-2fa|${ch.id}`, repeat: 14, text: `Account “${ch.title}” (${ch.data?.platform || ""}) has two-step verification “${ch.data?.two_fa || "Unknown"}” — turn it on.` });
+    if (!isDate(ch.data?.as_of) || days(ch.data.as_of, today) > 35) out.push({ rec: ch, level: "info", who: ["owner"], key: `mkt-num|${ch.id}`, repeat: 30, text: `Followers of “${ch.title}” were last updated ${ch.data?.as_of || "never"} — refresh the numbers.` });
+  }
+  for (const a of of(all, "marketing.agencies").filter((x) => x.status === "Active")) {
+    if (a.data?.screening !== "Cleared") out.push({ rec: a, level: "warn", who: ["role:security", "owner"], key: `mkt-agscr|${a.id}`, repeat: 14, text: `Agency “${a.title}” works for us without a cleared screening.` });
+    if (!a.data?.agreement || a.data.agreement === "None") out.push({ rec: a, level: "warn", who: ["owner", "role:legal"], key: `mkt-agnda|${a.id}`, repeat: 14, text: `Agency “${a.title}” works for us without an NDA or contract.` });
+  }
+  for (const o of of(all, "marketing.outlets").filter((x) => x.status === "In contact" && isDate(x.data?.last_contact) && days(x.data.last_contact, today) > 60)) out.push({ rec: o, level: "info", who: ["owner"], key: `mkt-outlet|${o.id}`, repeat: 30, text: `No contact with ${o.title} for ${days(o.data.last_contact, today)} days — send news or a story idea.` });
+  return out;
+}

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clientEmail, days, financeFindings, hrFindings, legalFindings, addMonths, operationsFindings, salesFindings, stepFor } from "../src/lib/deptAgents.ts";
+import { clientEmail, days, financeFindings, hrFindings, legalFindings, marketingFindings, addMonths, operationsFindings, salesFindings, stepFor } from "../src/lib/deptAgents.ts";
 
 const T = "2026-10-15";
 const th = { remind_before: 3, escalate_after: 3, stalled_deal: 14 };
@@ -126,4 +126,21 @@ test("legal: renewal windows, recurring obligations, won deals without contract,
   assert.ok(f.some((x) => x.key === "leg-euc|C1"));
   const done = [...all, r("OB2", "legal.obligations", "Upcoming", { due: "2026-12-30" }, { title: "Sales tax return" })];
   assert.ok(!legalFindings(done as any, T, th).some((x) => x.key.startsWith("leg-next")));
+});
+
+test("marketing: release check, calendar, interview prep, events, campaigns, account 2FA", () => {
+  const all = [
+    r("CH", "marketing.channels", "Active", { platform: "LinkedIn", two_fa: "No", as_of: "2026-10-10" }),
+    r("S1", "marketing.social", "Approved", { publish: "2026-10-14", check: "Passed (AI check)" }),
+    r("S2", "marketing.social", "Review", { publish: "2026-10-30" }),
+    r("P1", "marketing.press", "Writing", { deadline: "2026-10-16", check: "Legal review needed" }),
+    r("I1", "marketing.interviews", "Confirmed", { session: "2026-10-17" }),
+    r("E1", "marketing.events", "Booked", { starts: "2026-11-01" }),
+    r("C1", "marketing.campaigns", "Running", { end_date: "2026-10-10", budget: 1000, spent: 1200 }),
+  ];
+  const f = marketingFindings(all as any, T, th); const k = f.map((x) => x.key.split("|")[0]);
+  for (const x of ["mkt-2fa", "mkt-late", "mkt-nock", "mkt-legal", "mkt-press", "mkt-prep", "mkt-evprep", "mkt-camp", "mkt-over", "mkt-empty"]) assert.ok(k.includes(x), x);
+  assert.equal(f.find((x) => x.key.startsWith("mkt-2fa"))!.level, "bad");
+  assert.deepEqual(f.find((x) => x.key.startsWith("mkt-camp"))!.action, { type: "set", field: "status", value: "Completed" });
+  assert.ok(!k.includes("mkt-num"));
 });
