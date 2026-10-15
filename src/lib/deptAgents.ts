@@ -80,3 +80,59 @@ export function financeFindings(all: R[], today: string, th: Th): Finding[] {
   }
   return out;
 }
+
+/* ---------------- Sales ---------------- */
+const SITE = "https://workspace.agron1.com";
+const link = (r: R) => `${SITE}/${r.section.replace(".", "/")}?r=${r.id}`;
+const openTask = (all: R[], title: string) => all.some((t) => t.section === "company.tasks" && t.status !== "Done" && t.title.trim().toLowerCase() === title.trim().toLowerCase());
+
+export function salesFindings(all: R[], today: string, th: Th): Finding[] {
+  const out: Finding[] = [];
+  const deals = of(all, "sales.pipeline"); const open = deals.filter((d) => !["Won", "Lost"].includes(d.status || ""));
+  // Deals without movement get a follow-up task for their owner
+  for (const d of open) {
+    const idle = age(d, today); if (idle < th.stalled_deal) continue;
+    const title = `Follow up — ${d.title}`;
+    out.push({ rec: d, level: idle >= th.stalled_deal * 2 ? "bad" : "warn", who: ["owner"], key: `sal-stall|${d.id}`, text: `Deal “${d.title}” (${d.status}) has had no movement for ${idle} days.`,
+      action: openTask(all, title) ? undefined : { type: "create", section: "company.tasks", title, status: "Open", fields: { assignee: "{owner}", due: addDays(today, 2), priority: "High", related: link(d), notes: "Call or write to the client and record the next step in the deal." } }, why: `${idle} days without movement` });
+  }
+  // Qualified leads become deals; new leads must be contacted within two days
+  for (const l of of(all, "marketing.leads")) {
+    if (l.status === "New" && created(l, today) >= 2) out.push({ rec: l, level: "warn", who: ["owner", "role:sales"], key: `sal-lead|${l.id}`, repeat: 3, text: `New lead “${l.title}” (${l.data?.source || "unknown source"}) has not been contacted for ${created(l, today)} days.` });
+    if (["Qualified", "To pipeline"].includes(l.status || "") && !deals.some((d) => d.data?.lead_ref === l.id))
+      out.push({ rec: l, level: "info", who: ["role:sales"], key: `sal-todeal|${l.id}`, text: `Qualified lead “${l.title}” has no deal yet — a deal is prepared.`,
+        action: { type: "create", section: "sales.pipeline", title: "{title}", status: "Qualified", link: "lead_ref", fields: { client: "{title}", country: "{country}", owner: "{owner}", notes: "Created from the qualified lead. Contact: {contact} {email}" } }, why: "Lead qualified" });
+  }
+  // Proposals: expiring, expired, accepted
+  for (const p of of(all, "sales.proposals")) {
+    if (p.status === "Sent" && isDate(p.data?.valid_until)) {
+      const d = days(today, p.data.valid_until);
+      if (d >= 0 && d <= 5) out.push({ rec: p, level: "warn", who: ["owner", "role:sales"], key: `sal-valid|${p.id}`, repeat: 30, text: `Proposal “${p.title}” is valid until ${p.data.valid_until} — ask the client for a decision.` });
+      if (d < 0) out.push({ rec: p, level: "warn", who: ["owner", "role:sales"], key: `sal-expired|${p.id}`, repeat: 30, text: `Proposal “${p.title}” expired on ${p.data.valid_until} without an answer — extend or close it.` });
+    }
+    const deal = deals.find((d) => d.id === p.data?.deal_ref);
+    if (p.status === "Accepted" && deal && ["Lead", "Qualified", "Proposal"].includes(deal.status || ""))
+      out.push({ rec: deal, level: "info", who: ["owner", "role:sales"], key: `sal-acc|${p.id}`, text: `Proposal “${p.title}” was accepted — deal “${deal.title}” moves to Negotiation.`, action: { type: "set", field: "status", value: "Negotiation" }, why: "Proposal accepted" });
+  }
+  // Data the next steps need
+  for (const d of deals) {
+    if (d.status === "Won" && !Number(d.data?.value)) out.push({ rec: d, level: "warn", who: ["owner", "role:finance"], key: `sal-noval|${d.id}`, text: `Won deal “${d.title}” has no value — the invoice cannot be prepared.` });
+    if (["Negotiation", "Won"].includes(d.status || "") && !d.data?.client_ref) out.push({ rec: d, level: "info", who: ["owner"], key: `sal-noclient|${d.id}`, repeat: 14, text: `Deal “${d.title}” is not linked to a client card — link or create it so contracts, invoices and service find the client.` });
+  }
+  // Tenders and meetings
+  for (const t of of(all, "sales.tenders")) {
+    if (!["Identified", "Preparing"].includes(t.status || "") || !isDate(t.data?.deadline)) continue;
+    const st = stepFor(days(today, t.data.deadline), [14, 7, 2]); if (!st || st === "late") continue;
+    out.push({ rec: t, level: st === "d2" ? "bad" : "warn", who: ["owner", "role:sales"], key: `sal-tender|${t.id}|${st}`, repeat: 365, text: `Tender “${t.title}” (${t.data?.buyer || ""}) closes on ${t.data.deadline}.` });
+  }
+  for (const a of of(all, "sales.activities")) {
+    if (a.status === "Planned" && isDate(a.data?.date) && days(a.data.date, today) >= 1) out.push({ rec: a, level: "info", who: ["owner"], key: `sal-outcome|${a.id}`, repeat: 3, text: `${a.data?.type || "Activity"} “${a.title}” on ${a.data.date} — record the outcome and the next step.` });
+    const next = String(a.data?.next_step || "").trim();
+    if (a.status === "Done" && next && days(String(a.updated_at || today), today) <= 14) {
+      const title = `Next step: ${next.slice(0, 80)} — ${a.data?.client || a.title}`;
+      if (!openTask(all, title) && !all.some((t) => t.section === "company.tasks" && t.title === title))
+        out.push({ rec: a, level: "info", who: ["owner"], key: `sal-next|${a.id}`, repeat: 365, text: `Next step after “${a.title}”: ${next}. A task is prepared.`, action: { type: "create", section: "company.tasks", title, status: "Open", fields: { assignee: "{owner}", due: addDays(today, 3), priority: "Medium", related: link(a) } }, why: "Next step recorded" });
+    }
+  }
+  return out;
+}

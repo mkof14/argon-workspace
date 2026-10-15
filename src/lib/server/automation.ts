@@ -5,7 +5,7 @@ import { renderEmail, SITE } from "@/lib/mail";
 import { allSections } from "@/config/workspace.config.mjs";
 import { REFS } from "@/config/links";
 import { dueItems, isMine, money, PEOPLE_KEYS } from "@/lib/insights";
-import { financeFindings, type Finding } from "@/lib/deptAgents";
+import { financeFindings, salesFindings, type Finding } from "@/lib/deptAgents";
 import { AGENTS, DEPT_AGENTS, DEFAULT_RULES, aiCost, dateDue, isWorkday, matchEvent, qualityIssues, render, withDefaults, type Action, type AgentId, type Ev, type Rule, type Settings } from "@/lib/automation";
 
 /**
@@ -192,10 +192,7 @@ async function deadlinesAgent(c: Ctx, recs: any[]) {
   const once = (k: string) => { const last = c.fired[k]; const wk = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10); if (last && last > wk) return false; c.fired[k] = today(); return true; };
   for (const x of late.filter((x) => once(`late|${x.r.id}|${x.k}`))) tell(c, recipients(c, "leads", x.r), `<b>Overdue ${-x.d} days:</b> ${esc(x.r.title)} — ${esc(label(x.r.section))}${x.r.data?.owner ? ` (${esc(x.r.data.owner)})` : ""} — <a href="${recUrl(x.r)}">open</a>`);
   for (const x of nobody.filter((x) => once(`nobody|${x.r.id}|${x.k}`))) tell(c, recipients(c, "leads", x.r), `<b>Nobody responsible</b>, ${x.d < 0 ? "overdue" : `due in ${x.d} days`}: ${esc(x.r.title)} — ${esc(label(x.r.section))} — <a href="${recUrl(x.r)}">open</a>`);
-  // Deals with no movement
-  const stalled = recs.filter((r) => r.section === "sales.pipeline" && !["Won", "Lost"].includes(r.status) && (Date.now() - Date.parse(r.updated_at)) / 864e5 > s.stalled_deal);
-  for (const r of stalled.filter((r) => once(`stalled|${r.id}`))) tell(c, recipients(c, "owner", r), `<b>Deal without movement for ${Math.floor((Date.now() - Date.parse(r.updated_at)) / 864e5)} days:</b> ${esc(r.title)} (${esc(r.status)}) — <a href="${recUrl(r)}">open</a>`);
-  return `${late.length} escalated, ${nobody.length} without owner, ${stalled.length} stalled deals`;
+  return `${late.length} escalated, ${nobody.length} without owner`;
 }
 
 /** Compliance: every serious deal, vendor and partner gets a screening record; results come from the Consolidated Screening List when the key is set. */
@@ -307,8 +304,8 @@ async function briefAgent(c: Ctx, recsAll: any[], force: boolean) {
 
 /* ---------------- Department agents ---------------- */
 type Finder = (all: any[], today: string, th: Settings["thresholds"]) => Finding[];
-const FINDERS: Partial<Record<AgentId, Finder>> = { finance: financeFindings };
-const DEPT_OF: Partial<Record<AgentId, string>> = { finance: "finance" };
+const FINDERS: Partial<Record<AgentId, Finder>> = { finance: financeFindings, sales: salesFindings };
+const DEPT_OF: Partial<Record<AgentId, string>> = { finance: "finance", sales: "sales" };
 const COLOR = { bad: "#B4232F", warn: "#A15C00", info: "#2A3440" };
 
 /** Runs a department agent: tells people once (then every few days while it is still true) and runs or proposes the changes. */
