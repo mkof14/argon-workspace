@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clientEmail, days, financeFindings, hrFindings, legalFindings, marketingFindings, addMonths, operationsFindings, salesFindings, stepFor } from "../src/lib/deptAgents.ts";
+import { clientEmail, days, financeFindings, hrFindings, legalFindings, marketingFindings, technicalFindings, addMonths, operationsFindings, salesFindings, stepFor } from "../src/lib/deptAgents.ts";
 
 const T = "2026-10-15";
 const th = { remind_before: 3, escalate_after: 3, stalled_deal: 14 };
@@ -143,4 +143,23 @@ test("marketing: release check, calendar, interview prep, events, campaigns, acc
   assert.equal(f.find((x) => x.key.startsWith("mkt-2fa"))!.level, "bad");
   assert.deepEqual(f.find((x) => x.key.startsWith("mkt-camp"))!.action, { type: "set", field: "status", value: "Completed" });
   assert.ok(!k.includes("mkt-num"));
+});
+
+test("technical: failed test → bug once, critical bug, certification, IT renewal, equipment without matrix", () => {
+  const all = [
+    r("T1", "technical.testing", "Failed", { type: "Sea trial", config: "C40 HQ", owner: "Ivan" }),
+    r("T2", "technical.testing", "Failed", {}),
+    r("SW", "technical.software", "Backlog", { type: "Bug" }, { title: "Fix failed test — T2" }),
+    r("B1", "technical.software", "In progress", { type: "Bug", priority: "Critical" }, { created_at: "2026-10-13T10:00:00Z" }),
+    r("C1", "technical.certification", "In review", { due: "2026-10-20", scheme: "FCC" }),
+    r("IT", "technical.it", "Active", { renewal: "2026-11-05", vendor: "Google" }),
+    r("EQ", "technical.equipment", "Selected", {}),
+  ];
+  const f = technicalFindings(all as any, T, th);
+  assert.equal((f.find((x) => x.key === "tec-fail|T1")!.action as any).fields.type, "Bug");
+  assert.ok(!f.some((x) => x.key === "tec-fail|T2"));
+  assert.equal(f.find((x) => x.key === "tec-crit|B1")!.level, "bad");
+  assert.equal(f.find((x) => x.key.startsWith("tec-cert|C1"))!.key, "tec-cert|C1|d7");
+  assert.deepEqual(f.find((x) => x.key.startsWith("tec-it|IT"))!.action, { type: "set", field: "status", value: "Renewal due" });
+  assert.ok(f.some((x) => x.key === "tec-matrix|EQ"));
 });

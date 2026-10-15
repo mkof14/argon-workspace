@@ -357,3 +357,44 @@ export function marketingFindings(all: R[], today: string, _th: Th): Finding[] {
   for (const o of of(all, "marketing.outlets").filter((x) => x.status === "In contact" && isDate(x.data?.last_contact) && days(x.data.last_contact, today) > 60)) out.push({ rec: o, level: "info", who: ["owner"], key: `mkt-outlet|${o.id}`, repeat: 30, text: `No contact with ${o.title} for ${days(o.data.last_contact, today)} days — send news or a story idea.` });
   return out;
 }
+
+/* ---------------- Technical ---------------- */
+export function technicalFindings(all: R[], today: string, _th: Th): Finding[] {
+  const out: Finding[] = [];
+  const sw = of(all, "technical.software");
+  for (const s of sw) {
+    if (s.status === "Done") continue; const a = created(s, today); const bug = s.data?.type === "Bug"; const pr = s.data?.priority;
+    if (bug && pr === "Critical" && a >= 1) out.push({ rec: s, level: "bad", who: ["leads", "role:engineering", "owner"], key: `tec-crit|${s.id}`, repeat: 1, text: `Critical bug “${s.title}” (${s.data?.component || ""}) is open for ${a} day(s).` });
+    else if (bug && pr === "High" && a >= 7) out.push({ rec: s, level: "warn", who: ["role:engineering", "owner"], key: `tec-high|${s.id}`, repeat: 3, text: `High-priority bug “${s.title}” is open for ${a} days.` });
+    if (s.status === "Review" && age(s, today) >= 5) out.push({ rec: s, level: "info", who: ["role:engineering"], key: `tec-review|${s.id}`, text: `“${s.title}” waits in Review for ${age(s, today)} days.` });
+    if (s.status === "In progress" && age(s, today) >= 21) out.push({ rec: s, level: "info", who: ["owner"], key: `tec-stuck|${s.id}`, repeat: 14, text: `“${s.title}” has been In progress for ${age(s, today)} days without an update — split it or record progress.` });
+  }
+  // A failed test becomes a bug to fix
+  for (const t of of(all, "technical.testing")) {
+    const title = `Fix failed test — ${t.title}`;
+    if (t.status === "Failed" && !sw.some((s) => s.title === title)) out.push({ rec: t, level: "warn", who: ["role:engineering", "owner"], key: `tec-fail|${t.id}`, text: `Test “${t.title}” (${t.data?.type || ""}${t.data?.config ? `, ${t.data.config}` : ""}) failed — a bug to fix is prepared.`, action: { type: "create", section: "technical.software", title, status: "Backlog", fields: { type: "Bug", priority: "High", owner: "{owner}", notes: "Failed test: {title}. Result: {result}" } }, why: "Test failed" });
+    if (t.status === "Blocked" && age(t, today) >= 5) out.push({ rec: t, level: "warn", who: ["owner", "role:engineering"], key: `tec-blocked|${t.id}`, text: `Test “${t.title}” is blocked for ${age(t, today)} days.` });
+    if (t.status === "Planned" && isDate(t.data?.date) && days(t.data.date, today) >= 2) out.push({ rec: t, level: "info", who: ["owner"], key: `tec-result|${t.id}`, repeat: 7, text: `Test “${t.title}” was planned for ${t.data.date} — record the result.` });
+  }
+  for (const c of of(all, "technical.certification")) {
+    if (c.status === "Rejected") { out.push({ rec: c, level: "bad", who: ["leads", "role:engineering", "role:legal"], key: `tec-certrej|${c.id}`, repeat: 30, text: `Certification “${c.title}” (${c.data?.scheme || ""}) was rejected — affected equipment cannot be sold where it is required.` }); continue; }
+    if (["Approved"].includes(c.status || "") || !isDate(c.data?.due)) continue;
+    const st = stepFor(days(today, c.data.due), [30, 7]); if (st) out.push({ rec: c, level: st === "late" ? "bad" : "warn", who: ["role:engineering", "role:legal"], key: `tec-cert|${c.id}|${st}`, repeat: st === "late" ? 7 : 365, text: st === "late" ? `Certification “${c.title}” was due on ${c.data.due} and is ${c.status}.` : `Certification “${c.title}” (${c.data?.scheme || ""}) is due on ${c.data.due}.` });
+  }
+  for (const ch of of(all, "technical.changes")) {
+    if (ch.status === "Requested" && created(ch, today) >= 5) out.push({ rec: ch, level: "warn", who: ["owner", "role:engineering"], key: `tec-chg|${ch.id}`, text: `Change request “${ch.title}” (${ch.data?.impact || ""}) is not assessed for ${created(ch, today)} days.` });
+    if (ch.status === "Approved" && ["Compliance", "Safety"].includes(ch.data?.impact)) out.push({ rec: ch, level: "warn", who: ["role:legal", "role:security"], key: `tec-chgcomp|${ch.id}`, repeat: 365, text: `Approved change “${ch.title}” affects ${ch.data.impact.toLowerCase()} — check classification, certificates and documents.` });
+    if (ch.status === "Approved" && isDate(ch.data?.due) && days(ch.data.due, today) >= 1) out.push({ rec: ch, level: "warn", who: ["owner"], key: `tec-chglate|${ch.id}`, repeat: 7, text: `Change “${ch.title}” was due on ${ch.data.due} and is not implemented.` });
+  }
+  for (const it of of(all, "technical.it")) {
+    if (it.status === "Retired" || !isDate(it.data?.renewal)) continue;
+    const st = stepFor(days(today, it.data.renewal), [30, 7]); if (!st) continue;
+    out.push({ rec: it, level: st === "late" ? "bad" : st === "d7" ? "warn" : "info", who: ["owner", "role:engineering", "role:finance"], key: `tec-it|${it.id}|${st}`, repeat: st === "late" ? 3 : 365, text: st === "late" ? `“${it.title}” (${it.data?.vendor || ""}) renewal date ${it.data.renewal} has passed — check that the service still works.` : `“${it.title}” (${it.data?.type || ""}, ${it.data?.vendor || ""}) renews on ${it.data.renewal}${it.data?.monthly_cost ? ` — ${money(it.data.monthly_cost)}/month` : ""}.`,
+      action: it.status === "Active" && st !== "late" ? { type: "set", field: "status", value: "Renewal due" } : undefined, why: "Renewal within 30 days" });
+  }
+  for (const d of of(all, "technical.docs")) if (d.status === "In review" && age(d, today) >= 7) out.push({ rec: d, level: "info", who: ["owner"], key: `tec-doc|${d.id}`, text: `Document “${d.title}” ${d.data?.version || ""} waits in review for ${age(d, today)} days.` });
+  for (const r of of(all, "technical.rnd")) if (r.status !== "Done" && isDate(r.data?.due) && days(r.data.due, today) >= 1) out.push({ rec: r, level: "info", who: ["owner"], key: `tec-rnd|${r.id}`, repeat: 14, text: `R&D “${r.title}” was due on ${r.data.due} (${r.status}).` });
+  for (const e of of(all, "technical.equipment")) if (e.status === "Selected" && !String(e.data?.matrix_id || "").trim()) out.push({ rec: e, level: "warn", who: ["role:legal", "role:engineering"], key: `tec-matrix|${e.id}`, repeat: 14, text: `Selected equipment “${e.title}” (${e.data?.manufacturer || ""} ${e.data?.model || ""}) is not linked to the compliance matrix — export and licence status unknown.` });
+  for (const s of of(all, "technical.systems")) if (s.status !== "Retired" && !String(s.data?.owner || "").trim()) out.push({ rec: s, level: "info", who: ["role:engineering"], key: `tec-sysown|${s.id}`, repeat: 30, text: `System “${s.title}” has no owner — who answers when it is down?` });
+  return out;
+}
