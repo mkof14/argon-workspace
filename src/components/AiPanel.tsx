@@ -4,14 +4,18 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import Icon from "./Icon";
 import { useApp, findSection } from "./App";
-import { t, tx } from "@/lib/i18n";
+import { t, tx, type Lang } from "@/lib/i18n";
 import { DEMO, Faq, Rec, isExternal, store } from "@/lib/store";
 import { recordMarkdown } from "@/lib/format";
 import { HELP, l2 } from "@/config/learn";
 import { deskById } from "@/config/legal";
+import type { Op } from "@/lib/command";
 
 export type AiContext = { title: string; section?: string; record?: Rec; rows?: Rec[]; ask?: string; desk?: string; format?: "item"; onApply?: (text: string) => void };
-type Msg = { role: "user" | "assistant"; content: string; src?: "faq" | "cache" | "ai"; faqId?: string; saved?: boolean; q?: string };
+type Plan = { ops: Op[]; records: Record<string, Rec>; dropped: string[]; state: "ready" | "running" | "done" | "cancelled"; results?: { ok: boolean; text: string; href?: string }[] };
+type Msg = { role: "user" | "assistant"; content: string; src?: "faq" | "cache" | "ai"; faqId?: string; saved?: boolean; q?: string; plan?: Plan };
+type T4 = { en: string; ru: string; uk: string; ar: string };
+const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk, ar });
 
 export default function AiPanel({ ctx, onClose }: { ctx: AiContext; onClose: () => void }) {
   const { lang, me, toast } = useApp();
@@ -21,6 +25,8 @@ export default function AiPanel({ ctx, onClose }: { ctx: AiContext; onClose: () 
   const [tier, setTier] = useState<"quick" | "deep">(ctx.section?.startsWith("legal") || desk ? "deep" : "quick");
   const [applied, setApplied] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState<"ask" | "do">("ask");
+  const T = (x: T4) => tx(x, lang as Lang);
   const [usage, setUsage] = useState("");
   const [sugg, setSugg] = useState<Faq[]>([]);
   const ctl = useRef<AbortController | null>(null);
@@ -29,10 +35,10 @@ export default function AiPanel({ ctx, onClose }: { ctx: AiContext; onClose: () 
 
   // Similar saved questions while typing (free, no AI call)
   useEffect(() => {
-    const text = q.trim(); if (text.length < 6) { setSugg([]); return; }
+    const text = q.trim(); if (text.length < 6 || mode === "do") { setSugg([]); return; }
     const id = setTimeout(() => store.faqSearch(text, lang, 3).then(setSugg).catch(() => {}), 350);
     return () => clearTimeout(id);
-  }, [q, lang]);
+  }, [q, lang, mode]);
 
   const who = () => `User: ${me.full_name} (role: ${me.role}${me.company ? ", company: " + me.company : ""}). Answer language: ${lang}.`;
   const context = () => {
@@ -72,7 +78,38 @@ export default function AiPanel({ ctx, onClose }: { ctx: AiContext; onClose: () 
     finally { setBusy(false); }
   };
   const askAnyway = (m: Msg) => ask(true, m.q);
-  const send = () => ask(false);
+  /* ---- Commands: AI proposes a plan, the person confirms, the browser applies it with the person's own rights ---- */
+  const command = async () => {
+    const text = q.trim(); if (!text || busy) return;
+    if (DEMO) { toast(t("ai_demo", lang), true); return; }
+    const next: Msg[] = [...msgs, { role: "user", content: text }, { role: "assistant", content: "…", src: "ai" }];
+    setMsgs(next); setQ(""); setSugg([]); setBusy(true);
+    try {
+      const r = await fetch("/api/command", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, lang, record_id: ctx.record?.id || "", context: `${ctx.title}${ctx.section ? ` (${ctx.section})` : ""}` }) });
+      if (r.status === 429) { toast(t("ai_limit", lang), true); setMsgs(next.slice(0, -2)); return; }
+      if (!r.ok) throw new Error(await r.text());
+      const j = await r.json();
+      setMsgs([...next.slice(0, -1), { role: "assistant", content: j.reply || "", src: "ai", plan: j.ops?.length ? { ops: j.ops, records: j.records || {}, dropped: j.dropped || [], state: "ready" } : undefined }]);
+    } catch (e: any) { toast(e.message || "Error", true); setMsgs(next.slice(0, -1)); } finally { setBusy(false); }
+  };
+  const setPlan = (i: number, p: Partial<Plan>) => setMsgs((m) => m.map((x, j) => (j === i && x.plan ? { ...x, plan: { ...x.plan, ...p } } : x)));
+  const runPlan = async (i: number) => {
+    const p = msgs[i].plan; if (!p) return; setPlan(i, { state: "running" }); const results: Plan["results"] = [];
+    for (const o of p.ops) {
+      try {
+        if (o.op === "create") { const r = await store.save({ section: o.section, title: o.title, status: o.status, data: o.data }); results.push({ ok: true, text: opText(o), href: `/${r.section.replace(".", "/")}?r=${r.id}` }); }
+        else if (o.op === "update") { const cur = p.records[o.id]; if (!cur) throw new Error("not found"); await store.save({ ...cur, status: o.status ?? cur.status, data: { ...(cur.data || {}), ...o.data } }); results.push({ ok: true, text: opText(o), href: `/${o.section.replace(".", "/")}?r=${o.id}` }); }
+        else { await store.addComment(o.id, o.body); results.push({ ok: true, text: opText(o), href: `/${o.section.replace(".", "/")}?r=${o.id}` }); }
+      } catch (e: any) { results.push({ ok: false, text: `${opText(o)} — ${e?.message || "error"}` }); }
+    }
+    setPlan(i, { state: "done", results });
+  };
+  const secName = (id: string) => tx(findSection(id)?.label, lang as Lang) || id;
+  const fields = (d: Record<string, any>) => Object.entries(d).filter(([k]) => !k.endsWith("_title")).map(([k, v]) => `${k}: ${d[`${k}_title`] || v}`).join(" · ");
+  const opText = (o: Op) => o.op === "create" ? `${T(L("Create in", "Создать в", "Створити в", "إنشاء في"))} «${secName(o.section)}»: ${o.title} (${o.status})${Object.keys(o.data).length ? " — " + fields(o.data) : ""}`
+    : o.op === "update" ? `${T(L("Change", "Изменить", "Змінити", "تغيير"))} «${o.title}»: ${[o.status && `${T(L("status", "статус", "статус", "الحالة"))} → ${o.status}`, fields(o.data)].filter(Boolean).join(" · ")}`
+    : `${T(L("Comment on", "Комментарий к", "Коментар до", "تعليق على"))} «${o.title}»: ${o.body}`;
+  const send = () => (mode === "do" ? command() : ask(false));
   const saveMemo = async (i: number) => {
     const m = msgs[i]; if (!m.q || !desk) return;
     try { await store.save({ section: "legal.desks", title: m.q.slice(0, 120), status: "Draft", controlled: !!ctx.record?.controlled, data: { desk: desk.name.en, question: m.q, memo: m.content, related: ctx.record ? `${ctx.section}:${ctx.record.id} · ${ctx.record.title}` : "" } }); toast(t("memo_saved", lang)); }
@@ -90,15 +127,23 @@ export default function AiPanel({ ctx, onClose }: { ctx: AiContext; onClose: () 
       <aside className="ai" role="dialog" aria-modal="true" aria-label={t("ai_title", lang)}>
         <div className="drawer-h"><div style={{ flex: 1, minWidth: 0 }}><div className="eyebrow">{t("ai_title", lang)}</div><h2 style={{ fontSize: 18 }}>{ctx.record ? ctx.record.title : ctx.title}</h2>
           {desk && <div className="chip" style={{ color: desk.color, borderColor: desk.color, marginBottom: 8 }}><Icon n={desk.icon} className="lockico" />{l2(desk.name, lang)}</div>}
-          <div className="seg" role="group"><button className={tier === "quick" ? "on" : ""} onClick={() => setTier("quick")}>{t("ai_quick", lang)}</button><button className={tier === "deep" ? "on" : ""} onClick={() => setTier("deep")}>{t("ai_deep", lang)}</button></div>
-          <div className="faint" style={{ fontSize: 13, marginTop: 6 }}>{t("ai_quick_hint", lang)}</div></div>
+          {canSave && <div className="seg" role="group" style={{ marginInlineEnd: 8 }}><button className={mode === "ask" ? "on" : ""} onClick={() => setMode("ask")}><Icon n="book" />{T(L("Ask", "Спросить", "Запитати", "اسأل"))}</button><button className={mode === "do" ? "on" : ""} onClick={() => setMode("do")}><Icon n="spark" />{T(L("Do", "Сделать", "Зробити", "نفّذ"))}</button></div>}
+          {mode === "ask" && <div className="seg" role="group"><button className={tier === "quick" ? "on" : ""} onClick={() => setTier("quick")}>{t("ai_quick", lang)}</button><button className={tier === "deep" ? "on" : ""} onClick={() => setTier("deep")}>{t("ai_deep", lang)}</button></div>}
+          <div className="faint" style={{ fontSize: 13, marginTop: 6 }}>{mode === "do" ? T(L("Write what to do: “create a task for Ivan for Friday”, “move the Aurora deal to Negotiation”, “add a 120,000 USD invoice to the Marina X deal”. You will see the plan and confirm it.", "Напишите, что сделать: «создай задачу Ивану на пятницу», «переведи сделку Aurora в Negotiation», «добавь счёт на 120 000 USD по сделке Marina X». Вы увидите план и подтвердите его.", "Напишіть, що зробити: «створи задачу Івану на п'ятницю», «переведи угоду Aurora в Negotiation», «додай рахунок на 120 000 USD за угодою Marina X». Ви побачите план і підтвердите його.", "اكتب ما يجب فعله: «أنشئ مهمة لإيفان ليوم الجمعة»، «انقل صفقة Aurora إلى التفاوض»، «أضف فاتورة بقيمة 120,000 دولار لصفقة Marina X». سترى الخطة وتؤكدها.")) : t("ai_quick_hint", lang)}</div></div>
           <button className="iconbtn" onClick={onClose} aria-label={t("close", lang)}><Icon n="x" /></button></div>
         <div className="ai-msgs">
           {DEMO && <div className="banner"><Icon n="info" /><span>{t("ai_demo", lang)}</span></div>}
-          {!msgs.length && <div className="faint" style={{ fontSize: 14 }}><Icon n="book" className="lockico" /> {t("ai_faq_hint", lang)}</div>}
+          {!msgs.length && mode === "ask" && <div className="faint" style={{ fontSize: 14 }}><Icon n="book" className="lockico" /> {t("ai_faq_hint", lang)}</div>}
           {msgs.map((m, i) => m.role === "user" ? <div key={i} className="ai-u">{m.content}</div>
             : <div key={i} className="ai-a"><div className="md" dangerouslySetInnerHTML={{ __html: m.content ? (DOMPurify.sanitize(marked.parse(m.content) as string)) : "…" }} />
-              {m.content && !(busy && i === msgs.length - 1) && <div className="ai-src">
+              {m.plan && <div className="cmd-plan">
+                {(m.plan.results || m.plan.ops.map((o) => ({ ok: true, text: opText(o), href: undefined as string | undefined }))).map((r, k) => <div key={k} className={`cmd-op ${m.plan!.results ? (r.ok ? "ok" : "bad") : ""}`}><Icon n={m.plan!.results ? (r.ok ? "check" : "alert") : "edit"} />{r.href ? <a href={r.href}>{r.text}</a> : <span>{r.text}</span>}</div>)}
+                {m.plan.dropped.length > 0 && !m.plan.results && <div className="faint" style={{ fontSize: 12.5 }}>{T(L("Skipped", "Пропущено", "Пропущено", "تم تخطيه"))}: {m.plan.dropped.join("; ")}</div>}
+                {m.plan.state === "ready" && <div className="toolbar"><button className="btn primary sm" onClick={() => runPlan(i)}><Icon n="check" />{T(L("Yes, do it", "Да, выполнить", "Так, виконати", "نعم، نفّذ"))}</button><button className="btn ghost sm" onClick={() => setPlan(i, { state: "cancelled" })}><Icon n="x" />{T(L("Cancel", "Отмена", "Скасувати", "إلغاء"))}</button></div>}
+                {m.plan.state === "running" && <div className="faint">…</div>}
+                {m.plan.state === "cancelled" && <div className="faint" style={{ fontSize: 13 }}>{T(L("Cancelled — nothing was changed.", "Отменено — ничего не изменено.", "Скасовано — нічого не змінено.", "أُلغي — لم يتغير شيء."))}</div>}
+              </div>}
+              {m.content && !m.plan && mode === "ask" && !(busy && i === msgs.length - 1) && <div className="ai-src">
                 {m.src === "faq" && <span className="chip c-ok"><Icon n="book" className="lockico" />{t("from_faq", lang)}</span>}
                 {m.src === "cache" && <span className="chip c-ok"><Icon n="clock" className="lockico" />{t("from_cache", lang)}</span>}
                 {m.src === "faq" && !DEMO && i === msgs.length - 1 && <button className="btn ghost sm" onClick={() => askAnyway(m)}><Icon n="spark" />{t("ask_ai_anyway", lang)}</button>}
@@ -113,7 +158,7 @@ export default function AiPanel({ ctx, onClose }: { ctx: AiContext; onClose: () 
         <div className="ai-compose">
           {sugg.length > 0 && <div className="faq-sugg"><div className="eyebrow">{t("similar", lang)}</div>
             {sugg.map((f) => <button key={f.id} onClick={() => useFaq(f)}><Icon n="book" /><span>{f.question}</span>{f.verified && <span className="chip c-ok" style={{ marginInlineStart: "auto" }}>{t("verified", lang)}</span>}</button>)}</div>}
-          <textarea className="input" rows={3} value={q} placeholder={t("ai_ph", lang)} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send(); }} aria-label={t("ai_ph", lang)} />
+          <textarea className="input" rows={3} value={q} placeholder={mode === "do" ? T(L("What should be done?", "Что сделать?", "Що зробити?", "ماذا يجب أن يُفعل؟")) : t("ai_ph", lang)} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send(); }} aria-label={t("ai_ph", lang)} />
           <div className="toolbar"><span className="faint" style={{ fontSize: 12.5 }}>{usage && `${t("ai_usage", lang)}: ${usage}`}</span><span style={{ flex: 1 }} />
             {busy && <button className="btn" onClick={() => ctl.current?.abort()}>Stop</button>}
             <button id="ai-send" className="btn primary" disabled={busy || !q.trim()} onClick={send}><Icon n="spark" />{t("send", lang)}</button></div>

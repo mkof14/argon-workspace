@@ -986,3 +986,9 @@ a.hub-row:hover{background:var(--surface-2)}
   .tb-right .askai,.tb-right .intake-btn{width:40px;height:40px;min-width:40px;padding:0;display:inline-grid;place-items:center;border-radius:9px}
   .tb-right .searchbtn{min-width:0;width:40px;height:40px;padding:0;justify-content:center;border-radius:9px}
 }
+/* AI commands: the plan to confirm */
+.cmd-plan{display:grid;gap:8px;margin-top:10px;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}
+.cmd-op{display:flex;gap:8px;align-items:flex-start;font-size:14px;line-height:1.45}
+.cmd-op svg{width:16px;height:16px;flex:none;margin-top:2px;color:var(--ink-3)}
+.cmd-op.ok svg{color:var(--ok,#1F7A4D)}.cmd-op.bad svg{color:var(--bad)}
+.lockico{width:15px;height:15px;vertical-align:-2px;flex:none}
