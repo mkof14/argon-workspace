@@ -967,3 +967,22 @@ a.hub-row:hover{background:var(--surface-2)}
 .auto-act{display:grid;gap:8px;padding:12px;border:1px solid var(--line-2);border-radius:10px;background:var(--surface-2)}
 .tabs.card{padding:0 8px}
 @media (max-width:640px){.auto-rule .seg{order:3}.auto-q .toolbar{width:100%}}
+/* Phone top bar: title on its own row, buttons in a second row (nothing gets squeezed) */
+@media (max-width:640px){
+  .topbar{flex-wrap:wrap;row-gap:8px;padding:8px 12px}
+  .topbar .crumb{flex:1 1 0;min-width:0}
+  .topbar .crumb h1{font-size:18px;-webkit-line-clamp:1}
+  .topbar .tb-right{flex:1 0 100%;margin-inline-start:0;justify-content:space-between;gap:4px}
+  .topbar .tb-right .mic-top{display:inline-grid}
+  .topbar .tb-right .askai{min-width:40px;justify-content:center;padding:0 10px}
+  .topbar .tb-right .askai svg{flex:none}
+}
+/* Tablet and small laptop with the menu open: compact buttons; if still too narrow, buttons move to a second row instead of squeezing the title */
+.topbar{flex-wrap:wrap;row-gap:8px}
+.topbar .crumb{flex:1 1 160px}
+@media (max-width:1280px){.tb-right .intake-btn span,.tb-right .askai span,.searchbtn span,.searchbtn kbd{display:none}.tb-right .askai,.tb-right .intake-btn{min-width:40px;justify-content:center;padding:0 10px}}
+@media (max-width:1000px) and (min-width:641px){.tb-right .mic-top{display:none}}
+@media (max-width:1280px){
+  .tb-right .askai,.tb-right .intake-btn{width:40px;height:40px;min-width:40px;padding:0;display:inline-grid;place-items:center;border-radius:9px}
+  .tb-right .searchbtn{min-width:0;width:40px;height:40px;padding:0;justify-content:center;border-radius:9px}
+}
