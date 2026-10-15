@@ -8,6 +8,7 @@ import MktCalendar from "./MktCalendar";
 import ChannelsBoard from "./ChannelsBoard";
 import SystemsBoard from "./SystemsBoard";
 import DeptReport from "./DeptReport";
+import AgentCard, { DEPT_FINDERS } from "./AgentCard";
 import { PortalsCard, MetricsCard, FxCard, DomainScan, AccessReview, AccessLog } from "./DeptTools";
 import { MktIdeas } from "./MarketingStudio";
 import { DEPARTMENTS, DEPT_COLORS } from "@/config/workspace.config.mjs";
@@ -269,6 +270,7 @@ export default function DeptHub({ dept }: { dept: string }) {
     // Every department: monthly KPIs first, its own tools, official portals last, and a report
     if (dept === "security") { cards.unshift(<AccessLog key="log" />); cards.unshift(<AccessReview key="acc" />); cards.unshift(<DomainScan key="dom" />); }
     if (dept === "finance") cards.push(<FxCard key="fx" />);
+    if (DEPT_FINDERS[dept]) cards.unshift(<AgentCard key="agent" dept={dept} recs={recs} />);
     cards.unshift(<MetricsCard key="kpi" dept={dept} recs={recs} />);
     cards.push(<PortalsCard key="portals" dept={dept} />);
     if (dept !== "marketing" && dept !== "technical") strip = <div className="toolbar" style={{ gap: 10 }}><DeptReport dept={dept} recs={recs} />{strip}</div>;

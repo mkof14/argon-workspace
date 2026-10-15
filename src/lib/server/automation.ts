@@ -5,7 +5,8 @@ import { renderEmail, SITE } from "@/lib/mail";
 import { allSections } from "@/config/workspace.config.mjs";
 import { REFS } from "@/config/links";
 import { dueItems, isMine, money, PEOPLE_KEYS } from "@/lib/insights";
-import { AGENTS, DEFAULT_RULES, aiCost, dateDue, isWorkday, matchEvent, qualityIssues, render, withDefaults, type Action, type AgentId, type Ev, type Rule, type Settings } from "@/lib/automation";
+import { financeFindings, type Finding } from "@/lib/deptAgents";
+import { AGENTS, DEPT_AGENTS, DEFAULT_RULES, aiCost, dateDue, isWorkday, matchEvent, qualityIssues, render, withDefaults, type Action, type AgentId, type Ev, type Rule, type Settings } from "@/lib/automation";
 
 /**
  * Automation engine: company settings, "when → then" rules and agents.
@@ -86,7 +87,7 @@ const audit = (c: Ctx, agent: AgentId, rec: { id: string; section: string; title
 function describeAction(a: Action, rec: any) {
   if (a.type === "create") return `Create “${render(a.title, rec, today())}” in ${label(a.section)}${a.status ? ` (${a.status})` : ""}`;
   if (a.type === "set") return `Set ${a.field} of “${rec.title}” to “${a.value}”`;
-  if (a.type === "email") return `Email ${rec.data?.[a.to_field] || "(no address)"}: ${render(a.subject, rec)}`;
+  if (a.type === "email") return `Email ${a.to || rec.data?.[a.to_field] || "(no address)"}: ${render(a.subject, rec)}`;
   return `Notify ${a.to.replace("role:", "")}: ${render(a.message, rec)}`;
 }
 
@@ -119,7 +120,7 @@ async function execute(c: Ctx, agent: AgentId, a: Action, rec: any): Promise<str
     return "updated";
   }
   if (a.type === "email") {
-    const to = String(rec.data?.[a.to_field] || "").trim();
+    const to = String(a.to || rec.data?.[a.to_field] || "").trim();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) throw new Error(`No valid email in “${a.to_field}”`);
     const subject = render(a.subject, rec); const body = render(a.body, rec);
     const err = await sendMail({ to, subject, html: renderEmail({ subject, body, lang: "en", sender: { name: "AGRON Inc.", email: "info@agron1.com" } }), text: body, replyTo: "info@agron1.com" });
@@ -304,6 +305,37 @@ async function briefAgent(c: Ctx, recsAll: any[], force: boolean) {
   return `sent to ${sent}`;
 }
 
+/* ---------------- Department agents ---------------- */
+type Finder = (all: any[], today: string, th: Settings["thresholds"]) => Finding[];
+const FINDERS: Partial<Record<AgentId, Finder>> = { finance: financeFindings };
+const DEPT_OF: Partial<Record<AgentId, string>> = { finance: "finance" };
+const COLOR = { bad: "#B4232F", warn: "#A15C00", info: "#2A3440" };
+
+/** Runs a department agent: tells people once (then every few days while it is still true) and runs or proposes the changes. */
+async function deptAgent(c: Ctx, recs: any[], agent: AgentId, mode: "auto" | "suggest") {
+  const finder = FINDERS[agent]; if (!finder) return "no checks";
+  const t = today(); const found = finder(recs, t, c.settings.thresholds); let told = 0, acted = 0;
+  for (const x of found) {
+    const last = c.fired[x.key]; const fresh = !last || last <= new Date(Date.now() - (x.repeat ?? 7) * 864e5).toISOString().slice(0, 10);
+    if (!fresh) continue; c.fired[x.key] = t;
+    const ppl = [...new Map(x.who.flatMap((w) => recipients(c, w, x.rec)).map((p) => [p.email, p])).values()];
+    if (ppl.length) { tell(c, ppl, `<span style="color:${COLOR[x.level]}">${x.level === "bad" ? "<b>" : ""}${esc(x.text)}${x.level === "bad" ? "</b>" : ""}</span> — <a href="${recUrl(x.rec)}">open</a>`); told++; }
+    if (x.action) { await act(c, agent, x.action, x.rec, mode, x.why || x.text); acted++; }
+  }
+  // What the agent sees now, for the department overview (titles only; access is checked when it is shown)
+  await saveState(c.db, `agent-${agent}`, { at: new Date().toISOString(), items: found.slice(0, 60).map((x) => ({ level: x.level, text: x.text, id: x.rec.id, section: x.rec.section, controlled: !!x.rec.controlled, action: x.action ? describeAction(x.action, x.rec) : null })) });
+  return `${found.length} finding(s), ${told} new notice(s), ${acted} change(s) ${mode === "auto" ? "made" : "proposed"}`;
+}
+/** Latest findings of a department agent that this person may see. */
+export async function deptFindings(db: any, dept: string, me: { role: string; us_person: boolean }) {
+  const agent = (Object.entries(DEPT_OF).find(([, d]) => d === dept) || [])[0]; if (!agent) return null;
+  const st = await readState(db, `agent-${agent}`).catch(() => null); if (!st) return { agent, at: null, items: [] };
+  const full = ["owner", "admin"].includes(me.role);
+  const { data: acc } = full ? { data: [] } : await db.from("section_access").select("section").eq("role", me.role);
+  const ok = new Set((acc || []).map((a: any) => a.section));
+  return { agent, at: st.at, items: st.items.filter((i: any) => (full || ok.has(i.section)) && (!i.controlled || me.us_person)) };
+}
+
 /* ---------------- AI budget ---------------- */
 export async function aiUsage(db: any, s: Settings) {
   const since = new Date(); since.setUTCDate(1); since.setUTCHours(0, 0, 0, 0);
@@ -324,7 +356,7 @@ export async function runAgents(db: any, opts: { only?: AgentId; manual?: boolea
     if (opts.only && opts.only !== a) continue;
     const mode = c.settings.agents[a]; if (mode === "off") { out[a] = "off"; continue; }
     try {
-      out[a] = a === "rules" ? await rulesAgent(c, recs) : a === "deadlines" ? await deadlinesAgent(c, recs) : a === "compliance" ? await complianceAgent(c, recs, mode) : a === "quality" ? await qualityAgent(c, recs, mode) : await briefAgent(c, recs, !!opts.manual);
+      out[a] = DEPT_AGENTS.includes(a) ? await deptAgent(c, recs, a, mode) : a === "rules" ? await rulesAgent(c, recs) : a === "deadlines" ? await deadlinesAgent(c, recs) : a === "compliance" ? await complianceAgent(c, recs, mode) : a === "quality" ? await qualityAgent(c, recs, mode) : await briefAgent(c, recs, !!opts.manual);
       c.log.push({ at: new Date().toISOString(), agent: a, kind: "run", text: out[a] });
     } catch (e: any) { out[a] = `error: ${e?.message || e}`; c.log.push({ at: new Date().toISOString(), agent: a, kind: "error", text: String(e?.message || e) }); }
   }

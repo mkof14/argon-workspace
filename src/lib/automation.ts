@@ -2,8 +2,10 @@
 // Pure functions only (no imports of other local modules), so the Node test runner can load this file directly.
 
 export type Mode = "off" | "suggest" | "auto";
-export type AgentId = "rules" | "deadlines" | "compliance" | "quality" | "brief";
-export const AGENTS: AgentId[] = ["rules", "deadlines", "compliance", "quality", "brief"];
+export type AgentId = "rules" | "deadlines" | "compliance" | "quality" | "brief" | "finance";
+export const AGENTS: AgentId[] = ["rules", "deadlines", "compliance", "quality", "brief", "finance"];
+/** Department agents (their checks live in deptAgents.ts). */
+export const DEPT_AGENTS: AgentId[] = ["finance"];
 
 export type Settings = {
   company: { name: string; timezone: string; currency: string; workdays: number[]; holidays: string[] };
@@ -18,7 +20,7 @@ export const DEFAULT_SETTINGS: Settings = {
   company: { name: "AGRON Inc.", timezone: "America/New_York", currency: "USD", workdays: [1, 2, 3, 4, 5], holidays: [] },
   thresholds: { escalate_after: 3, remind_before: 3, stalled_deal: 14, stale_record: 60, screening_wait: 3 },
   notify: { digest: true, monitor_roles: ["owner", "admin", "security"], report_roles: ["owner", "admin", "management"], brief_roles: ["owner"], escalate_roles: ["owner", "admin", "management"] },
-  agents: { rules: "suggest", deadlines: "auto", compliance: "suggest", quality: "suggest", brief: "auto" },
+  agents: { rules: "suggest", deadlines: "auto", compliance: "suggest", quality: "suggest", brief: "auto", finance: "suggest" },
   ai: { monthly_usd: 50, price_in: 3, price_out: 15 },
 };
 
@@ -54,7 +56,7 @@ export type Action =
   | { type: "notify"; to: string; message: string }                                   // to: "owner" (the person in the record) | "role:<role>" | "leads"
   | { type: "create"; section: string; title: string; status?: string; link?: string; fields?: Record<string, string> } // link: ref field in the new record pointing back
   | { type: "set"; field: string; value: string }                                     // field "status" changes the status
-  | { type: "email"; to_field: string; subject: string; body: string };               // email to an outside address: always waits for approval
+  | { type: "email"; to_field: string; to?: string; subject: string; body: string };  // email to an outside address (field or fixed address): always waits for approval
 export type Rule = {
   id: string; name: string; enabled: boolean; mode: "auto" | "suggest";
   on: "created" | "status" | "date"; section: string; status?: string; date_key?: string; offset?: number;

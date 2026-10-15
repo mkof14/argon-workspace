@@ -1,6 +1,6 @@
 import { adminClient, currentProfile, userClient } from "@/lib/server/supabase";
 import { readState } from "@/lib/server/backup";
-import { aiUsage, decide, getLog, getQueue, getRules, getSettings, integrations, onRecordEvent, runAgents, saveRules, saveSettings } from "@/lib/server/automation";
+import { aiUsage, decide, deptFindings, getLog, getQueue, getRules, getSettings, integrations, onRecordEvent, runAgents, saveRules, saveSettings } from "@/lib/server/automation";
 import { AGENTS, DEFAULT_RULES, type AgentId, type Rule } from "@/lib/automation";
 
 export const runtime = "nodejs";
@@ -33,6 +33,7 @@ export async function POST(req: Request) {
       if (ev.kind === "status" && (ev.from || "") === (ev.to || "")) return Response.json({ matched: 0 });
       return Response.json(await onRecordEvent(db, rec, ev));
     }
+    if (b.action === "findings") return Response.json(await deptFindings(db, String(b.dept || ""), { role: me.role, us_person: !!me.us_person }));
     const admin = ["owner", "admin"].includes(me.role);
     if (!admin) return new Response("Only owners and administrators", { status: 403 });
     if (b.action === "pending") {
