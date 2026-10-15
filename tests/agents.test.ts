@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clientEmail, days, financeFindings, hrFindings, operationsFindings, salesFindings, stepFor } from "../src/lib/deptAgents.ts";
+import { clientEmail, days, financeFindings, hrFindings, legalFindings, addMonths, operationsFindings, salesFindings, stepFor } from "../src/lib/deptAgents.ts";
 
 const T = "2026-10-15";
 const th = { remind_before: 3, escalate_after: 3, stalled_deal: 14 };
@@ -106,4 +106,24 @@ test("hr: onboarding, leaver offboarding + access removal, probation task, work 
   assert.equal(f.find((x) => x.key.startsWith("hr-auth|P3"))!.key, "hr-auth|P3|d30");
   assert.equal(f.find((x) => x.key === "hr-i9|P3")!.level, "bad");
   assert.ok(!f.some((x) => x.key === "hr-ciiaa|P3"));
+});
+
+test("legal: renewal windows, recurring obligations, won deals without contract, end-user clause", () => {
+  assert.equal(addMonths("2026-01-31", 1), "2026-02-28");
+  assert.equal(addMonths("2026-11-15", 3), "2027-02-15");
+  const all = [
+    r("LC", "legal.licences", "Granted", { expires: "2026-12-01" }),
+    r("OB", "legal.obligations", "Done", { due: "2026-09-30", frequency: "Quarterly", area: "Tax" }, { title: "Sales tax return" }),
+    r("D1", "sales.pipeline", "Won", {}),
+    r("C1", "legal.contracts", "Negotiation", { type: "Sale", deal_ref: "D1" }),
+    r("PA", "legal.authority", "Active", { expires: "2026-10-20" }),
+  ];
+  const f = legalFindings(all as any, T, th);
+  const lc = f.find((x) => x.key.startsWith("leg-date|LC"))!; assert.equal(lc.key, "leg-date|LC|d60"); assert.deepEqual(lc.action, { type: "set", field: "status", value: "Renewal due" });
+  const pa = f.find((x) => x.key.startsWith("leg-date|PA"))!; assert.equal(pa.level, "bad"); assert.deepEqual(pa.action, { type: "set", field: "status", value: "Expiring" });
+  assert.equal((f.find((x) => x.key.startsWith("leg-next|OB"))!.action as any).fields.due, "2026-12-30");
+  assert.match(f.find((x) => x.key === "leg-nocontract|D1")!.text, /no signed contract yet/);
+  assert.ok(f.some((x) => x.key === "leg-euc|C1"));
+  const done = [...all, r("OB2", "legal.obligations", "Upcoming", { due: "2026-12-30" }, { title: "Sales tax return" })];
+  assert.ok(!legalFindings(done as any, T, th).some((x) => x.key.startsWith("leg-next")));
 });

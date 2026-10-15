@@ -244,3 +244,59 @@ export function hrFindings(all: R[], today: string, _th: Th): Finding[] {
   for (const c of of(all, "hr.compensation")) if (c.status === "Proposed" && age(c, today) >= 7) out.push({ rec: c, level: "info", who: ["leads"], key: `hr-comp|${c.id}`, text: `A compensation proposal (${c.data?.person || c.title}) waits for approval ${age(c, today)} days.` });
   return out;
 }
+
+/* ---------------- Legal ---------------- */
+export const addMonths = (d: string, n: number) => { const [y, m, day] = String(d).slice(0, 10).split("-").map(Number); const t = new Date(Date.UTC(y, m - 1 + n, 1)); const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate(); t.setUTCDate(Math.min(day, last)); return t.toISOString().slice(0, 10); };
+const EVERY: Record<string, number> = { Monthly: 1, Quarterly: 3, Annual: 12 };
+/** Dated legal items: section → date field, statuses that close it, and the status to set when renewal is near. */
+const LEGAL_DATES: [string, string, string[], string, string?][] = [
+  ["legal.licences", "expires", ["Expired", "Denied", "Not started"], "Licence or permit", "Renewal due"],
+  ["legal.hse", "expires", ["Expired", "Identify"], "HSE permit", "Renewal due"],
+  ["legal.authority", "expires", ["Revoked", "Draft"], "Signing authority / POA", "Expiring"],
+  ["legal.corporate", "due", [], "Corporate filing", "Renewal due"],
+  ["legal.trademarks", "due", ["Refused"], "Trademark deadline"],
+  ["legal.obligations", "due", ["Done", "Not applicable"], "Obligation"],
+  ["legal.programs", "next_review", ["To draft"], "Compliance program review"],
+  ["legal.board", "due", ["Minutes signed", "Held", "Minutes drafted"], "Board / stockholder meeting"],
+  ["legal.ip", "due", ["Closed"], "IP item"],
+];
+const FROM: Record<string, string[]> = { "Renewal due": ["Granted", "Active"], Expiring: ["Active"] };
+
+export function legalFindings(all: R[], today: string, _th: Th): Finding[] {
+  const out: Finding[] = [];
+  for (const [sec, key, closed, what, renew] of LEGAL_DATES) for (const r of of(all, sec)) {
+    if (closed.includes(r.status || "") || !isDate(r.data?.[key])) continue;
+    const d = days(today, r.data[key]); const st = stepFor(d, [60, 30, 7]); if (!st) continue;
+    out.push({ rec: r, level: st === "late" || st === "d7" ? "bad" : st === "d30" ? "warn" : "info", who: st === "late" || st === "d7" ? ["role:legal", "owner", "leads"] : ["role:legal", "owner"], key: `leg-date|${r.id}|${st}`, repeat: st === "late" ? 3 : 365,
+      text: st === "late" ? `${what} “${r.title}” — date ${r.data[key]} has passed.` : `${what} “${r.title}” — ${r.data[key]} (in ${d} days).`,
+      action: renew && d <= 60 && FROM[renew]?.includes(r.status || "") ? { type: "set", field: "status", value: renew } : undefined, why: "Renewal window" });
+  }
+  // Recurring obligations: when one is done, the next one is created
+  for (const o of of(all, "legal.obligations")) {
+    const n = EVERY[o.data?.frequency]; if (o.status !== "Done" || !n || !isDate(o.data?.due)) continue;
+    const next = addMonths(o.data.due, n);
+    if (all.some((x) => x.section === "legal.obligations" && x.title === o.title && String(x.data?.due || "") >= next)) continue;
+    out.push({ rec: o, level: "info", who: ["role:legal"], key: `leg-next|${o.id}|${next}`, repeat: 365, text: `${o.data.frequency} obligation “${o.title}” is done — the next one (due ${next}) is prepared.`,
+      action: { type: "create", section: "legal.obligations", title: "{title}", status: "Upcoming", fields: { jurisdiction: "{jurisdiction}", area: "{area}", frequency: "{frequency}", due: next, owner: "{owner}", basis: "{basis}" } }, why: "Recurring obligation" });
+  }
+  // Requests and issues
+  for (const q of of(all, "legal.requests")) {
+    if (["Answered", "Closed"].includes(q.status || "")) continue;
+    if (q.status === "New" && created(q, today) >= 2) out.push({ rec: q, level: "warn", who: ["role:legal"], key: `leg-new|${q.id}`, repeat: 2, text: `Legal request “${q.title}” from ${q.data?.requester || "a colleague"} is not triaged for ${created(q, today)} days.` });
+    if (isDate(q.data?.due) && days(q.data.due, today) >= 1) out.push({ rec: q, level: q.data?.priority === "Critical" ? "bad" : "warn", who: ["role:legal", "owner"], key: `leg-reqlate|${q.id}`, repeat: 3, text: `Legal request “${q.title}” was due on ${q.data.due}.` });
+    else if (q.data?.priority === "Critical" && created(q, today) >= 1) out.push({ rec: q, level: "bad", who: ["role:legal", "leads"], key: `leg-crit|${q.id}`, repeat: 2, text: `Critical legal request “${q.title}” is open for ${created(q, today)} day(s).` });
+  }
+  for (const i of of(all, "legal.issues")) if (i.status !== "Resolved" && ["High", "Critical"].includes(i.data?.priority) && age(i, today) >= 7) out.push({ rec: i, level: "bad", who: ["leads", "role:legal"], key: `leg-issue|${i.id}`, text: `${i.data.priority} legal issue “${i.title}” has not moved for ${age(i, today)} days.` });
+  // Contracts behind the deals
+  const contracts = of(all, "legal.contracts");
+  for (const d of of(all, "sales.pipeline").filter((x) => x.status === "Won")) {
+    const cs = contracts.filter((c) => c.data?.deal_ref === d.id);
+    if (!cs.some((c) => c.status === "Signed")) out.push({ rec: d, level: "warn", who: ["role:legal", "owner"], key: `leg-nocontract|${d.id}`, text: `Deal “${d.title}” is won but has ${cs.length ? "no signed contract yet" : "no contract record"}.` });
+  }
+  for (const c of contracts) {
+    if (["Sale", "Lease", "Distribution", "Supply"].includes(c.data?.type) && ["Counsel review", "Negotiation"].includes(c.status || "") && !c.data?.end_user_clause)
+      out.push({ rec: c, level: "warn", who: ["role:legal"], key: `leg-euc|${c.id}`, repeat: 14, text: `Contract “${c.title}” (${c.data.type}) has no end-user / export clause marked.` });
+  }
+  for (const b of of(all, "legal.board")) if (b.status === "Held" && age(b, today) >= 14) out.push({ rec: b, level: "warn", who: ["owner", "role:legal"], key: `leg-minutes|${b.id}`, text: `Minutes of “${b.title}” are not drafted ${age(b, today)} days after the meeting.` });
+  return out;
+}
