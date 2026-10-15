@@ -3,8 +3,8 @@ const supabase = "https://*.supabase.co";
 const csp = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline'",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src 'self' https://fonts.gstatic.com data:",
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self' data:",
   `img-src 'self' data: blob: https://workspace.agron1.com ${supabase}`,
   `media-src 'self' blob: ${supabase}`,
   `connect-src 'self' ${supabase} wss://*.supabase.co`,
@@ -30,6 +30,8 @@ const security = [
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // Title, description and preview tags go into <head> for every visitor (not streamed later), so link previews and audits see them
+  htmlLimitedBots: /.*/,
   async headers() {
     return [
       { source: "/:path*", headers: security },

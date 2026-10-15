@@ -1,12 +1,13 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
+// Loaded when needed: the record form (with PDF, markdown and AI tools) and the template list are not part of the first page load
+const RecordDrawer = dynamic(() => import("./RecordDrawer"), { ssr: false });
+const SectionTemplates = dynamic(() => import("./Templates").then((m) => m.SectionTemplates), { ssr: false });
 import Icon from "./Icon";
 import { useApp } from "./App";
-import RecordDrawer from "./RecordDrawer";
 import dynamic from "next/dynamic";
 const MailCenter = dynamic(() => import("./Mail"), { ssr: false });
 const LegalHub = dynamic(() => import("./LegalHub"), { ssr: false });
-import { SectionTemplates } from "./Templates";
 import { CsvImport } from "./DataTools";
 import BrandLogos from "./BrandLogos";
 import ChannelsBoard from "./ChannelsBoard";

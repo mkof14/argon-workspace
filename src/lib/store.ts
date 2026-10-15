@@ -1,7 +1,7 @@
 "use client";
 import { allSections, defaultRules, ROLES } from "@/config/workspace.config.mjs";
 import type * as DemoMod from "./demo";
-import { SEED_FAQ, l2 } from "@/config/learn";
+import { SEED_FAQ, l2, loadLearnLang } from "@/config/learn";
 
 export type Rec = {
   id: string; section: string; title: string; status: string | null; data: Record<string, any>;
@@ -223,12 +223,14 @@ export const store = {
   },
   /* ----- FAQ knowledge base ----- */
   async faqSearch(q: string, lang?: string, n = 5): Promise<Faq[]> {
+    if (DEMO) await loadLearnLang("uk");
     if (!q.trim()) return [];
     if (DEMO) return demoFaq(demoLoad()).filter((f) => !lang || f.lang === lang).map((f) => ({ ...f, sim: textSim(q, f.question) })).filter((f) => f.sim! > 0.3).sort((a, b) => b.sim! - a.sim!).slice(0, n);
     const { data, error } = await sb().rpc("faq_search", { q, lng: lang || null, n });
     if (error) return []; return (data || []) as Faq[];
   },
   async faqList(): Promise<Faq[]> {
+    await loadLearnLang("uk"); // the starter answers are written in all four languages
     if (DEMO) return demoFaq(demoLoad());
     const get = async () => (await sb().from("faq").select("*").order("verified", { ascending: false }).order("hits", { ascending: false }).limit(500)).data || [];
     let rows = await get();
@@ -240,6 +242,7 @@ export const store = {
     return rows as Faq[];
   },
   async faqSave(f: Partial<Faq> & { question: string; answer: string; lang: string }) {
+    if (DEMO) await loadLearnLang("uk");
     if (DEMO) { const db = demoLoad(); const list = demoFaq(db); if (f.id) db.faq = list.map((x) => (x.id === f.id ? { ...x, ...f } as Faq : x)); else db.faq = [{ id: uid(), section: null, verified: false, hits: 0, source: "manual", ...f } as Faq, ...list]; demoSave(db); return; }
     const body: any = { question: f.question, answer: f.answer, lang: f.lang, section: f.section ?? null, source: f.source || "manual" };
     if (f.verified !== undefined) body.verified = f.verified;
@@ -247,10 +250,12 @@ export const store = {
     if (error) throw error;
   },
   async faqDelete(id: string) {
+    if (DEMO) await loadLearnLang("uk");
     if (DEMO) { const db = demoLoad(); db.faq = demoFaq(db).filter((x) => x.id !== id); demoSave(db); return; }
     const { error } = await sb().from("faq").delete().eq("id", id); if (error) throw error;
   },
   async faqHit(id: string) {
+    if (DEMO) await loadLearnLang("uk");
     if (DEMO) { const db = demoLoad(); db.faq = demoFaq(db).map((x) => (x.id === id ? { ...x, hits: x.hits + 1 } : x)); demoSave(db); return; }
     await sb().rpc("faq_hit", { fid: id });
   },

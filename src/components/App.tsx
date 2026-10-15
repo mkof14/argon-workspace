@@ -6,6 +6,7 @@ import Icon from "./Icon";
 import { DEPARTMENTS, DEPT_COLORS, ROLES, allSections } from "@/config/workspace.config.mjs";
 import { LANGS, Lang, t, tx } from "@/lib/i18n";
 import { installErrorReporting } from "@/lib/errors";
+import { loadLearnLang } from "@/config/learn";
 import { DEMO, Profile, Rule, accessFor, isExternal, store, Access } from "@/lib/store";
 import dynamic from "next/dynamic";
 import Dashboard from "./Dashboard";
@@ -30,7 +31,7 @@ const Bell = dynamic(() => import("./Inbox").then((m) => m.Bell), { ssr: false }
 const Intake = dynamic(() => import("./Intake"), { ssr: false });
 const DocsAsk = dynamic(() => import("./DocsAsk"), { ssr: false });
 const StarDome = dynamic(() => import("./StarDome"), { ssr: false });
-export const VERSION = "2.17";
+export const VERSION = "2.18";
 
 type Ctx = {
   lang: Lang; me: Profile; access: Access; toast: (m: string, err?: boolean) => void;
@@ -69,6 +70,9 @@ export default function App({ slug }: { slug: string[] }) {
   }, [focusDept]);
   const [ai, setAi] = useState<AiContext | null>(null);
   const [tick, setTick] = useState(0);
+  // Ukrainian and Arabic help texts arrive separately; redraw once they are here
+  const [, setTexts] = useState(0);
+  useEffect(() => { loadLearnLang(lang).then((loaded) => { if (loaded) setTexts((n) => n + 1); }).catch(() => {}); }, [lang]);
   const [mail, setMail] = useState<MailInit | null>(null);
   const [people, setPeople] = useState<Profile[]>([]);
   const [rules, setRules] = useState<Rule[] | null>(null);
@@ -108,7 +112,7 @@ export default function App({ slug }: { slug: string[] }) {
     setMe(p); setLoaded(true); setTick((x) => x + 1);
     if (!p && !DEMO) router.replace("/login");
     if (p && !isExternal(p.role)) store.profiles().then(setPeople).catch(() => {});
-    if (p && ["owner", "admin", "management", "legal"].includes(p.role)) store.faqList().catch(() => {}); // loads the starter FAQ once
+    if (p && ["owner", "admin", "management", "legal"].includes(p.role)) setTimeout(() => store.faqList().catch(() => {}), 8000); // tops up the starter FAQ after the page is ready
   }, [router]);
   useEffect(() => { reload(); }, [reload]);
   useEffect(() => { installErrorReporting(); if ("serviceWorker" in navigator && !DEMO) navigator.serviceWorker.register("/sw.js").catch(() => {}); }, []);

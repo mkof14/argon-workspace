@@ -1,3 +1,11 @@
+// Fonts are served from our own domain (no third-party request blocks the first paint); only the needed weights.
+import "@fontsource/ibm-plex-sans/400.css";
+import "@fontsource/ibm-plex-sans/500.css";
+import "@fontsource/ibm-plex-sans/600.css";
+import "@fontsource/ibm-plex-sans/700.css";
+import "@fontsource/ibm-plex-sans-arabic/400.css";
+import "@fontsource/ibm-plex-sans-arabic/600.css";
+import "@fontsource/unbounded/600.css";
 import "./globals.css";
 import type { Metadata, Viewport } from "next";
 
@@ -23,10 +31,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
         <link rel="preload" as="image" href="/logo-full.webp" />
-        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Arabic:wght@400;600&display=swap" />
         <style dangerouslySetInnerHTML={{ __html: `:root{--font-display:"Unbounded";--font-body:"IBM Plex Sans";--font-arabic:"IBM Plex Sans Arabic";--font-mono:ui-monospace}` }} />
         <script dangerouslySetInnerHTML={{ __html: `try{var t=localStorage.getItem("agronws.theme");if(t)document.documentElement.setAttribute("data-theme",t);var l=localStorage.getItem("agronws.lang");if(l){document.documentElement.lang=l;document.documentElement.dir=l==="ar"?"rtl":"ltr"}}catch(e){}` }} />
       </head>

@@ -1,9 +1,9 @@
 /* AGRON Workspace — design tokens. The menu (rail) follows the light/dark theme; brand plates (hero, logo) stay dark. */
 :root{
-  --bg:#F1EFEA; --surface:#FDFCFA; --surface-2:#F6F4F0; --ink:#111820; --ink-2:#4B5867; --ink-3:#7A8796;
+  --bg:#F1EFEA; --surface:#FDFCFA; --surface-2:#F6F4F0; --ink:#111820; --ink-2:#4B5867; --ink-3:#5E6A77;
   --line:#DAD6CE; --line-2:#E8E4DD; --accent:#C2410C; --accent-soft:#FDE8DC; --accent-ink:#FFFFFF;
   --rail:#141A21; --rail-2:#1C242D; --rail-ink:#C7D0DA; --rail-dim:#7D8A98; --rail-hi:#FF6A2B; --rail-line:#26303B;
-  --ok:#1F7A4D; --ok-bg:#DDF2E6; --info:#1F5F99; --info-bg:#DDEAF7; --warn:#A15C00; --warn-bg:#FBEBCF; --bad:#B4232F; --bad-bg:#F9DADC; --vio:#4A1D5C; --vio-bg:#EBDDF1;
+  --ok:#1F7A4D; --ok-bg:#DDF2E6; --info:#1F5F99; --info-bg:#DDEAF7; --warn:#8A4E00; --warn-bg:#FBEBCF; --bad:#B4232F; --bad-bg:#F9DADC; --vio:#4A1D5C; --vio-bg:#EBDDF1;
   --shadow:0 1px 1px rgba(17,24,32,.04); --shadow-lg:0 18px 50px rgba(17,24,32,.22);
   --f-display:var(--font-display),"IBM Plex Sans",system-ui,sans-serif;
   --f-body:var(--font-body),var(--font-arabic),system-ui,-apple-system,"Segoe UI",sans-serif;
@@ -885,7 +885,7 @@ a.hub-row:hover{background:var(--surface-2)}
 .rail .nav-label.nav-depts b{order:3;margin-inline-start:0;background:none;border:0;padding:0;color:var(--rail-dim);font-weight:400}
 
 /* Menu follows the theme: rail tokens are redefined inside .rail only, so dark brand plates elsewhere keep var(--rail) */
-.rail{--rail:#FBFAF7;--rail-2:#EFEBE4;--rail-ink:#34414E;--rail-dim:#6B7785;--rail-line:#E3DFD7;--rail-strong:#121820}
+.rail{--rail:#FBFAF7;--rail-2:#EFEBE4;--rail-ink:#34414E;--rail-dim:#5A6673;--rail-line:#E3DFD7;--rail-strong:#121820}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .rail{--rail:#141B24;--rail-2:#1D2734;--rail-ink:#C7D0DA;--rail-dim:#8592A0;--rail-line:#2A3543;--rail-strong:#F2F5F8}}
 :root[data-theme="dark"] .rail{--rail:#141B24;--rail-2:#1D2734;--rail-ink:#C7D0DA;--rail-dim:#8592A0;--rail-line:#2A3543;--rail-strong:#F2F5F8}
 .rail-brand img{background:#141A21;border-radius:10px;padding:10px 12px}
@@ -999,3 +999,7 @@ a.hub-row:hover{background:var(--surface-2)}
 .toolbar>.faint{white-space:normal}
 .ask-form{grid-template-columns:minmax(0,1fr)}
 .ask-ex .chip{white-space:normal;text-align:start;max-width:100%}
+
+/* Readability: active tab text on department colours meets contrast AA; footer stays below the fold while data loads (no jump) */
+.dtabs a.on{background:color-mix(in srgb,var(--dc) 78%,#000)}
+main.page{min-height:calc(100dvh - 90px);align-content:start}
