@@ -79,12 +79,13 @@ async function run(only: string | null) {
   return Response.json({ ok: true, sent, skipped: skipped.length });
 }
 
-/** Smart upload leaves files in `_intake/<user>/` until they are saved or removed; drop anything older than a day. */
+/** Smart upload leaves files in `_intake/<user>/` until they are saved or removed; drop anything older than a day (email attachments: 30 days). */
 async function cleanIntake() {
-  const st = adminClient().storage.from("files"); const cutoff = Date.now() - 864e5;
+  const st = adminClient().storage.from("files");
   const { data: users } = await st.list("_intake", { limit: 1000 });
   for (const u of users || []) {
     const { data: files } = await st.list(`_intake/${u.name}`, { limit: 1000 });
+    const cutoff = Date.now() - (u.name === "mail" ? 30 : 1) * 864e5; // email attachments wait up to 30 days for approval
     const old = (files || []).filter((f: any) => f.id && Date.parse(f.created_at || "") < cutoff).map((f: any) => `_intake/${u.name}/${f.name}`);
     if (old.length) await st.remove(old);
   }

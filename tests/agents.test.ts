@@ -193,3 +193,17 @@ test("every agent notice type has Russian, Ukrainian and Arabic text", async () 
   assert.equal(agentText(f, "en"), "EN");
   assert.equal(agentText({ ...f, rec: { ...f.rec, data: {} } }, "uk"), "Рахунок «INV-7» прострочено, строк був.");
 });
+
+test("email intake: skips newsletters, auto-replies and own mail; keeps documents; strips quoted history", async () => {
+  const { skipReason, keepFiles, cleanBody } = await import("../src/lib/mailRules.ts");
+  const own = ["info@agron1.com"];
+  assert.equal(skipReason({ subject: "Quote for C40" }, "buyer@port.ae", own), null);
+  assert.equal(skipReason({ subject: "News", "list-unsubscribe": "<x>" }, "news@media.com", own), "newsletter or mailing list");
+  assert.equal(skipReason({ subject: "Out of office" }, "a@b.com", own), "automatic reply");
+  assert.equal(skipReason({ subject: "x" }, "no-reply@bank.com", own), "automatic sender");
+  assert.equal(skipReason({ subject: "Digest", "x-agron-workspace": "1" }, "info@agron1.com", own), "sent by Workspace");
+  assert.equal(skipReason({ subject: "Fwd: invoice" }, "info@agron1.com", own), null);
+  const files = keepFiles([{ filename: "Invoice 12.pdf", contentType: "application/pdf", size: 1000 }, { filename: "image001.png", contentType: "image/png", size: 500, related: true }, { filename: "big.pdf", contentType: "application/pdf", size: 20e6 }, { filename: "x.exe", contentType: "application/x-msdownload", size: 10 }]);
+  assert.deepEqual(files.map((f) => f.filename), ["Invoice 12.pdf"]);
+  assert.equal(cleanBody("Hello,\nplease see attached.\n\nOn Mon, Oct 12, 2026 at 9:00 John wrote:\n> old"), "Hello,\nplease see attached.");
+});

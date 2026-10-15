@@ -2,8 +2,8 @@
 // Pure functions only (no imports of other local modules), so the Node test runner can load this file directly.
 
 export type Mode = "off" | "suggest" | "auto";
-export type AgentId = "rules" | "deadlines" | "compliance" | "quality" | "brief" | "finance" | "sales" | "operations" | "hr" | "legal" | "marketing" | "technical" | "security";
-export const AGENTS: AgentId[] = ["rules", "deadlines", "compliance", "quality", "brief", "finance", "sales", "operations", "hr", "legal", "marketing", "technical", "security"];
+export type AgentId = "rules" | "deadlines" | "compliance" | "quality" | "brief" | "finance" | "sales" | "operations" | "hr" | "legal" | "marketing" | "technical" | "security" | "intake";
+export const AGENTS: AgentId[] = ["rules", "deadlines", "compliance", "quality", "brief", "finance", "sales", "operations", "hr", "legal", "marketing", "technical", "security", "intake"];
 /** Department agents (their checks live in deptAgents.ts). */
 export const DEPT_AGENTS: AgentId[] = ["finance", "sales", "operations", "hr", "legal", "marketing", "technical", "security"];
 
@@ -20,7 +20,7 @@ export const DEFAULT_SETTINGS: Settings = {
   company: { name: "AGRON Inc.", timezone: "America/New_York", currency: "USD", workdays: [1, 2, 3, 4, 5], holidays: [] },
   thresholds: { escalate_after: 3, remind_before: 3, stalled_deal: 14, stale_record: 60, screening_wait: 3 },
   notify: { digest: true, monitor_roles: ["owner", "admin", "security"], report_roles: ["owner", "admin", "management"], brief_roles: ["owner"], escalate_roles: ["owner", "admin", "management"] },
-  agents: { rules: "suggest", deadlines: "auto", compliance: "suggest", quality: "suggest", brief: "auto", finance: "suggest", sales: "suggest", operations: "suggest", hr: "suggest", legal: "suggest", marketing: "suggest", technical: "suggest", security: "suggest" },
+  agents: { rules: "suggest", deadlines: "auto", compliance: "suggest", quality: "suggest", brief: "auto", finance: "suggest", sales: "suggest", operations: "suggest", hr: "suggest", legal: "suggest", marketing: "suggest", technical: "suggest", security: "suggest", intake: "suggest" },
   ai: { monthly_usd: 50, price_in: 3, price_out: 15 },
 };
 
@@ -56,7 +56,8 @@ export type Action =
   | { type: "notify"; to: string; message: string }                                   // to: "owner" (the person in the record) | "role:<role>" | "leads"
   | { type: "create"; section: string; title: string; status?: string; link?: string; fields?: Record<string, string> } // link: ref field in the new record pointing back
   | { type: "set"; field: string; value: string }                                     // field "status" changes the status
-  | { type: "email"; to_field: string; to?: string; subject: string; body: string };  // email to an outside address (field or fixed address): always waits for approval
+  | { type: "email"; to_field: string; to?: string; subject: string; body: string }   // email to an outside address (field or fixed address): always waits for approval
+  | { type: "file"; section: string; title: string; status: string; data: Record<string, any>; controlled: boolean; files: string[]; from: string; subject: string; summary?: string }; // an incoming email filed as a record
 export type Rule = {
   id: string; name: string; enabled: boolean; mode: "auto" | "suggest";
   on: "created" | "status" | "date"; section: string; status?: string; date_key?: string; offset?: number;
@@ -120,7 +121,7 @@ export function dateDue(rule: Rule, rec: R, today: string): string | null {
 export function describe(rule: Rule, label: (sectionId: string) => string) {
   const trig = rule.on === "created" ? `a new record is added to ${label(rule.section)}` : rule.on === "status" ? `a record in ${label(rule.section)} moves to ${rule.status || "any status"}`
     : `${Math.abs(rule.offset || 0)} day(s) ${(rule.offset || 0) < 0 ? "before" : "after"} “${rule.date_key}” in ${label(rule.section)}`;
-  const acts = rule.actions.map((a) => a.type === "notify" ? `notify ${a.to.replace("role:", "")}` : a.type === "create" ? `create a record in ${label(a.section)}` : a.type === "set" ? `set ${a.field} to “${a.value}”` : `email the address in “${a.to_field}” (after approval)`);
+  const acts = rule.actions.map((a) => a.type === "notify" ? `notify ${a.to.replace("role:", "")}` : a.type === "create" ? `create a record in ${label(a.section)}` : a.type === "set" ? `set ${a.field} to “${a.value}”` : a.type === "file" ? `file the email into ${label(a.section)}` : `email the address in “${a.to_field}” (after approval)`);
   return `When ${trig}${rule.when?.length ? " (with conditions)" : ""}: ${acts.join(", ")}.`;
 }
 

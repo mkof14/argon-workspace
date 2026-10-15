@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { readState, saveState } from "./backup";
 import { sendMail } from "./mailer";
 import { renderEmail, SITE } from "@/lib/mail";
+import { fileRecord, readInbox } from "./mailIntake";
 import { allSections } from "@/config/workspace.config.mjs";
 import { REFS } from "@/config/links";
 import { dueItems, isMine, money, PEOPLE_KEYS } from "@/lib/insights";
@@ -87,6 +88,7 @@ const audit = (c: Ctx, agent: AgentId, rec: { id: string; section: string; title
 function describeAction(a: Action, rec: any) {
   if (a.type === "create") return `Create “${render(a.title, rec, today())}” in ${label(a.section)}${a.status ? ` (${a.status})` : ""}`;
   if (a.type === "set") return `Set ${a.field} of “${rec.title}” to “${a.value}”`;
+  if (a.type === "file") return `File email from ${a.from} “${a.subject}” into ${label(a.section)} as “${a.title}”`;
   if (a.type === "email") return `Email ${a.to || rec.data?.[a.to_field] || "(no address)"}: ${render(a.subject, rec)}`;
   return `Notify ${a.to.replace("role:", "")}: ${render(a.message, rec)}`;
 }
@@ -118,6 +120,12 @@ async function execute(c: Ctx, agent: AgentId, a: Action, rec: any): Promise<str
     const { error } = await db.from("records").update(patch).eq("id", rec.id); if (error) throw new Error(error.message);
     await audit(c, agent, rec, `Set ${a.field} to “${a.value}”`);
     return "updated";
+  }
+  if (a.type === "file") {
+    const made = await fileRecord(c.db, a);
+    await audit(c, agent, made, `Filed from email ${a.from}: ${a.subject}`);
+    tell(c, recipients(c, `role:${DEPT_ROLE[a.section.split(".")[0]] || "management"}`, { ...made, data: {}, controlled: a.controlled }), `New from email: ${esc(a.subject)} (${esc(a.from)}) → ${esc(label(a.section))} — <a href="${recUrl(made)}">open</a>`);
+    return `created ${made.id}`;
   }
   if (a.type === "email") {
     const to = String(a.to || rec.data?.[a.to_field] || "").trim();
@@ -333,6 +341,28 @@ export async function deptFindings(db: any, dept: string, me: { role: string; us
   return { agent, at: st.at, items: st.items.filter((i: any) => (full || ok.has(i.section)) && (!i.controlled || me.us_person)) };
 }
 
+/* ---------------- Email intake ---------------- */
+const DEPT_ROLE: Record<string, string> = { technical: "engineering", company: "management", operations: "operations", finance: "finance", sales: "sales", marketing: "marketing", hr: "hr", legal: "legal", security: "security" };
+/** New letters at info@agron1.com become records: right away in Auto mode, or as proposals with the attachments ready. */
+async function intakeAgent(c: Ctx, mode: "auto" | "suggest") {
+  if (await overBudget(c)) return "AI budget reached — mail not read";
+  const r: any = await readInbox(c.db);
+  if (r.skipped) return r.skipped;
+  for (const it of r.items) {
+    const a: Action = { type: "file", section: it.section, title: it.title, status: it.status, data: it.data, controlled: it.controlled, files: it.files, from: it.from, subject: it.subject, summary: it.summary };
+    const now = new Date().toISOString();
+    if (mode === "auto") {
+      try { const res = await execute(c, "intake", a, { id: "", section: it.section, title: it.title, data: {} }); c.log.push({ at: now, agent: "intake", kind: "action", text: `${describeAction(a, null)} → ${res}`, section: it.section }); }
+      catch (e: any) { c.log.push({ at: now, agent: "intake", kind: "error", text: `${it.subject}: ${e?.message || e}` }); }
+    } else {
+      c.queue.push({ id: uid(), at: now, agent: "intake", title: describeAction(a, null), detail: [it.summary, it.reason].filter(Boolean).join(" — "), section: it.section, action: a, status: "pending", controlled: it.controlled });
+      c.log.push({ at: now, agent: "intake", kind: "queued", text: describeAction(a, null), section: it.section });
+    }
+  }
+  if (mode !== "auto" && r.items.length) for (const p of c.profiles.filter((x) => ["owner", "admin"].includes(x.role))) tell(c, [p], `${r.items.length} new email(s) at info@agron1.com are prepared for filing — <a href="${SITE}/admin/system?tab=auto">approve</a>`);
+  return `${r.items.length} email(s) ${mode === "auto" ? "filed" : "prepared"}, ${r.ignored.length} skipped (newsletters, auto-replies, own mail)`;
+}
+
 /* ---------------- AI budget ---------------- */
 export async function aiUsage(db: any, s: Settings) {
   const since = new Date(); since.setUTCDate(1); since.setUTCHours(0, 0, 0, 0);
@@ -353,7 +383,7 @@ export async function runAgents(db: any, opts: { only?: AgentId; manual?: boolea
     if (opts.only && opts.only !== a) continue;
     const mode = c.settings.agents[a]; if (mode === "off") { out[a] = "off"; continue; }
     try {
-      out[a] = DEPT_AGENTS.includes(a) ? await deptAgent(c, recs, a, mode) : a === "rules" ? await rulesAgent(c, recs) : a === "deadlines" ? await deadlinesAgent(c, recs) : a === "compliance" ? await complianceAgent(c, recs, mode) : a === "quality" ? await qualityAgent(c, recs, mode) : await briefAgent(c, recs, !!opts.manual);
+      out[a] = a === "intake" ? await intakeAgent(c, mode) : DEPT_AGENTS.includes(a) ? await deptAgent(c, recs, a, mode) : a === "rules" ? await rulesAgent(c, recs) : a === "deadlines" ? await deadlinesAgent(c, recs) : a === "compliance" ? await complianceAgent(c, recs, mode) : a === "quality" ? await qualityAgent(c, recs, mode) : await briefAgent(c, recs, !!opts.manual);
       c.log.push({ at: new Date().toISOString(), agent: a, kind: "run", text: out[a] });
     } catch (e: any) { out[a] = `error: ${e?.message || e}`; c.log.push({ at: new Date().toISOString(), agent: a, kind: "error", text: String(e?.message || e) }); }
   }
@@ -370,10 +400,11 @@ export async function decide(db: any, id: string, approve: boolean, by: { id: st
   if (item.controlled && !by.us_person) throw new Error("US-persons-only record: a US person must decide");
   const now = new Date().toISOString(); item.decided_by = by.email; item.decided_at = now;
   const c = await context(db);
-  if (!approve) { item.status = "rejected"; c.log.push({ at: now, agent: item.agent, kind: "decision", text: `Rejected by ${by.email}: ${item.title}` }); }
+  if (!approve) { item.status = "rejected"; if (item.action.type === "file" && item.action.files?.length) await db.storage.from("files").remove(item.action.files.filter((p) => p.startsWith("_intake/mail/"))).catch(() => {}); c.log.push({ at: now, agent: item.agent, kind: "decision", text: `Rejected by ${by.email}: ${item.title}` }); }
   else {
     try {
       if (item.action.type === "set" && item.action.field === "_quality_fix") item.result = `fixed ${await applyQualityFixes(db)}`;
+      else if (item.action.type === "file") item.result = await execute(c, item.agent, item.action, { id: "", section: item.action.section, title: item.action.title, data: {} });
       else {
         const { data: rec } = await db.from("records").select("id,section,title,status,data,controlled,created_at,updated_at").eq("id", item.record_id).single();
         if (!rec) throw new Error("The record no longer exists");
