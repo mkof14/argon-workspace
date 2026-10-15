@@ -192,3 +192,55 @@ export function operationsFindings(all: R[], today: string, _th: Th): Finding[] 
   for (const v of of(all, "operations.inventory")) if (v.status === "In repair" && age(v, today) >= 14) out.push({ rec: v, level: "info", who: ["role:operations"], key: `ops-rep|${v.id}`, text: `“${v.title}” (${v.data?.serial || ""}) is in repair for ${age(v, today)} days.` });
   return out;
 }
+
+/* ---------------- HR ---------------- */
+// Never puts pay, documents or personal details into notices: names and dates only.
+export function hrFindings(all: R[], today: string, _th: Th): Finding[] {
+  const out: Finding[] = [];
+  const has = (sec: string, title: string) => all.some((r) => r.section === sec && r.title.trim().toLowerCase() === title.trim().toLowerCase());
+  const person = (r: R, name: string) => String(r.data?.person || "").trim().toLowerCase() === name.trim().toLowerCase();
+  for (const p of of(all, "hr.team")) {
+    const n = p.title; const live = ["Active", "Onboarding", "On leave"].includes(p.status || "");
+    if (p.status === "Onboarding" && !has("hr.onboarding", `Onboarding — ${n}`) && !of(all, "hr.onboarding").some((o) => person(o, n)))
+      out.push({ rec: p, level: "info", who: ["role:hr"], key: `hr-onb|${p.id}`, text: `${n} is onboarding without a checklist — one is prepared.`, action: { type: "create", section: "hr.onboarding", title: "Onboarding — {title}", status: "To do", fields: { person: "{title}", due: isDate(p.data?.start) ? addDays(p.data.start, 5) : addDays(today, 5) } }, why: "Status Onboarding" });
+    if (live && isDate(p.data?.probation)) {
+      const d = days(today, p.data.probation); const title = `Probation review — ${n}`;
+      if (d >= 0 && d <= 14 && !has("company.tasks", title)) out.push({ rec: p, level: "info", who: ["role:hr"], key: `hr-prob|${p.id}`, text: `Probation of ${n} ends on ${p.data.probation} — a review task for ${p.data?.manager || "the manager"} is prepared.`, action: { type: "create", section: "company.tasks", title, status: "Open", fields: { assignee: "{manager}", due: p.data.probation, priority: "High", notes: "Decide: confirm, extend or end. Record the result in the team card." } }, why: "Probation ends soon" });
+    }
+    if (live && isDate(p.data?.expires)) {
+      const st = stepFor(days(today, p.data.expires), [90, 30, 7]);
+      if (st) out.push({ rec: p, level: st === "late" || st === "d7" ? "bad" : "warn", who: st === "d90" ? ["role:hr"] : ["role:hr", "leads"], key: `hr-auth|${p.id}|${st}`, repeat: st === "late" ? 3 : 365, text: st === "late" ? `Work authorization of ${n} expired on ${p.data.expires}.` : `Work authorization of ${n} expires on ${p.data.expires} — start the renewal.` });
+    }
+    if (live && p.data?.location === "United States" && p.data?.type === "Employee") {
+      if (!p.data?.i9 && isDate(p.data?.start) && days(p.data.start, today) >= 3) out.push({ rec: p, level: "bad", who: ["role:hr"], key: `hr-i9|${p.id}`, text: `Form I-9 for ${n} is not marked done — it is due within 3 business days of the start date (${p.data.start}).` });
+      if (!p.data?.ciiaa) out.push({ rec: p, level: "warn", who: ["role:hr"], key: `hr-ciiaa|${p.id}`, repeat: 14, text: `${n} has no signed confidentiality and invention assignment agreement on record.` });
+    }
+    if (p.status === "Left") {
+      if (!has("hr.offboarding", `Offboarding — ${n}`) && !of(all, "hr.offboarding").some((o) => person(o, n)))
+        out.push({ rec: p, level: "warn", who: ["role:hr"], key: `hr-off|${p.id}`, text: `${n} has left — an offboarding checklist is prepared.`, action: { type: "create", section: "hr.offboarding", title: "Offboarding — {title}", status: "Planned", fields: { person: "{title}", due: addDays(today, 3) } }, why: "Status Left" });
+      if (!has("security.access", `Revoke access — ${n}`))
+        out.push({ rec: p, level: "bad", who: ["role:security", "role:hr"], key: `hr-revoke|${p.id}`, text: `${n} has left — remove access to Workspace, email, drives and company systems today.`, action: { type: "create", section: "security.access", title: "Revoke access — {title}", status: "Scheduled", fields: { system: "Workspace, Google Workspace, drives, GitHub, Vercel, Supabase, bank and government portals", due: today, notes: "Person left the company. Remove or transfer every access; record what was removed." } }, why: "Status Left" });
+      const kept = of(all, "hr.assets").filter((a) => a.status === "Issued" && person(a, n));
+      if (kept.length) out.push({ rec: p, level: "warn", who: ["role:hr"], key: `hr-assets|${p.id}`, text: `${n} has left but still holds ${kept.length} company item(s): ${kept.map((a) => a.data?.item || a.title).join(", ")}.` });
+    }
+  }
+  for (const o of of(all, "hr.onboarding")) {
+    if (o.status !== "Done" && isDate(o.data?.due) && days(o.data.due, today) >= 1) out.push({ rec: o, level: "warn", who: ["role:hr", "owner"], key: `hr-onblate|${o.id}`, text: `Onboarding “${o.title}” was due on ${o.data.due} and is not done.` });
+    if (o.status === "Done" && (!o.data?.nda || !o.data?.export_briefing)) out.push({ rec: o, level: "bad", who: ["role:hr", "role:security"], key: `hr-onbgap|${o.id}`, repeat: 14, text: `Onboarding “${o.title}” is closed without ${[!o.data?.nda && "a signed NDA", !o.data?.export_briefing && "the export-control briefing"].filter(Boolean).join(" and ")}.` });
+  }
+  for (const t of of(all, "hr.training")) {
+    if (!isDate(t.data?.expires) || t.status === "Expired") continue;
+    const d = days(today, t.data.expires);
+    if (d < 0 && t.status === "Certified") out.push({ rec: t, level: "warn", who: ["role:hr"], key: `hr-trexp|${t.id}`, text: `Training “${t.title}” of ${t.data?.person || ""} expired on ${t.data.expires}.`, action: { type: "set", field: "status", value: "Expired" }, why: "Certificate expired" });
+    else if (d >= 0 && d <= 30) out.push({ rec: t, level: "info", who: ["role:hr", "owner"], key: `hr-tr|${t.id}`, repeat: 30, text: `Training “${t.title}” of ${t.data?.person || ""} expires on ${t.data.expires} — book the refresher.` });
+  }
+  for (const l of of(all, "hr.leave")) if (l.status === "Requested" && created(l, today) >= 2) out.push({ rec: l, level: "warn", who: ["role:hr"], key: `hr-leave|${l.id}`, repeat: 2, text: `Leave request of ${l.data?.person || l.title} (${l.data?.from || ""} – ${l.data?.to || ""}) waits for a decision ${created(l, today)} days.` });
+  for (const c of of(all, "hr.candidates")) {
+    if (c.status === "Offer" && age(c, today) >= 7) out.push({ rec: c, level: "warn", who: ["role:hr"], key: `hr-offer|${c.id}`, text: `Offer to ${c.title} (${c.data?.position || ""}) has no answer for ${age(c, today)} days.` });
+    if (["Applied", "Screening", "Interview"].includes(c.status || "") && age(c, today) >= 10) out.push({ rec: c, level: "info", who: ["role:hr"], key: `hr-cand|${c.id}`, text: `Candidate ${c.title} (${c.data?.position || ""}) has waited ${age(c, today)} days at ${c.status} — reply or move on.` });
+  }
+  for (const h of of(all, "hr.hiring")) if (h.status === "Open" && !Number(h.data?.candidates) && created(h, today) >= 21) out.push({ rec: h, level: "info", who: ["role:hr", "owner"], key: `hr-hire|${h.id}`, repeat: 14, text: `Position “${h.title}” is open ${created(h, today)} days with no candidates — widen the search.` });
+  for (const v of of(all, "hr.reviews")) if (["Planned", "Self-review", "Manager review"].includes(v.status || "") && age(v, today) >= 30) out.push({ rec: v, level: "info", who: ["owner", "role:hr"], key: `hr-rev|${v.id}`, text: `Review of ${v.data?.person || v.title} is stuck at ${v.status} for ${age(v, today)} days.` });
+  for (const c of of(all, "hr.compensation")) if (c.status === "Proposed" && age(c, today) >= 7) out.push({ rec: c, level: "info", who: ["leads"], key: `hr-comp|${c.id}`, text: `A compensation proposal (${c.data?.person || c.title}) waits for approval ${age(c, today)} days.` });
+  return out;
+}

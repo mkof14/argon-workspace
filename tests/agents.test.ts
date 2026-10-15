@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clientEmail, days, financeFindings, operationsFindings, salesFindings, stepFor } from "../src/lib/deptAgents.ts";
+import { clientEmail, days, financeFindings, hrFindings, operationsFindings, salesFindings, stepFor } from "../src/lib/deptAgents.ts";
 
 const T = "2026-10-15";
 const th = { remind_before: 3, escalate_after: 3, stalled_deal: 14 };
@@ -89,4 +89,21 @@ test("operations: export stop, delivery → installation, commissioned → insta
   const fl = f.find((x) => x.key === "ops-fleet|B3")!.action as any; assert.equal(fl.fields.warranty_end, "2026-10-15".replace("2026", "2027")); assert.equal(fl.link, "build_ref");
   assert.equal((f.find((x) => x.key.startsWith("ops-svc|U1"))!.action as any).link, "unit_ref");
   assert.equal(f.find((x) => x.key === "ops-crit|K1")!.level, "bad");
+});
+
+test("hr: onboarding, leaver offboarding + access removal, probation task, work authorization, I-9", () => {
+  const all = [
+    r("P1", "hr.team", "Onboarding", { start: "2026-10-20" }, { title: "Ann Lee" }),
+    r("P2", "hr.team", "Left", {}, { title: "Bob Ray" }),
+    r("A2", "hr.assets", "Issued", { person: "Bob Ray", item: "Laptop" }),
+    r("P3", "hr.team", "Active", { probation: "2026-10-25", manager: "Kate", expires: "2026-11-01", location: "United States", type: "Employee", start: "2026-10-01", ciiaa: true }, { title: "Cy Dee" }),
+  ];
+  const f = hrFindings(all as any, T, th);
+  assert.equal((f.find((x) => x.key === "hr-onb|P1")!.action as any).fields.due, "2026-10-25");
+  assert.equal((f.find((x) => x.key === "hr-revoke|P2")!.action as any).section, "security.access");
+  assert.ok(f.some((x) => x.key === "hr-off|P2") && f.some((x) => x.key === "hr-assets|P2"));
+  assert.equal((f.find((x) => x.key === "hr-prob|P3")!.action as any).fields.assignee, "{manager}");
+  assert.equal(f.find((x) => x.key.startsWith("hr-auth|P3"))!.key, "hr-auth|P3|d30");
+  assert.equal(f.find((x) => x.key === "hr-i9|P3")!.level, "bad");
+  assert.ok(!f.some((x) => x.key === "hr-ciiaa|P3"));
 });

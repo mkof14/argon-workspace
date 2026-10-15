@@ -5,7 +5,7 @@ import { renderEmail, SITE } from "@/lib/mail";
 import { allSections } from "@/config/workspace.config.mjs";
 import { REFS } from "@/config/links";
 import { dueItems, isMine, money, PEOPLE_KEYS } from "@/lib/insights";
-import { financeFindings, operationsFindings, salesFindings, type Finding } from "@/lib/deptAgents";
+import { financeFindings, hrFindings, operationsFindings, salesFindings, type Finding } from "@/lib/deptAgents";
 import { AGENTS, DEPT_AGENTS, DEFAULT_RULES, aiCost, dateDue, isWorkday, matchEvent, qualityIssues, render, withDefaults, type Action, type AgentId, type Ev, type Rule, type Settings } from "@/lib/automation";
 
 /**
@@ -304,8 +304,8 @@ async function briefAgent(c: Ctx, recsAll: any[], force: boolean) {
 
 /* ---------------- Department agents ---------------- */
 type Finder = (all: any[], today: string, th: Settings["thresholds"]) => Finding[];
-const FINDERS: Partial<Record<AgentId, Finder>> = { finance: financeFindings, sales: salesFindings, operations: operationsFindings };
-const DEPT_OF: Partial<Record<AgentId, string>> = { finance: "finance", sales: "sales", operations: "operations" };
+const FINDERS: Partial<Record<AgentId, Finder>> = { finance: financeFindings, sales: salesFindings, operations: operationsFindings, hr: hrFindings };
+const DEPT_OF: Partial<Record<AgentId, string>> = { finance: "finance", sales: "sales", operations: "operations", hr: "hr" };
 const COLOR = { bad: "#B4232F", warn: "#A15C00", info: "#2A3440" };
 
 /** Runs a department agent: tells people once (then every few days while it is still true) and runs or proposes the changes. */
