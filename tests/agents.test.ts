@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clientEmail, days, financeFindings, hrFindings, legalFindings, marketingFindings, technicalFindings, addMonths, operationsFindings, salesFindings, stepFor } from "../src/lib/deptAgents.ts";
+import { clientEmail, days, financeFindings, hrFindings, legalFindings, marketingFindings, securityFindings, technicalFindings, quarter, addMonths, operationsFindings, salesFindings, stepFor } from "../src/lib/deptAgents.ts";
 
 const T = "2026-10-15";
 const th = { remind_before: 3, escalate_after: 3, stalled_deal: 14 };
@@ -162,4 +162,21 @@ test("technical: failed test → bug once, critical bug, certification, IT renew
   assert.equal(f.find((x) => x.key.startsWith("tec-cert|C1"))!.key, "tec-cert|C1|d7");
   assert.deepEqual(f.find((x) => x.key.startsWith("tec-it|IT"))!.action, { type: "set", field: "status", value: "Renewal due" });
   assert.ok(f.some((x) => x.key === "tec-matrix|EQ"));
+});
+
+test("security: incidents, quarterly access review once, overdue access removal, cyber, data classification", () => {
+  assert.equal(quarter("2026-10-15"), "2026-Q4");
+  const all = [
+    r("IN", "security.incidents", "Reported", { severity: "High" }, { created_at: "2026-10-13T10:00:00Z" }),
+    r("AC", "security.access", "Scheduled", { due: "2026-10-14" }, { title: "Revoke access — Bob Ray" }),
+    r("CY", "security.cyber", "Open", { risk: "High" }),
+    r("TD", "security.tcp", "EAR controlled", {}),
+  ];
+  const f = securityFindings(all as any, T, th);
+  assert.equal(f.find((x) => x.key === "sec-inc|IN")!.level, "bad");
+  assert.equal((f.find((x) => x.key === "sec-qar|2026-Q4")!.action as any).title, "Quarterly access review — 2026-Q4");
+  assert.equal(f.find((x) => x.key === "sec-acc|AC")!.level, "bad");
+  assert.ok(f.some((x) => x.key === "sec-cyber|CY") && f.some((x) => x.key === "sec-tcpacc|TD"));
+  const again = securityFindings([...all, r("Q", "security.access", "Scheduled", {}, { title: "Quarterly access review — 2026-Q4" })] as any, T, th);
+  assert.ok(!again.some((x) => x.key.startsWith("sec-qar")));
 });

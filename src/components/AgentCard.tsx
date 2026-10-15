@@ -5,7 +5,7 @@ import Icon from "./Icon";
 import { useApp } from "./App";
 import { tx, type Lang } from "@/lib/i18n";
 import { store, type Rec } from "@/lib/store";
-import { financeFindings, hrFindings, legalFindings, marketingFindings, technicalFindings, operationsFindings, salesFindings, type Finding } from "@/lib/deptAgents";
+import { financeFindings, hrFindings, legalFindings, marketingFindings, securityFindings, technicalFindings, operationsFindings, salesFindings, type Finding } from "@/lib/deptAgents";
 import { DEFAULT_SETTINGS } from "@/lib/automation";
 import { AGENT_INFO, L } from "./Automation";
 
@@ -19,6 +19,7 @@ export const DEPT_FINDERS: Record<string, { agent: keyof typeof AGENT_INFO; run:
   legal: { agent: "legal", run: legalFindings, extra: ["sales.pipeline"] },
   marketing: { agent: "marketing", run: marketingFindings, extra: [] },
   technical: { agent: "technical", run: technicalFindings, extra: [] },
+  security: { agent: "security", run: securityFindings, extra: [] },
 };
 const TONE = { bad: "c-bad", warn: "c-warn", info: "c-info" };
 

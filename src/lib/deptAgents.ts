@@ -398,3 +398,38 @@ export function technicalFindings(all: R[], today: string, _th: Th): Finding[] {
   for (const s of of(all, "technical.systems")) if (s.status !== "Retired" && !String(s.data?.owner || "").trim()) out.push({ rec: s, level: "info", who: ["role:engineering"], key: `tec-sysown|${s.id}`, repeat: 30, text: `System “${s.title}” has no owner — who answers when it is down?` });
   return out;
 }
+
+/* ---------------- Security ---------------- */
+export const quarter = (d: string) => `${d.slice(0, 4)}-Q${Math.floor((Number(d.slice(5, 7)) - 1) / 3) + 1}`;
+export function securityFindings(all: R[], today: string, _th: Th): Finding[] {
+  const out: Finding[] = [];
+  for (const i of of(all, "security.incidents")) {
+    if (i.status === "Resolved") continue; const a = created(i, today); const sev = i.data?.severity;
+    if (i.status === "Reported" && ["Critical", "High"].includes(sev) && a >= 1) out.push({ rec: i, level: "bad", who: ["leads", "role:security"], key: `sec-inc|${i.id}`, repeat: 1, text: `${sev} incident “${i.title}” is reported ${a} day(s) ago and nobody is investigating.` });
+    else if (i.status === "Reported" && a >= 3) out.push({ rec: i, level: "warn", who: ["role:security"], key: `sec-inc|${i.id}`, repeat: 3, text: `Incident “${i.title}” waits ${a} days for investigation.` });
+    if (i.status === "Investigating" && age(i, today) >= 7) out.push({ rec: i, level: "warn", who: ["owner", "role:security"], key: `sec-inv|${i.id}`, text: `Investigation of “${i.title}” has no update for ${age(i, today)} days.` });
+  }
+  // Access: a review every quarter, and every scheduled review or removal done on time
+  const acc = of(all, "security.access"); const q = quarter(today); const title = `Quarterly access review — ${q}`;
+  const anchor = [...acc].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0] || of(all, "security.cyber")[0] || of(all, "security.screening")[0];
+  if (anchor && !acc.some((a) => a.title === title)) out.push({ rec: anchor, level: "info", who: ["role:security"], key: `sec-qar|${q}`, repeat: 90, text: `${q}: time for the quarterly access review — a review record is prepared.`, action: { type: "create", section: "security.access", title, status: "Scheduled", fields: { system: "Workspace roles, Google Workspace, GitHub, Vercel, Supabase, social accounts, bank and government portals", due: addDays(today, 7), notes: "Use Security → Overview → Access review. Remove anyone who no longer needs access; record what changed." } }, why: "New quarter" });
+  for (const a of acc) if (a.status !== "Done" && isDate(a.data?.due) && days(a.data.due, today) >= 1) {
+    const revoke = /^revoke access/i.test(a.title);
+    out.push({ rec: a, level: revoke ? "bad" : "warn", who: revoke ? ["leads", "role:security"] : ["owner", "role:security"], key: `sec-acc|${a.id}`, repeat: revoke ? 1 : 3, text: revoke ? `“${a.title}” is overdue — a former team member may still have access.` : `Access review “${a.title}” was due on ${a.data.due}.` });
+  }
+  for (const c of of(all, "security.cyber")) {
+    if (c.status === "Open" && ["High", "Restricted"].includes(c.data?.risk) && age(c, today) >= 14) out.push({ rec: c, level: "bad", who: ["leads", "role:security"], key: `sec-cyber|${c.id}`, repeat: 7, text: `${c.data.risk} cyber risk “${c.title}” (${c.data?.asset || ""}) is open ${age(c, today)} days without mitigation.` });
+    if (c.status === "Mitigating" && age(c, today) >= 30) out.push({ rec: c, level: "warn", who: ["owner", "role:security"], key: `sec-mit|${c.id}`, text: `Mitigation of “${c.title}” has no update for ${age(c, today)} days.` });
+    if (c.status === "Accepted" && age(c, today) >= 365) out.push({ rec: c, level: "info", who: ["role:security"], key: `sec-acc-risk|${c.id}`, repeat: 90, text: `Accepted risk “${c.title}” has not been reviewed for a year.` });
+  }
+  for (const t of of(all, "security.tcp")) {
+    if (["Unclassified", "Under review"].includes(t.status || "") && created(t, today) >= 14) out.push({ rec: t, level: "warn", who: ["role:security", "role:legal"], key: `sec-tcp|${t.id}`, repeat: 7, text: `Technical data “${t.title}” is ${t.status} for ${created(t, today)} days — classify it (EAR, ITAR or not controlled).` });
+    if (["EAR controlled", "ITAR controlled"].includes(t.status || "") && !String(t.data?.access || "").trim()) out.push({ rec: t, level: "bad", who: ["role:security"], key: `sec-tcpacc|${t.id}`, repeat: 14, text: `${t.status} data “${t.title}” has no list of who may access it.` });
+  }
+  for (const a of of(all, "security.audits")) {
+    if (a.status === "Findings open" && age(a, today) >= 30) out.push({ rec: a, level: "warn", who: ["owner", "role:security", "leads"], key: `sec-audit|${a.id}`, repeat: 14, text: `Audit “${a.title}” (${a.data?.standard || ""}) has open findings for ${age(a, today)} days.` });
+    if (a.status === "Planned" && isDate(a.data?.date) && days(a.data.date, today) >= 1) out.push({ rec: a, level: "info", who: ["owner"], key: `sec-auditdate|${a.id}`, repeat: 14, text: `Audit “${a.title}” was planned for ${a.data.date} — start it or move the date.` });
+  }
+  for (const s of of(all, "security.screening")) if (["Flagged", "Escalated"].includes(s.status || "") && age(s, today) >= 7) out.push({ rec: s, level: "bad", who: ["leads", "role:security"], key: `sec-flag|${s.id}`, repeat: 7, text: `Screening “${s.title}” is ${s.status} for ${age(s, today)} days without a decision — work with this party stays on hold.` });
+  return out;
+}
