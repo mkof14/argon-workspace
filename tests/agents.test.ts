@@ -180,3 +180,16 @@ test("security: incidents, quarterly access review once, overdue access removal,
   const again = securityFindings([...all, r("Q", "security.access", "Scheduled", {}, { title: "Quarterly access review — 2026-Q4" })] as any, T, th);
   assert.ok(!again.some((x) => x.key.startsWith("sec-qar")));
 });
+
+test("every agent notice type has Russian, Ukrainian and Arabic text", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { AGENT_TEXT, agentText } = await import("../src/lib/agentText.ts");
+  const src = readFileSync(new URL("../src/lib/deptAgents.ts", import.meta.url), "utf8");
+  const kinds = [...new Set([...src.matchAll(/key: `([a-z0-9-]+)\|/g)].map((m) => m[1]))];
+  assert.ok(kinds.length > 100);
+  for (const k of kinds) { assert.ok(AGENT_TEXT[k], k); assert.ok(AGENT_TEXT[k].every((x: string) => x.length > 10), k); }
+  const f = { key: "fin-over|I1", text: "EN", rec: { title: "INV-7", status: "Sent", data: { amount: 120000, currency: "USD", due: "2026-10-01" } } };
+  assert.equal(agentText(f, "ru"), "Счёт «INV-7» (120,000 USD) просрочен, срок был 2026-10-01.");
+  assert.equal(agentText(f, "en"), "EN");
+  assert.equal(agentText({ ...f, rec: { ...f.rec, data: {} } }, "uk"), "Рахунок «INV-7» прострочено, строк був.");
+});

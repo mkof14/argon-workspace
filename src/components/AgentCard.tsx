@@ -7,6 +7,7 @@ import { tx, type Lang } from "@/lib/i18n";
 import { store, type Rec } from "@/lib/store";
 import { financeFindings, hrFindings, legalFindings, marketingFindings, securityFindings, technicalFindings, operationsFindings, salesFindings, type Finding } from "@/lib/deptAgents";
 import { DEFAULT_SETTINGS } from "@/lib/automation";
+import { agentText } from "@/lib/agentText";
 import { AGENT_INFO, L } from "./Automation";
 
 type T4 = { en: string; ru: string; uk: string; ar: string };
@@ -42,7 +43,7 @@ export default function AgentCard({ dept, recs }: { dept: string; recs: Rec[] })
         <span className={`chip ${list.some((x) => x.level === "bad") ? "c-bad" : list.length ? "c-warn" : "c-ok"}`} style={{ marginInlineStart: "auto" }}>{list.length}</span></div>
       <div className="feed">{list.length ? list.slice(0, 10).map((x, i) => (
         <Link key={x.key + i} href={`/${x.rec.section.replace(".", "/")}?r=${x.rec.id}`} className="hub-row">
-          <span><b style={{ fontWeight: 500 }}>{x.text}</b>{x.action && <small>{T(L("Agent prepares", "Агент готовит", "Агент готує", "يجهّز الوكيل"))}: {x.action.type === "set" ? `${x.action.field} → ${x.action.value}` : x.action.type === "email" ? T(L("reminder email (after approval)", "письмо-напоминание (после одобрения)", "лист-нагадування (після схвалення)", "رسالة تذكير (بعد الموافقة)")) : x.action.type}</small>}</span>
+          <span><b style={{ fontWeight: 500 }}>{agentText(x, lang)}</b>{x.action && <small>{T(L("Agent prepares", "Агент готовит", "Агент готує", "يجهّز الوكيل"))}: {x.action.type === "set" ? `${x.action.field} → ${x.action.value}` : x.action.type === "email" ? T(L("reminder email (after approval)", "письмо-напоминание (после одобрения)", "лист-нагадування (після схвалення)", "رسالة تذكير (بعد الموافقة)")) : x.action.type}</small>}</span>
           <span className={`chip ${TONE[x.level]}`}>{x.level === "bad" ? "!" : x.level === "warn" ? "•" : "i"}</span></Link>))
         : <div className="empty" style={{ padding: 16 }}>{T(L("All clear — nothing for the agent to raise.", "Всё чисто — агенту нечего поднимать.", "Усе чисто — агентові нічого піднімати.", "كل شيء سليم — لا شيء ينبّه إليه الوكيل."))}</div>}</div>
       <p className="faint" style={{ margin: "8px 18px 14px", fontSize: 12.5 }}>{T(L("Every working day the agent emails these to the right people and prepares the changes.", "Каждый рабочий день агент пишет об этом нужным людям и готовит изменения.", "Щоробочого дня агент пише про це потрібним людям і готує зміни.", "كل يوم عمل يراسل الوكيل الأشخاص المعنيين ويجهّز التغييرات."))}{["owner", "admin"].includes(me.role) && <> <Link href="/admin/system?tab=auto">{T(L("Automation settings", "Настройки автоматизации", "Налаштування автоматизації", "إعدادات الأتمتة"))}</Link></>}</p>
