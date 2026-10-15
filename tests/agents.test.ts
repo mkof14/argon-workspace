@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clientEmail, days, financeFindings, salesFindings, stepFor } from "../src/lib/deptAgents.ts";
+import { clientEmail, days, financeFindings, operationsFindings, salesFindings, stepFor } from "../src/lib/deptAgents.ts";
 
 const T = "2026-10-15";
 const th = { remind_before: 3, escalate_after: 3, stalled_deal: 14 };
@@ -70,4 +70,23 @@ test("sales: stalled deals get one follow-up task, qualified leads become deals,
   assert.ok(f.some((x) => x.key === "sal-valid|P2"));
   assert.match((f.find((x) => x.key === "sal-next|A1")!.action as any).title, /^Next step: Send the C40 spec — Aurora$/);
   assert.ok(f.some((x) => x.key === "sal-noval|W1"));
+});
+
+test("operations: export stop, delivery → installation, commissioned → installed + fleet, service ticket, critical ticket", () => {
+  const all = [
+    r("B1", "operations.builds", "Shipping", { export_check: "In progress" }),
+    r("B2", "operations.builds", "Shipping", { export_check: "Cleared", site: "Marina X", owner: "Ann" }),
+    r("S2", "operations.logistics", "Delivered", { build_ref: "B2" }),
+    r("B3", "operations.builds", "Testing", { export_check: "Cleared", client: "Aurora" }),
+    r("I3", "operations.installation", "Commissioned", { build_ref: "B3" }),
+    r("U1", "operations.fleet", "Active", { next_service: "2026-10-20" }),
+    r("K1", "operations.support", "New", { severity: "Critical" }, { created_at: "2026-10-13T10:00:00Z" }),
+  ];
+  const f = operationsFindings(all as any, T, th);
+  assert.equal(f.find((x) => x.key === "ops-export|B1|Shipping")!.level, "bad");
+  assert.equal((f.find((x) => x.key === "ops-inst|B2")!.action as any).link, "build_ref");
+  assert.deepEqual(f.find((x) => x.key === "ops-done|B3")!.action, { type: "set", field: "status", value: "Installed" });
+  const fl = f.find((x) => x.key === "ops-fleet|B3")!.action as any; assert.equal(fl.fields.warranty_end, "2026-10-15".replace("2026", "2027")); assert.equal(fl.link, "build_ref");
+  assert.equal((f.find((x) => x.key.startsWith("ops-svc|U1"))!.action as any).link, "unit_ref");
+  assert.equal(f.find((x) => x.key === "ops-crit|K1")!.level, "bad");
 });

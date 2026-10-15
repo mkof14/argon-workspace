@@ -136,3 +136,59 @@ export function salesFindings(all: R[], today: string, th: Th): Finding[] {
   }
   return out;
 }
+
+/* ---------------- Operations ---------------- */
+export function operationsFindings(all: R[], today: string, _th: Th): Finding[] {
+  const out: Finding[] = [];
+  const builds = of(all, "operations.builds"); const byId = new Map(all.map((r) => [r.id, r]));
+  const linked = (sec: string, key: string, id: string) => all.filter((r) => r.section === sec && r.data?.[key] === id);
+  // Export control before anything ships
+  for (const b of builds) if (["Shipping", "Testing"].includes(b.status || "") && b.data?.export_check !== "Cleared")
+    out.push({ rec: b, level: b.status === "Shipping" ? "bad" : "warn", who: b.status === "Shipping" ? ["leads", "role:security", "role:operations"] : ["role:operations", "role:security"], key: `ops-export|${b.id}|${b.status}`, repeat: 3, text: `Build “${b.title}” is at ${b.status} but the export check is “${b.data?.export_check || "Not started"}”. It must not ship until cleared.` });
+  for (const l of of(all, "operations.logistics")) {
+    const b = byId.get(l.data?.build_ref);
+    if (["In transit", "Customs"].includes(l.status || "") && b && b.data?.export_check !== "Cleared") out.push({ rec: l, level: "bad", who: ["leads", "role:security"], key: `ops-ship-exp|${l.id}`, repeat: 3, text: `Shipment “${l.title}” is ${l.status} while build “${b.title}” has no export clearance.` });
+    if (["In transit", "Customs"].includes(l.status || "") && isDate(l.data?.due) && days(l.data.due, today) >= 1) out.push({ rec: l, level: "warn", who: ["role:operations"], key: `ops-late|${l.id}`, repeat: 3, text: `Shipment “${l.title}” (${l.data?.carrier || ""} ${l.data?.tracking || ""}) was due on ${l.data.due} and is still ${l.status}.` });
+    // Delivered → installation is planned for the build
+    if (l.status === "Delivered" && b && b.status !== "Installed" && !linked("operations.installation", "build_ref", b.id).length)
+      out.push({ rec: b, level: "info", who: ["role:operations"], key: `ops-inst|${b.id}`, text: `Build “${b.title}” is delivered — an installation record is prepared.`, action: { type: "create", section: "operations.installation", title: "Installation — {title}", status: "Planned", link: "build_ref", fields: { site: "{site}", owner: "{owner}", due: addDays(today, 14) } }, why: "Shipment delivered" });
+  }
+  // Commissioned → build installed, unit added to the fleet with warranty and first service
+  for (const i of of(all, "operations.installation")) {
+    const b = byId.get(i.data?.build_ref); if (i.status !== "Commissioned" || !b) continue;
+    if (b.status !== "Installed") out.push({ rec: b, level: "info", who: ["role:operations"], key: `ops-done|${b.id}`, text: `Installation “${i.title}” is commissioned — build “${b.title}” moves to Installed.`, action: { type: "set", field: "status", value: "Installed" }, why: "Installation commissioned" });
+    if (!linked("operations.fleet", "build_ref", b.id).length) out.push({ rec: b, level: "info", who: ["role:operations"], key: `ops-fleet|${b.id}`, text: `“${b.title}” is commissioned — the unit is added to the fleet with a 12-month warranty and a service in 6 months.`,
+      action: { type: "create", section: "operations.fleet", title: "{title}", status: "Active", link: "build_ref", fields: { client: "{client}", site: "{site}", config: "{config}", commissioned: today, warranty_end: addDays(today, 365), next_service: addDays(today, 182) } }, why: "Installation commissioned" });
+  }
+  // Fleet: service and warranty
+  for (const u of of(all, "operations.fleet")) {
+    if (u.status === "Decommissioned") continue;
+    if (isDate(u.data?.next_service)) {
+      const d = days(today, u.data.next_service);
+      if (d <= 14) {
+        const title = `Scheduled service — ${u.title}`;
+        const has = all.some((t) => t.section === "operations.support" && t.data?.unit_ref === u.id && t.title === title && t.status !== "Resolved");
+        out.push({ rec: u, level: d < 0 ? "warn" : "info", who: ["role:operations"], key: `ops-svc|${u.id}|${u.data.next_service}`, repeat: d < 0 ? 7 : 365, text: d < 0 ? `Service of “${u.title}” was due on ${u.data.next_service}.` : `Service of “${u.title}” (${u.data?.site || u.data?.client || ""}) is due on ${u.data.next_service} — a service ticket is prepared.`,
+          action: has ? (u.status === "Active" ? { type: "set", field: "status", value: "Maintenance due" } : undefined) : { type: "create", section: "operations.support", title, status: "New", link: "unit_ref", fields: { client: "{client}", severity: "Medium", notes: "Planned maintenance. Site: {site}. SLA: {sla}." } }, why: "Service date close" });
+      }
+    }
+    if (isDate(u.data?.warranty_end)) {
+      const st = stepFor(days(today, u.data.warranty_end), [60, 14]);
+      if (st) out.push({ rec: u, level: "info", who: ["role:sales", "role:operations"], key: `ops-warr|${u.id}|${st}`, repeat: 365, text: st === "late" ? `Warranty of “${u.title}” ended on ${u.data.warranty_end} — offer a service contract.` : `Warranty of “${u.title}” ends on ${u.data.warranty_end} — a good moment to offer a service contract (${u.data?.sla || "no SLA"}).` });
+    }
+  }
+  // Purchasing, support, quality, repairs
+  for (const p of of(all, "operations.procurement")) {
+    if (p.status === "Approved" && age(p, today) >= 5) out.push({ rec: p, level: "warn", who: ["role:operations"], key: `ops-po|${p.id}`, text: `Purchase “${p.title}” was approved ${age(p, today)} days ago and is not ordered yet.` });
+    if (p.status === "Ordered" && isDate(p.data?.eta) && days(p.data.eta, today) >= 1) out.push({ rec: p, level: "warn", who: ["role:operations"], key: `ops-eta|${p.id}`, repeat: 3, text: `“${p.title}” from ${p.data?.vendor || "the vendor"} was expected on ${p.data.eta} and is not received.` });
+  }
+  for (const s of of(all, "operations.support")) {
+    if (s.status === "Resolved") continue; const a = created(s, today); const sev = s.data?.severity;
+    if (sev === "Critical" && a >= 1) out.push({ rec: s, level: "bad", who: ["leads", "role:operations"], key: `ops-crit|${s.id}`, repeat: 1, text: `Critical ticket “${s.title}” (${s.data?.client || ""}) is open for ${a} day(s).` });
+    else if (sev === "High" && a >= 3) out.push({ rec: s, level: "warn", who: ["role:operations", "owner"], key: `ops-high|${s.id}`, repeat: 3, text: `High-severity ticket “${s.title}” is open for ${a} days.` });
+    else if (a >= 14) out.push({ rec: s, level: "warn", who: ["owner", "role:operations"], key: `ops-old|${s.id}`, text: `Ticket “${s.title}” is open for ${a} days.` });
+  }
+  for (const q of of(all, "operations.quality")) if (["Non-conformance", "Corrective action"].includes(q.status || "") && age(q, today) >= 7) out.push({ rec: q, level: "warn", who: ["owner", "role:operations"], key: `ops-ncr|${q.id}`, text: `${q.status} “${q.title}” (${q.data?.build || ""}) has not moved for ${age(q, today)} days.` });
+  for (const v of of(all, "operations.inventory")) if (v.status === "In repair" && age(v, today) >= 14) out.push({ rec: v, level: "info", who: ["role:operations"], key: `ops-rep|${v.id}`, text: `“${v.title}” (${v.data?.serial || ""}) is in repair for ${age(v, today)} days.` });
+  return out;
+}
