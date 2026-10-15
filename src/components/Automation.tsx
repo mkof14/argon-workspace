@@ -66,6 +66,7 @@ export default function Automation({ a }: { a: ReturnType<typeof useAuto> }) {
   const { s, setS, load, call } = a;
   const [busy, setBusy] = useState("");
   const [hist, setHist] = useState(false);
+  const [drafts, setDrafts] = useState<Record<string, { subject: string; body: string }>>({}); // emails opened for reading or editing
   const [edit, setEdit] = useState<Rule | null>(null);
   const [agentF, setAgentF] = useState("");
   if (!s) return <div className="card"><div className="empty">…</div></div>;
@@ -79,7 +80,7 @@ export default function Automation({ a }: { a: ReturnType<typeof useAuto> }) {
     setBusy(ag || "all"); const j = await call("run", { agent: ag }); setBusy("");
     if (j) { toast(Object.entries(j).filter(([k]) => k !== "emails").map(([k, v]) => `${k}: ${v}`).join(" · ") || "OK"); load(); }
   };
-  const decideOne = async (id: string, approve: boolean) => { setBusy(id); const j = await call("decide", { id, approve }); setBusy(""); if (j) { toast(j.status === "failed" ? j.result : T(approve ? L("Done", "Сделано", "Зроблено", "تم") : L("Rejected", "Отклонено", "Відхилено", "مرفوض")), j.status === "failed"); load(); } };
+  const decideOne = async (id: string, approve: boolean) => { setBusy(id); const j = await call("decide", { id, approve, edit: drafts[id] }); setBusy(""); if (j) { toast(j.status === "failed" ? j.result : T(approve ? L("Done", "Сделано", "Зроблено", "تم") : L("Rejected", "Отклонено", "Відхилено", "مرفوض")), j.status === "failed"); load(); } };
   const approveAll = async () => { setBusy("all-q"); for (const q of pending) await call("decide", { id: q.id, approve: true }); setBusy(""); load(); };
   const saveRules = async (rules: Rule[]) => { setS({ ...s, rules }); const j = await call("rules", { rules }); if (j) toast(T(L("Rules saved", "Правила сохранены", "Правила збережено", "تم حفظ القواعد"))); };
 
@@ -116,6 +117,13 @@ export default function Automation({ a }: { a: ReturnType<typeof useAuto> }) {
           <div style={{ minWidth: 0, flex: 1 }}>
             <div className="toolbar" style={{ gap: 8 }}><span className="chip">{T(AGENT_INFO[q.agent as AgentId]?.name || L(q.agent, q.agent, q.agent, q.agent))}</span><b style={{ overflowWrap: "anywhere" }}>{q.title}</b></div>
             <div className="faint" style={{ fontSize: 13 }}>{q.detail} · {q.at.slice(0, 16).replace("T", " ")}{q.section && q.record_id ? <> · <a href={`/${q.section.replace(".", "/")}?r=${q.record_id}`}>{secLabel(q.section)}</a></> : null}</div>
+            {q.status === "pending" && q.action?.type === "email" && q.action.body && (drafts[q.id]
+              ? <div className="auto-act" style={{ marginTop: 8 }}>
+                  <div className="faint" style={{ fontSize: 12.5 }}>{T(L("To", "Кому", "Кому", "إلى"))}: {q.action.to}</div>
+                  <input className="input" value={drafts[q.id].subject} onChange={(e) => setDrafts({ ...drafts, [q.id]: { ...drafts[q.id], subject: e.target.value } })} />
+                  <textarea className="input" rows={8} value={drafts[q.id].body} onChange={(e) => setDrafts({ ...drafts, [q.id]: { ...drafts[q.id], body: e.target.value } })} />
+                  <div className="faint" style={{ fontSize: 12.5 }}>{T(L("Edit if needed — Approve sends exactly this text from info@agron1.com.", "Поправьте при необходимости — «Одобрить» отправит именно этот текст с info@agron1.com.", "Виправте за потреби — «Схвалити» надішле саме цей текст з info@agron1.com.", "عدّل إن لزم — «موافقة» ترسل هذا النص تماماً من info@agron1.com."))}</div></div>
+              : <button className="linkbtn" style={{ marginTop: 4 }} onClick={() => setDrafts({ ...drafts, [q.id]: { subject: q.action.subject, body: q.action.body } })}>{T(L("Read and edit the letter", "Прочитать и поправить письмо", "Прочитати й виправити лист", "اقرأ الرسالة وعدّلها"))}</button>)}
             {q.status !== "pending" && <div className="faint" style={{ fontSize: 12.5 }}>{q.status} · {q.decided_by} · {q.result || ""}</div>}
           </div>
           {q.status === "pending" ? <div className="toolbar" style={{ gap: 6 }}>

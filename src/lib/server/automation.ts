@@ -3,10 +3,11 @@ import { readState, saveState } from "./backup";
 import { sendMail } from "./mailer";
 import { renderEmail, SITE } from "@/lib/mail";
 import { fileRecord, readInbox } from "./mailIntake";
+import { draftEmail } from "./drafts";
 import { allSections } from "@/config/workspace.config.mjs";
 import { REFS } from "@/config/links";
 import { dueItems, isMine, money, PEOPLE_KEYS } from "@/lib/insights";
-import { financeFindings, hrFindings, legalFindings, marketingFindings, securityFindings, technicalFindings, operationsFindings, salesFindings, type Finding } from "@/lib/deptAgents";
+import { dealEmail, financeFindings, hrFindings, legalFindings, marketingFindings, securityFindings, technicalFindings, operationsFindings, salesFindings, type Finding } from "@/lib/deptAgents";
 import { AGENTS, DEPT_AGENTS, DEFAULT_RULES, aiCost, dateDue, isWorkday, matchEvent, qualityIssues, render, withDefaults, type Action, type AgentId, type Ev, type Rule, type Settings } from "@/lib/automation";
 
 /**
@@ -81,7 +82,7 @@ async function save(c: Ctx) {
   for (const [k, d] of Object.entries(c.fired)) if (d < cut) delete c.fired[k];
   await Promise.all([addLog(c.db, c.log), addQueue(c.db, c.queue), saveState(c.db, "fired", c.fired)]);
 }
-const audit = (c: Ctx, agent: AgentId, rec: { id: string; section: string; title: string }, text: string) =>
+const audit = (c: Ctx, agent: AgentId, rec: { id: string; section: string; title: string }, text: string) => !rec.id ? Promise.resolve() :
   c.db.from("activity").insert({ record_id: rec.id, section: rec.section, actor: null, action: "automation", detail: { agent, title: rec.title, text } }).then(() => {}, () => {});
 
 /* ---------------- Actions ---------------- */
@@ -130,7 +131,7 @@ async function execute(c: Ctx, agent: AgentId, a: Action, rec: any): Promise<str
   if (a.type === "email") {
     const to = String(a.to || rec.data?.[a.to_field] || "").trim();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) throw new Error(`No valid email in “${a.to_field}”`);
-    const subject = render(a.subject, rec); const body = render(a.body, rec);
+    const subject = a.to ? a.subject : render(a.subject, rec); const body = a.to ? a.body : render(a.body, rec); // AI drafts are sent exactly as approved
     const err = await sendMail({ to, subject, html: renderEmail({ subject, body, lang: "en", sender: { name: "AGRON Inc.", email: "info@agron1.com" } }), text: body, replyTo: "info@agron1.com" });
     if (err) throw new Error(err);
     await audit(c, agent, rec, `Emailed ${to}: ${subject}`);
@@ -319,17 +320,31 @@ const COLOR = { bad: "#B4232F", warn: "#A15C00", info: "#2A3440" };
 /** Runs a department agent: tells people once (then every few days while it is still true) and runs or proposes the changes. */
 async function deptAgent(c: Ctx, recs: any[], agent: AgentId, mode: "auto" | "suggest") {
   const finder = FINDERS[agent]; if (!finder) return "no checks";
-  const t = today(); const found = finder(recs, t, c.settings.thresholds); let told = 0, acted = 0;
+  const t = today(); const found = finder(recs, t, c.settings.thresholds); let told = 0, acted = 0; const fresh: Finding[] = [];
   for (const x of found) {
-    const last = c.fired[x.key]; const fresh = !last || last <= new Date(Date.now() - (x.repeat ?? 7) * 864e5).toISOString().slice(0, 10);
-    if (!fresh) continue; c.fired[x.key] = t;
+    const last = c.fired[x.key]; const isNew = !last || last <= new Date(Date.now() - (x.repeat ?? 7) * 864e5).toISOString().slice(0, 10);
+    if (!isNew) continue; c.fired[x.key] = t; fresh.push(x);
     const ppl = [...new Map(x.who.flatMap((w) => recipients(c, w, x.rec)).map((p) => [p.email, p])).values()];
     if (ppl.length) { tell(c, ppl, `<span style="color:${COLOR[x.level]}">${x.level === "bad" ? "<b>" : ""}${esc(x.text)}${x.level === "bad" ? "</b>" : ""}</span> — <a href="${recUrl(x.rec)}">open</a>`); told++; }
     if (x.action) { await act(c, agent, x.action, x.rec, mode, x.why || x.text); acted++; }
   }
+  if (agent === "sales") acted += await salesDrafts(c, recs, fresh);
   // What the agent sees now, for the department overview (titles only; access is checked when it is shown)
   await saveState(c.db, `agent-${agent}`, { at: new Date().toISOString(), items: found.slice(0, 60).map((x) => ({ level: x.level, text: x.text, id: x.rec.id, section: x.rec.section, controlled: !!x.rec.controlled, action: x.action ? describeAction(x.action, x.rec) : null })) });
   return `${found.length} finding(s), ${told} new notice(s), ${acted} change(s) ${mode === "auto" ? "made" : "proposed"}`;
+}
+/** Sales: letters to clients for stalled deals and expiring proposals, written by AI and waiting for approval (at most 5 a day). */
+async function salesDrafts(c: Ctx, recs: any[], fresh: Finding[]) {
+  if (!process.env.ANTHROPIC_API_KEY || (await overBudget(c))) return 0; let n = 0;
+  for (const x of fresh.filter((f) => /^sal-(stall|valid)\|/.test(f.key)).slice(0, 5)) {
+    const deal = x.rec.section === "sales.pipeline" ? x.rec : recs.find((r) => r.id === x.rec.data?.deal_ref);
+    const to = deal ? dealEmail(deal, recs) : ""; if (!to || x.rec.controlled) continue;
+    const kind = x.key.startsWith("sal-valid") ? "proposal" : "followup";
+    const d = await draftEmail(c.db, kind, { client: deal.data?.client || deal.title, deal: deal.title, stage: deal.status, configuration: deal.data?.config, country: deal.data?.country, segment: deal.data?.segment, last_activity: deal.updated_at?.slice(0, 10), valid_until: x.rec.data?.valid_until, notes: String(deal.data?.notes || "").slice(0, 1500) });
+    if (!d) continue;
+    await act(c, "sales", { type: "email", to_field: "", to, subject: d.subject, body: d.body }, x.rec, "suggest", `AI draft (${d.lang}) — ${kind === "proposal" ? "proposal expiring" : "deal without movement"}`); n++;
+  }
+  return n;
 }
 /** Latest findings of a department agent that this person may see. */
 export async function deptFindings(db: any, dept: string, me: { role: string; us_person: boolean }) {
@@ -358,6 +373,13 @@ async function intakeAgent(c: Ctx, mode: "auto" | "suggest") {
       c.queue.push({ id: uid(), at: now, agent: "intake", title: describeAction(a, null), detail: [it.summary, it.reason].filter(Boolean).join(" — "), section: it.section, action: a, status: "pending", controlled: it.controlled });
       c.log.push({ at: now, agent: "intake", kind: "queued", text: describeAction(a, null), section: it.section });
     }
+  }
+  // A first inquiry gets a reply draft in the client's language (always waits for approval)
+  for (const it of r.items.filter((x: any) => x.section === "marketing.leads" && x.from && !x.controlled).slice(0, 5)) {
+    const d = await draftEmail(c.db, "reply", { from: it.from, subject: it.subject, email: it.text });
+    if (!d) continue;
+    const a: Action = { type: "email", to_field: "", to: it.from, subject: d.subject, body: d.body };
+    c.queue.push({ id: uid(), at: new Date().toISOString(), agent: "intake", title: describeAction(a, null), detail: `AI reply draft (${d.lang}) to a new inquiry: ${it.subject}`, section: "marketing.leads", action: a, status: "pending" });
   }
   if (mode !== "auto" && r.items.length) for (const p of c.profiles.filter((x) => ["owner", "admin"].includes(x.role))) tell(c, [p], `${r.items.length} new email(s) at info@agron1.com are prepared for filing — <a href="${SITE}/admin/system?tab=auto">approve</a>`);
   return `${r.items.length} email(s) ${mode === "auto" ? "filed" : "prepared"}, ${r.ignored.length} skipped (newsletters, auto-replies, own mail)`;
@@ -394,9 +416,13 @@ export async function runAgents(db: any, opts: { only?: AgentId; manual?: boolea
 }
 
 /** Approve or reject a proposal from the queue. */
-export async function decide(db: any, id: string, approve: boolean, by: { id: string; us_person: boolean; email: string }) {
+export async function decide(db: any, id: string, approve: boolean, by: { id: string; us_person: boolean; email: string }, edit?: { subject?: string; body?: string }) {
   const q = await getQueue(db); const item = q.find((x) => x.id === id);
   if (!item || item.status !== "pending") throw new Error("Already decided or not found");
+  if (approve && edit && item.action.type === "email") { // the approver corrected the draft
+    if (typeof edit.subject === "string" && edit.subject.trim()) item.action.subject = edit.subject.trim().slice(0, 200);
+    if (typeof edit.body === "string" && edit.body.trim()) item.action.body = edit.body.trim().slice(0, 6000);
+  }
   if (item.controlled && !by.us_person) throw new Error("US-persons-only record: a US person must decide");
   const now = new Date().toISOString(); item.decided_by = by.email; item.decided_at = now;
   const c = await context(db);
@@ -405,6 +431,7 @@ export async function decide(db: any, id: string, approve: boolean, by: { id: st
     try {
       if (item.action.type === "set" && item.action.field === "_quality_fix") item.result = `fixed ${await applyQualityFixes(db)}`;
       else if (item.action.type === "file") item.result = await execute(c, item.agent, item.action, { id: "", section: item.action.section, title: item.action.title, data: {} });
+      else if (!item.record_id && item.action.type === "email" && item.action.to) item.result = await execute(c, item.agent, item.action, { id: "", section: item.section || "", title: item.action.subject, data: {} });
       else {
         const { data: rec } = await db.from("records").select("id,section,title,status,data,controlled,created_at,updated_at").eq("id", item.record_id).single();
         if (!rec) throw new Error("The record no longer exists");

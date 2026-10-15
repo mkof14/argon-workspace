@@ -12,7 +12,7 @@ import { cleanBody, keepFiles, skipReason } from "@/lib/mailRules";
  */
 const BUCKET = "files";
 const safe = (n: string) => n.normalize("NFKD").replace(/[^\w.\-]+/g, "_").replace(/_+/g, "_").slice(-120) || "file";
-export type Filed = { uid: number; from: string; subject: string; date: string; section: string; title: string; status: string; data: Record<string, any>; summary: string; controlled: boolean; files: string[]; reason: string };
+export type Filed = { uid: number; text: string; from: string; subject: string; date: string; section: string; title: string; status: string; data: Record<string, any>; summary: string; controlled: boolean; files: string[]; reason: string };
 
 export async function readInbox(db: any, opts: { max?: number; budgetMs?: number } = {}) {
   const user = (process.env.SMTP_USER || "").trim(), pass = (process.env.SMTP_PASS || "").replace(/\s+/g, "");
@@ -63,7 +63,7 @@ export async function readInbox(db: any, opts: { max?: number; budgetMs?: number
       const data = { ...p.data };
       const noteKey = ["notes", "description", "request", "body", "findings"].find((k) => sec?.fields.some((f: any) => f.key === k));
       if (noteKey && !data[noteKey]) data[noteKey] = `${p.summary}\n\nFrom: ${m.from?.text || from}\nSubject: ${subject}`;
-      items.push({ uid, from, subject, date: m.date?.toISOString?.() || new Date().toISOString(), section: p.section, title: p.title, status: p.status, data, summary: p.summary, controlled: p.controlled, files: staged, reason: p.reason });
+      items.push({ uid, text: body.slice(0, 6000), from, subject, date: m.date?.toISOString?.() || new Date().toISOString(), section: p.section, title: p.title, status: p.status, data, summary: p.summary, controlled: p.controlled, files: staged, reason: p.reason });
     }
     await saveState(db, "mailintake", { validity, last, at: new Date().toISOString(), filed: (state.filed || 0) + items.length });
   } finally { lock.release(); await client.logout().catch(() => {}); }

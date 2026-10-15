@@ -207,3 +207,11 @@ test("email intake: skips newsletters, auto-replies and own mail; keeps document
   assert.deepEqual(files.map((f) => f.filename), ["Invoice 12.pdf"]);
   assert.equal(cleanBody("Hello,\nplease see attached.\n\nOn Mon, Oct 12, 2026 at 9:00 John wrote:\n> old"), "Hello,\nplease see attached.");
 });
+
+test("deal email: client card, then lead, then notes", async () => {
+  const { dealEmail } = await import("../src/lib/deptAgents.ts");
+  const all = [r("C1", "sales.clients", "Active", { contact: "Ann <ann@port.ae>" }), r("L1", "marketing.leads", "New", { email: "lead@x.com" })];
+  assert.equal(dealEmail(r("D", "sales.pipeline", "Proposal", { client_ref: "C1", lead_ref: "L1" }) as any, all as any), "ann@port.ae");
+  assert.equal(dealEmail(r("D", "sales.pipeline", "Proposal", { lead_ref: "L1" }) as any, all as any), "lead@x.com");
+  assert.equal(dealEmail(r("D", "sales.pipeline", "Proposal", { notes: "write to bob@yacht.mc" }) as any, all as any), "bob@yacht.mc");
+});

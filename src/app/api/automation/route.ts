@@ -57,7 +57,7 @@ export async function POST(req: Request) {
       const only = AGENTS.includes(b.agent) ? (b.agent as AgentId) : undefined;
       return Response.json(await runAgents(db, { only, manual: true }));
     }
-    if (b.action === "decide") return Response.json(await decide(db, String(b.id || ""), !!b.approve, { id: me.id, us_person: !!me.us_person, email: me.email }));
+    if (b.action === "decide") return Response.json(await decide(db, String(b.id || ""), !!b.approve, { id: me.id, us_person: !!me.us_person, email: me.email }, b.edit));
   } catch (e: any) { return new Response(e?.message || "Failed", { status: 500 }); }
   return new Response("Unknown action", { status: 400 });
 }

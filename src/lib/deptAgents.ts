@@ -433,3 +433,10 @@ export function securityFindings(all: R[], today: string, _th: Th): Finding[] {
   for (const s of of(all, "security.screening")) if (["Flagged", "Escalated"].includes(s.status || "") && age(s, today) >= 7) out.push({ rec: s, level: "bad", who: ["leads", "role:security"], key: `sec-flag|${s.id}`, repeat: 7, text: `Screening “${s.title}” is ${s.status} for ${age(s, today)} days without a decision — work with this party stays on hold.` });
   return out;
 }
+
+/** Client email for a deal: client card → lead → any address in the deal notes. */
+export function dealEmail(d: R, all: R[]) {
+  const client = all.find((r) => r.id === d.data?.client_ref) || all.find((r) => r.section === "sales.clients" && d.data?.client && r.title.trim().toLowerCase() === String(d.data.client).trim().toLowerCase());
+  const lead = all.find((r) => r.id === d.data?.lead_ref);
+  return emailIn(client?.data?.contact) || emailIn(lead?.data?.email) || emailIn(d.data?.notes) || "";
+}
