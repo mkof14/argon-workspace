@@ -10,12 +10,21 @@ import { GLOSSARY, GUIDES, HELP, l2 } from "@/config/learn";
 import { t, tx } from "@/lib/i18n";
 import { Faq, isExternal, store } from "@/lib/store";
 
+import type { HB } from "@/config/handbook";
+
+const HOW = { en: "How it works", ru: "Как всё устроено", uk: "Як усе влаштовано", ar: "كيف يعمل كل شيء" } as Record<string, string>;
+const HOW_SUB = { en: "The full handbook: how Workspace, roles, records, approvals, AI, rules and agents work — with steps and limits.", ru: "Полный справочник: как работают Workspace, роли, записи, согласования, ИИ, правила и агенты — с шагами и ограничениями.", uk: "Повний довідник: як працюють Workspace, ролі, записи, погодження, ШІ, правила й агенти — з кроками та обмеженнями.", ar: "الدليل الكامل: كيف تعمل مساحة العمل والأدوار والسجلات والموافقات والذكاء الاصطناعي والقواعد والوكلاء — بالخطوات والحدود." } as Record<string, string>;
+const md = (x: string) => DOMPurify.sanitize(marked.parse(x) as string);
 const lines = (s: string) => { const [first, ...rest] = s.split("\n"); return { first, bullets: rest.map((x) => x.replace(/^(-|\d+\.)\s*/, "")).filter(Boolean) }; };
 
 export default function Learn() {
   const { lang, me, access, toast, openAi, tick } = useApp();
   const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
-  const [tab, setTab] = useState<"guide" | "terms" | "faq">((params?.get("tab") as any) || "guide");
+  const [tab, setTab] = useState<"how" | "guide" | "terms" | "faq">((params?.get("tab") as any) || (params?.get("s") ? "guide" : "how"));
+  const [hb, setHb] = useState<HB[]>([]);
+  const [hc, setHc] = useState<string>(params?.get("c") || "");
+  useEffect(() => { import("@/config/handbook").then((m) => setHb(m.HANDBOOK)).catch(() => {}); }, []);
+  useEffect(() => { if (hc && hb.length) setTimeout(() => document.getElementById(`hb-${hc}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 200); }, [hc, hb.length]);
   const [q, setQ] = useState(params?.get("q") || "");
   const [focus] = useState(params?.get("s") || "");
   const [faq, setFaq] = useState<Faq[]>([]);
@@ -53,6 +62,7 @@ export default function Learn() {
         <div style={{ position: "relative", zIndex: 1, minWidth: 0 }}><div className="eyebrow" style={{ color: "var(--dc)" }}>{t("workspace", lang)}</div><h2>{t("learn", lang)}</h2>
           <div className="sec-desc">{t("learn_sub", lang)}</div></div>
         <div className="stats">
+          <button className={`stat ${tab === "how" ? "on" : ""}`} onClick={() => setTab("how")}><b style={{ color: "var(--dc)" }}>{hb.length || 16}</b><small>{HOW[lang] || HOW.en}</small></button>
           <button className={`stat ${tab === "guide" ? "on" : ""}`} onClick={() => setTab("guide")}><b style={{ color: "var(--dc)" }}>{depts.reduce((a: number, d: any) => a + d.secs.length, 0)}</b><small>{t("guide", lang)}</small></button>
           <button className={`stat ${tab === "terms" ? "on" : ""}`} onClick={() => setTab("terms")}><b style={{ color: "var(--dc)" }}>{Object.values(GLOSSARY).reduce((a, x) => a + x.length, 0)}</b><small>{t("terms", lang)}</small></button>
           <button className={`stat ${tab === "faq" ? "on" : ""}`} onClick={() => setTab("faq")}><b style={{ color: "var(--dc)" }}>{faq.filter((f) => f.lang === fl).length}</b><small>FAQ</small></button>
@@ -61,6 +71,7 @@ export default function Learn() {
 
       <div className="card">
         <div className="tabs">
+          <button className={tab === "how" ? "on" : ""} onClick={() => setTab("how")}><Icon n="layers" />{HOW[lang] || HOW.en}</button>
           <button className={tab === "guide" ? "on" : ""} onClick={() => setTab("guide")}><Icon n="book" />{t("guide", lang)}</button>
           <button className={tab === "terms" ? "on" : ""} onClick={() => setTab("terms")}><Icon n="tag" />{t("terms", lang)}</button>
           <button className={tab === "faq" ? "on" : ""} onClick={() => setTab("faq")}><Icon n="info" />FAQ</button>
@@ -70,6 +81,23 @@ export default function Learn() {
           {tab === "faq" && !isExternal(me.role) && <button className="btn primary" onClick={() => setEdit({ question: q, answer: "", lang: fl })}><Icon n="plus" />{t("add_question", lang)}</button>}
         </div>
       </div>
+
+      {tab === "how" && (() => {
+        const hl = (lang in HOW ? lang : "en") as "en" | "ru" | "uk" | "ar";
+        const list = hb.filter((c) => hit(c.title[hl], c.body[hl]));
+        return <div style={{ display: "grid", gap: 10, ["--dc" as any]: "#14B8A6" }}>
+          <div className="faint" style={{ fontSize: 14 }}>{HOW_SUB[hl]}</div>
+          <nav className="chipbar hb-toc" aria-label={HOW[hl]}>{hb.map((c, i) => <button key={c.id} className={hc === c.id ? "on" : ""} onClick={() => { setHc(c.id); const d = document.getElementById(`hb-${c.id}`) as HTMLDetailsElement | null; if (d) { d.open = true; d.scrollIntoView({ behavior: "smooth", block: "start" }); } }}><span className="mono" style={{ opacity: .6 }}>{i + 1}</span>{c.title[hl]}</button>)}</nav>
+          {!hb.length ? <div className="card empty">…</div> : !list.length ? <div className="card empty">{t("no_match", lang)}</div> : <div className="guides hb-list">{list.map((c) => (
+            <details key={c.id} id={`hb-${c.id}`} className={`guide-row hb ${hc === c.id ? "hl" : ""}`} open={!!ql || hc === c.id || (!hc && c.id === "overview")}>
+              <summary><span className="flag"><Icon n={c.icon} /></span><span className="t"><b>{c.title[hl]}</b></span><Icon n="down" className="lockico" /></summary>
+              <div className="body"><div className="md" dangerouslySetInnerHTML={{ __html: md(c.body[hl]) }} />
+                <div className="toolbar"><button className="btn ghost sm" onClick={() => { const u = `${location.origin}/learn?tab=how&c=${c.id}`; navigator.clipboard?.writeText(u).then(() => toast(t("copied", lang))).catch(() => {}); }}><Icon n="link" />{({ en: "Copy link", ru: "Ссылка", uk: "Посилання", ar: "نسخ الرابط" } as any)[lang] || "Copy link"}</button>
+                  <button className="btn ghost sm" onClick={() => openAi({ title: c.title[hl], ask: "" })}><Icon n="spark" />{t("ask_ai", lang)}</button></div>
+              </div>
+            </details>))}</div>}
+        </div>;
+      })()}
 
       {tab === "guide" && <>
         <div className="chipbar" role="tablist">

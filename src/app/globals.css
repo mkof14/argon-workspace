@@ -1003,3 +1003,13 @@ a.hub-row:hover{background:var(--surface-2)}
 /* Readability: active tab text on department colours meets contrast AA; footer stays below the fold while data loads (no jump) */
 .dtabs a.on{background:color-mix(in srgb,var(--dc) 78%,#000)}
 main.page{min-height:calc(100dvh - 90px);align-content:start}
+
+/* Learning Center → How it works */
+.guide-row.hb .body .md{font-size:15px;line-height:1.6}
+.guide-row.hb .body .md h3,.guide-row.hb .body .md p{margin:.5em 0}
+.guide-row.hb .body .md ul,.guide-row.hb .body .md ol{padding-inline-start:1.3em;margin:.4em 0}
+.guide-row.hb .body .md li{margin:.2em 0}
+.guide-row.hb .body .md table{margin:.6em 0;max-width:100%}
+.hb-toc button{gap:6px}
+.guide-row.hb{scroll-margin-top:80px}
+.guides.hb-list{grid-template-columns:1fr}
