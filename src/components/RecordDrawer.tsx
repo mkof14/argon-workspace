@@ -172,7 +172,7 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
       {/* Branded sheet used for PDF export */}
       <div ref={printRef} hidden style={{ position: "fixed", left: -10000, top: 0, width: 794, background: "#fff", color: "#111820", fontFamily: "IBM Plex Sans, IBM Plex Sans Arabic, sans-serif", fontSize: 13 }} dir={lang === "ar" ? "rtl" : "ltr"}>
         <div style={{ background: "#141A21", padding: "22px 36px", borderBottom: "3px solid #FF6A2B", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <img src="/logo-mark.webp" alt="AGRON" style={{ height: 38 }} /><span style={{ color: "#C7D0DA", fontSize: 11 }}>AGRON WORKSPACE · {new Date().toISOString().slice(0, 10)}</span></div>
+          <img src="/logo-mark.webp" alt="AGRON™" style={{ height: 38 }} /><span style={{ color: "#C7D0DA", fontSize: 11 }}>AGRON WORKSPACE · {new Date().toISOString().slice(0, 10)}</span></div>
         <div style={{ padding: "22px 36px" }}>
           <div style={{ fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase", color: "#7A8796" }}>{tx(section.label, lang)}</div>
           <h1 style={{ fontFamily: "Unbounded, sans-serif", fontSize: 19, margin: "4px 0 6px" }}>{title}</h1>

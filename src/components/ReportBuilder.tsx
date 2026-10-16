@@ -157,7 +157,7 @@ export default function ReportBuilder({ recs }: { recs: Rec[] }) {
             <button className="btn sm" onClick={() => openAi({ title: rep.title, ask: (lang === "ru" ? "Прочитай отчёт и дай: 3 главных вывода, риски и что сделать на этой неделе.\n\n" : "Read this report and give: 3 key takeaways, risks, and what to do this week.\n\n") + md })}><Icon n="spark" />{t("rb_ai", lang)}</button>
           </div>
           <div id="rb-doc" className="rb-doc">
-            <div className="rb-head"><div><h1>{rep.title}</h1><div style={{ color: "#4b5867" }}>AGRON Inc. · {rep.sub}</div></div><img src="/logo-full.webp" alt="AGRON" /></div>
+            <div className="rb-head"><div><h1>{rep.title}</h1><div style={{ color: "#4b5867" }}>AGRON Inc. · {rep.sub}</div></div><img src="/logo-full.webp" alt="AGRON™" width={1000} height={334} /></div>
             {rep.blocks.map((b) => <div key={b.h}>
               <h2>{b.h}</h2>{b.note && <p style={{ color: "#4b5867", margin: "0 0 6px" }}>{b.note}</p>}
               {b.kv && <div className="kv">{b.kv.map(([k, v]) => <div key={k}><b>{v}</b><span>{k}</span></div>)}</div>}

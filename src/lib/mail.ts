@@ -295,7 +295,7 @@ export function renderEmail(o: { subject: string; pre?: string; heading?: string
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#EEF1F4;padding:28px 12px"><tr><td align="center">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 8px 30px rgba(17,24,32,.08)" dir="${dir}">
 <tr><td style="background:#121820;background-image:linear-gradient(135deg,#121820 0%,#1D2833 100%);padding:26px 36px" align="${align}">
-<img src="${LOGO}" width="200" alt="AGRON" style="display:block;width:200px;max-width:60%;height:auto;border:0"></td></tr>
+<img src="${LOGO}" width="200" alt="AGRON™" style="display:block;width:200px;max-width:60%;height:auto;border:0"></td></tr>
 <tr><td style="height:4px;background:${acc};background-image:linear-gradient(90deg,${acc},#FFB15C);font-size:0;line-height:0">&nbsp;</td></tr>
 <tr><td style="padding:34px 36px 8px;text-align:${align}">
 ${o.heading ? `<h1 style="margin:0 0 18px;font-size:26px;line-height:1.25;color:#0E141A;font-weight:700;letter-spacing:-.01em">${inline(o.heading, o.draft)}</h1>` : ""}

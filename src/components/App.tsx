@@ -31,7 +31,7 @@ const Bell = dynamic(() => import("./Inbox").then((m) => m.Bell), { ssr: false }
 const Intake = dynamic(() => import("./Intake"), { ssr: false });
 const DocsAsk = dynamic(() => import("./DocsAsk"), { ssr: false });
 const StarDome = dynamic(() => import("./StarDome"), { ssr: false });
-export const VERSION = "2.18";
+export const VERSION = "2.19";
 
 type Ctx = {
   lang: Lang; me: Profile; access: Access; toast: (m: string, err?: boolean) => void;
@@ -144,7 +144,7 @@ export default function App({ slug }: { slug: string[] }) {
   if (!loaded || !me) return <div className="login"><div className="faint">…</div></div>;
 
   if (me.role === "pending") return (
-    <div className="login"><div className="box"><div className="brand"><img src="/logo-full.webp" alt="AGRON" /></div>
+    <div className="login"><div className="box"><div className="brand"><img src="/logo-full.webp" alt="AGRON™" width={1000} height={334} /></div>
       <h2 style={{ margin: 0 }}>{t("pending_t", lang)}</h2><p className="muted" style={{ margin: 0 }}>{t("pending_p", lang)}</p>
       <button className="btn" onClick={async () => { await store.signOut(); router.replace("/login"); }}><Icon n="logout" />{t("sign_out", lang)}</button></div></div>
   );
@@ -211,7 +211,7 @@ export default function App({ slug }: { slug: string[] }) {
         onDragLeave={(e) => { if (!e.relatedTarget) setDragFiles(false); }}
         onDrop={(e) => { setDragFiles(false); if (e.defaultPrevented || isExternal(me.role) || !e.dataTransfer.files.length) return; e.preventDefault(); setIntake({ files: [...e.dataTransfer.files] }); }}>
         <aside className={`rail ${railOpen ? "open" : ""}`} aria-label={t("menu", lang)}>
-          <div className="rail-brand"><img src="/logo-full.webp" alt="AGRON — Aerial-Ground Robotics Operations Network" width={640} height={187} />
+          <div className="rail-brand"><img src="/logo-full.webp" alt="AGRON™" width={1000} height={334} />
             <div className="prod"><i />{t("workspace", lang)}</div></div>
           <nav ref={navRef}>
             <Link href="/" className={`nav-item top ${!route ? "active" : ""}`} style={{ ["--dc" as any]: "#FF6A2B" }}><Icon n="stardome" /><span>{t("overview", lang)}</span></Link>

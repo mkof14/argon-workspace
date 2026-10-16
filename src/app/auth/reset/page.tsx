@@ -24,7 +24,7 @@ export default function ResetPassword() {
   return (
     <div className="auth" dir={lang === "ar" ? "rtl" : "ltr"} lang={lang}>
       <RadarScene />
-      <div className="auth-side"><img src="/logo-full.webp" alt="AGRON" width={640} height={187} /></div>
+      <div className="auth-side"><img src="/logo-full.webp" alt="AGRON™" width={1000} height={334} /></div>
       <main className="auth-box">
         <div className="auth-top"><h1>{t("new_pw", lang)}</h1></div>
         <form onSubmit={save} className="auth-form">

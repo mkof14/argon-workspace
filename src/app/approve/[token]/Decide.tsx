@@ -28,7 +28,7 @@ export default function Decide({ token, preset }: { token: string; preset?: "app
   const final = done || (v && v.status !== "pending" ? v.status : "");
   return (
     <div className="login"><div className="box approve">
-      <div className="brand"><img src="/logo-full.webp" alt="AGRON" /></div>
+      <div className="brand"><img src="/logo-full.webp" alt="AGRON™" width={1000} height={334} /></div>
       {!v && !err && <p className="faint">{t.wait}</p>}
       {err && !v && <p className="intake-err">{t.bad} {err}</p>}
       {v && <>

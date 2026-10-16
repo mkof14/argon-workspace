@@ -44,7 +44,7 @@ export default function Footer({ depts, isAdmin, dark, onTheme, onLang, onSearch
       <div className="foot-grid">
         <div className="foot-brand">
           <a href="https://www.agron1.com" target="_blank" rel="noopener" className="foot-logo" aria-label={t("main_site", lang)}>
-            <img src="/logo-full.webp" alt="AGRON — Aerial-Ground Robotics Operations Network" width={640} height={187} loading="lazy" />
+            <img src="/logo-full.webp" alt="AGRON™" width={1000} height={334} loading="lazy" />
           </a>
           <p>{t("foot_about", lang)}</p>
           <a href="https://www.agron1.com" target="_blank" rel="noopener" className="btn sm foot-site"><Icon n="globe" />{t("main_site", lang)}<Icon n="ext" /></a>
