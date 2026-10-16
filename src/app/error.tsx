@@ -7,7 +7,7 @@ export default function Error({ error, reset }: { error: Error & { digest?: stri
   useEffect(() => { reportError(error, error.digest ? `digest ${error.digest}` : "page"); }, [error]);
   return (
     <div className="login"><div className="box" style={{ textAlign: "center" }}>
-      <div className="brand"><img src="/logo-full.webp" alt="AGRON™" width={1000} height={334} /></div>
+      <div className="brand"><img src="/logo-full.webp" alt="AGRON™ — Aerial-Ground Robotics Operations Network" width={1000} height={280} /></div>
       <h2 style={{ margin: 0 }}>Something went wrong on this page</h2>
       <p className="muted" style={{ margin: 0 }}>The error has been logged for the administrators. Try again, or go back to the start page.<br />Произошла ошибка. Мы её записали — попробуйте ещё раз.</p>
       <div className="toolbar" style={{ justifyContent: "center" }}>

@@ -75,7 +75,7 @@ export default function Login() {
     <div className="auth" dir={lang === "ar" ? "rtl" : "ltr"} lang={lang}>
       <RadarScene />
       <div className="auth-side">
-        <img src="/logo-full.webp" alt="AGRON™" width={1000} height={334} />
+        <img src="/logo-full.webp" alt="AGRON™ — Aerial-Ground Robotics Operations Network" width={1000} height={280} />
         <p>{t("auth_tag", lang)}</p>
       </div>
       <main className="auth-box">
