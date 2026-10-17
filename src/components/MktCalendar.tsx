@@ -60,9 +60,9 @@ export default function MktCalendar({ recs, lang }: { recs: Rec[]; lang: Lang })
     <div className="card hub-card wide mcal">
       <div className="card-h"><h2><Icon n="calendar" />{t("mk_calendar", lang)}</h2>
         <div className="mcal-nav">
-          <button className="iconbtn" aria-label="Previous month" onClick={() => setM(new Date(m.getFullYear(), m.getMonth() - 1, 1))}><Icon n="chev" className="flip" /></button>
+          <button className="iconbtn" aria-label={tt(L("Previous month", "Предыдущий месяц", "Попередній місяць", "الشهر السابق"), lang)} onClick={() => setM(new Date(m.getFullYear(), m.getMonth() - 1, 1))}><Icon n="chev" className="flip" /></button>
           <b>{m.toLocaleDateString(loc, { month: "long", year: "numeric" })}</b>
-          <button className="iconbtn" aria-label="Next month" onClick={() => setM(new Date(m.getFullYear(), m.getMonth() + 1, 1))}><Icon n="chev" /></button>
+          <button className="iconbtn" aria-label={tt(L("Next month", "Следующий месяц", "Наступний місяць", "الشهر التالي"), lang)} onClick={() => setM(new Date(m.getFullYear(), m.getMonth() + 1, 1))}><Icon n="chev" /></button>
           <button className="btn ghost sm" onClick={() => { const d = new Date(); setM(new Date(d.getFullYear(), d.getMonth(), 1)); }}>{t("today", lang)}</button>
         </div></div>
       <div className="mcal-legend">{LEGEND.map((x) => <button key={x.sec} className={only === x.sec ? "on" : ""} onClick={() => setOnly(only === x.sec ? "" : x.sec)}><i style={{ background: x.c }} />{tt(x.l, lang)}</button>)}</div>

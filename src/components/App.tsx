@@ -31,7 +31,7 @@ const Bell = dynamic(() => import("./Inbox").then((m) => m.Bell), { ssr: false }
 const Intake = dynamic(() => import("./Intake"), { ssr: false });
 const DocsAsk = dynamic(() => import("./DocsAsk"), { ssr: false });
 const StarDome = dynamic(() => import("./StarDome"), { ssr: false });
-export const VERSION = "2.21";
+export const VERSION = "2.22";
 
 type Ctx = {
   lang: Lang; me: Profile; access: Access; toast: (m: string, err?: boolean) => void;
@@ -281,7 +281,7 @@ export default function App({ slug }: { slug: string[] }) {
           <div className="content">
             <main className="page">
               {DEMO && <div className="banner"><Icon n="info" /><span>{t("demo_banner", lang)}</span>
-                <button className="btn ghost sm" style={{ marginInlineStart: "auto" }} onClick={() => { store.resetDemo(); reload(); }}>Reset</button></div>}
+                <button className="btn ghost sm" style={{ marginInlineStart: "auto" }} onClick={() => { store.resetDemo(); reload(); }}>{({ en: "Reset", ru: "Сбросить", uk: "Скинути", ar: "إعادة تعيين" } as any)[lang] || "Reset"}</button></div>}
               {body}
             </main>
             <Footer depts={depts} isAdmin={isAdmin} dark={dark} onTheme={toggleTheme} onLang={setLang} onSearch={(v) => setSearch({ voice: v })} hubs={HUBS} version={VERSION}

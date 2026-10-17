@@ -21,7 +21,7 @@ import { Rec, store } from "@/lib/store";
 import { OPEN, dayDiff, dueItems } from "@/lib/insights";
 
 type T2 = { en: string; ru: string };
-const L = (en: string, ru: string): T2 => ({ en, ru });
+const L = (en: string, ru: string, uk?: string, ar?: string): T2 => ({ en, ru, ...(uk ? { uk } : {}), ...(ar ? { ar } : {}) } as T2);
 type Item = { title: string; sub?: string; right?: string; tone?: "bad" | "warn" | "ok" | "info" | ""; href?: string };
 type Kpi = { l: T2; v: string; s?: string; href?: string; tone?: string };
 const n = (v: any) => Number(v) || 0;
@@ -49,7 +49,7 @@ export default function DeptHub({ dept }: { dept: string }) {
   useEffect(() => { store.listMany(secs.map((s) => s.id)).then(setRecs).catch(() => setRecs([])); }, [dept, tick, access]); // eslint-disable-line
   const of = (id: string) => (recs || []).filter((r) => r.section === id);
   const has = (id: string) => access.read.has(id);
-  const T = (x: T2) => l2(x, lang);
+  const T = (x: T2) => (x as any)[lang] || l2(x, lang);
   const c = (DEPT_COLORS as any)[dept];
 
   const view = useMemo(() => {
@@ -101,7 +101,7 @@ export default function DeptHub({ dept }: { dept: string }) {
           .reduce((a, r) => a + workingDays(r.data.from, r.data.to || r.data.from), 0);
         const allow = n(p.data?.leave_days) || 15; return { l: p.title, v: taken, v2: allow, sub: `${allow - taken} ${T(L("days left", "дн. осталось"))}` };
       });
-      cards.push(<Bars key="bal" title={L(`Paid leave used in ${yr} (taken / allowance)`, `Использованный отпуск в ${yr} (взято / положено)`)} icon="sun" rows={bal} more="/hr/leave" />);
+      cards.push(<Bars key="bal" title={L(`Paid leave used in ${yr} (taken / allowance)`, `Использованный отпуск в ${yr} (взято / положено)`, `Використана відпустка у ${yr} (взято / належить)`, `الإجازات المستخدمة في ${yr} (المأخوذة / المستحقة)`)} icon="sun" rows={bal} more="/hr/leave" />);
       cards.push(<List key="out" title={L("Who is out", "Кто отсутствует")} icon="calendar" more="/hr/leave"
         items={[...outNow.map((r) => ({ title: r.data?.person || r.title, sub: `${r.data?.type || ""} · ${r.data?.from} → ${r.data?.to || r.data?.from}`, right: T(L("out now", "сейчас")), tone: "warn" as const, href: href(r) })),
           ...soon.map((r) => ({ title: r.data?.person || r.title, sub: `${r.data?.type || ""} · ${r.data?.from} → ${r.data?.to || r.data?.from}`, right: rel(dayDiff(r.data.from), lang), tone: "info" as const, href: href(r) }))]}
@@ -113,7 +113,7 @@ export default function DeptHub({ dept }: { dept: string }) {
         if (p.data?.probation && dayDiff(p.data.probation) >= -7 && dayDiff(p.data.probation) <= 30) items.push({ title: p.title, sub: T(L("Probation ends: review needed", "Конец испытательного срока: нужна оценка")), right: rel(dayDiff(p.data.probation), lang), tone: "info", href: href(p) });
         if (!p.data?.i9 && p.data?.location !== "UAE" && p.status !== "Left") items.push({ title: p.title, sub: T(L("Form I-9 not marked as completed", "Форма I-9 не отмечена")), right: "I-9", tone: "warn", href: href(p) });
         if (!p.data?.ciiaa) items.push({ title: p.title, sub: T(L("Confidentiality & IP agreement not signed", "Соглашение о конфиденциальности не подписано")), right: "CIIAA", tone: "warn", href: href(p) });
-        if (p.data?.start) { const s = new Date(p.data.start); const nx = new Date(new Date().getFullYear(), s.getMonth(), s.getDate()); const d = dayDiff(nx.toISOString()); const yrs = nx.getFullYear() - s.getFullYear(); if (yrs > 0 && d >= 0 && d <= 30) items.push({ title: p.title, sub: T(L(`${yrs}-year work anniversary`, `${yrs} г. в компании`)), right: rel(d, lang), tone: "ok", href: href(p) }); }
+        if (p.data?.start) { const s = new Date(p.data.start); const nx = new Date(new Date().getFullYear(), s.getMonth(), s.getDate()); const d = dayDiff(nx.toISOString()); const yrs = nx.getFullYear() - s.getFullYear(); if (yrs > 0 && d >= 0 && d <= 30) items.push({ title: p.title, sub: T(L(`${yrs}-year work anniversary`, `${yrs} г. в компании`, `${yrs} р. у компанії`, `${yrs} سنوات في الشركة`)), right: rel(d, lang), tone: "ok", href: href(p) }); }
       }
       for (const r of of("hr.training")) if (r.data?.expires && dayDiff(r.data.expires) <= 60 && r.status !== "Expired") items.push({ title: r.data?.person || r.title, sub: `${T(L("Certificate expires", "Истекает сертификат"))}: ${r.data?.course || r.title}`, right: rel(dayDiff(r.data.expires), lang), tone: "warn", href: href(r) });
       cards.push(<List key="cmp" title={L("People compliance and key dates", "Кадровый комплаенс и даты")} icon="clipboard" items={items} empty={L("All files complete; no dates in the next 30–90 days.", "Все карточки в порядке, ближайших дат нет.")} />);

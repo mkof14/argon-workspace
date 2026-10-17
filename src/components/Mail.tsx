@@ -1,4 +1,5 @@
 "use client";
+import { l2 } from "@/config/learn";
 import { useEffect, useMemo, useState } from "react";
 import Icon from "./Icon";
 import { useApp, findSection } from "./App";
@@ -6,6 +7,8 @@ import { t, tx, LANGS, Lang } from "@/lib/i18n";
 import { DEMO, Rec, store } from "@/lib/store";
 import { saveBlob } from "@/lib/format";
 import { COMPANY, MAIL_CATS, MailTemplate, TEMPLATES, fill, pick, plainText, renderEmail, varsOf } from "@/lib/mail";
+/** Interface labels (template names, categories): own translation first, then the Learning Center dictionary. */
+const ui = (m: any, l: string) => (m ? m[l] || l2(m, l) : "");
 
 export type MailInit = { template?: string; section?: string; record?: Rec; vars?: Record<string, string>; to?: string };
 
@@ -118,7 +121,7 @@ function Composer({ tpl, init, onDone, templates, setTpl }: { tpl: MailTemplate;
     saveBlob(`AGRON_${tpl.id}.eml`, m, "message/rfc822"); log("Opened in Gmail");
   };
   const saveTpl = async () => {
-    try { await store.save({ section: "mail.templates", title: `${pick(tpl.name, uiLang)} (${lang.toUpperCase()})`, status: "Draft", data: { category: tpl.cat, lang, subject, heading, body, cta_label: ctaLabel, cta_url: ctaUrl } }); toast(t("saved", lang)); reload(); }
+    try { await store.save({ section: "mail.templates", title: `${ui(tpl.name, uiLang)} (${lang.toUpperCase()})`, status: "Draft", data: { category: tpl.cat, lang, subject, heading, body, cta_label: ctaLabel, cta_url: ctaUrl } }); toast(t("saved", lang)); reload(); }
     catch (e: any) { toast(e.message || "Error", true); }
   };
   const translate = async () => {
@@ -139,10 +142,10 @@ function Composer({ tpl, init, onDone, templates, setTpl }: { tpl: MailTemplate;
     <div className="card" style={{ display: "grid", gap: 0, ["--cc" as any]: MAIL_CATS[tpl.cat]?.color }}>
       <div className="card-h">
         <div style={{ flex: 1, minWidth: 200 }}>
-          <div className="eyebrow" style={{ color: MAIL_CATS[tpl.cat]?.color }}>{pick(MAIL_CATS[tpl.cat]?.label, uiLang)}</div>
+          <div className="eyebrow" style={{ color: MAIL_CATS[tpl.cat]?.color }}>{ui(MAIL_CATS[tpl.cat]?.label, uiLang)}</div>
           {onDone ? <select className="input" style={{ fontWeight: 600, marginTop: 4 }} value={tpl.id} onChange={(e) => setTpl(e.target.value)} aria-label={t("choose_template", uiLang)}>
-            {Object.keys(MAIL_CATS).filter((c) => c !== "system").map((c) => { const list = templates.filter((x) => x.cat === c); return list.length ? <optgroup key={c} label={pick(MAIL_CATS[c].label, uiLang)}>{list.map((x) => <option key={x.id} value={x.id}>{pick(x.name, uiLang)}</option>)}</optgroup> : null; })}
-          </select> : <h2 style={{ marginTop: 2 }}>{pick(tpl.name, uiLang)}</h2>}
+            {Object.keys(MAIL_CATS).filter((c) => c !== "system").map((c) => { const list = templates.filter((x) => x.cat === c); return list.length ? <optgroup key={c} label={ui(MAIL_CATS[c].label, uiLang)}>{list.map((x) => <option key={x.id} value={x.id}>{ui(x.name, uiLang)}</option>)}</optgroup> : null; })}
+          </select> : <h2 style={{ marginTop: 2 }}>{ui(tpl.name, uiLang)}</h2>}
         </div>
         <div className="seg" role="group" aria-label={t("language", uiLang)}>{LANGS.map((l) => <button key={l.code} className={lang === l.code ? "on" : ""} onClick={() => setLang(l.code)}>{l.short}</button>)}</div>
         {missingLang && !tpl.system && <button className="btn sm" disabled={!!busy} onClick={translate}><Icon n="spark" />{busy === "tr" ? t("translating", uiLang) : t("translate_ai", uiLang)}</button>}
@@ -235,7 +238,7 @@ export default function MailCenter() {
   const [id, setId] = useState("intro");
   const [q, setQ] = useState("");
   const isAdmin = me.role === "owner" || me.role === "admin";
-  const list = all.filter((x) => (!x.system || isAdmin) && (!q || (pick(x.name, lang) + pick(x.subject, lang) + pick(x.name, "en")).toLowerCase().includes(q.toLowerCase())));
+  const list = all.filter((x) => (!x.system || isAdmin) && (!q || (ui(x.name, lang) + pick(x.subject, lang) + pick(x.name, "en")).toLowerCase().includes(q.toLowerCase())));
   const tpl = all.find((x) => x.id === id) || all[0];
   return (
     <>
@@ -243,7 +246,7 @@ export default function MailCenter() {
         <span className="ic"><Icon n="mail" /></span>
         <div style={{ minWidth: 0, position: "relative", zIndex: 1 }}><div className="eyebrow" style={{ color: "#0EA5E9" }}>{t("mail_center", lang)}</div><h2>{t("templates", lang)}</h2>
           <div className="sub">{t("templates", lang)}: <b className="mono">{all.filter((x) => !x.system).length}</b> · EN · RU · UA · AR</div></div>
-        <div className="stats">{Object.entries(MAIL_CATS).filter(([c]) => c !== "system" || isAdmin).map(([c, m]) => { const n = all.filter((x) => x.cat === c).length; return n ? <span key={c} className="stat" style={{ cursor: "default", borderColor: m.color }}><b style={{ color: m.color }}>{n}</b><small>{pick(m.label, lang)}</small></span> : null; })}</div>
+        <div className="stats">{Object.entries(MAIL_CATS).filter(([c]) => c !== "system" || isAdmin).map(([c, m]) => { const n = all.filter((x) => x.cat === c).length; return n ? <span key={c} className="stat" style={{ cursor: "default", borderColor: m.color }}><b style={{ color: m.color }}>{n}</b><small>{ui(m.label, lang)}</small></span> : null; })}</div>
       </section>
       <div className="mail-grid">
         <div className="card" style={{ position: "sticky", top: 8 }}>
@@ -251,8 +254,8 @@ export default function MailCenter() {
           <div className="tpl-list">
             {Object.entries(MAIL_CATS).map(([c, m]) => { const items = list.filter((x) => x.cat === c); return items.length ? (
               <div key={c} style={{ ["--cc" as any]: m.color }}>
-                <div className="tpl-cat"><i />{pick(m.label, lang)}</div>
-                {items.map((x) => <button key={x.id} className={`tpl ${x.id === tpl.id ? "on" : ""}`} onClick={() => setId(x.id)}><b>{pick(x.name, lang)}</b><small>{pick(x.subject, lang)}</small></button>)}
+                <div className="tpl-cat"><i />{ui(m.label, lang)}</div>
+                {items.map((x) => <button key={x.id} className={`tpl ${x.id === tpl.id ? "on" : ""}`} onClick={() => setId(x.id)}><b>{ui(x.name, lang)}</b><small>{pick(x.subject, lang)}</small></button>)}
               </div>) : null; })}
           </div>
         </div>

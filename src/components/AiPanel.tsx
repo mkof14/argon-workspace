@@ -174,7 +174,7 @@ export default function AiPanel({ ctx, onClose }: { ctx: AiContext; onClose: () 
           {listening && <div className="search-listen"><span className="pulse" />{t("listening", lang)}</div>}
           <textarea className="input" rows={3} value={q} placeholder={mode === "do" ? T(L("What should be done?", "Что сделать?", "Що зробити?", "ماذا يجب أن يُفعل؟")) : t("ai_ph", lang)} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send(); }} aria-label={t("ai_ph", lang)} />
           <div className="toolbar"><span className="faint" style={{ fontSize: 12.5 }}>{usage && `${t("ai_usage", lang)}: ${usage}`}</span><span style={{ flex: 1 }} />
-            {busy && <button className="btn" onClick={() => ctl.current?.abort()}>Stop</button>}
+            {busy && <button className="btn" onClick={() => ctl.current?.abort()}>{T(L("Stop", "Стоп", "Стоп", "إيقاف"))}</button>}
             <button className={`iconbtn mic ${listening ? "on" : ""}`} onClick={listen} title={t("voice", lang)} aria-label={t("voice", lang)} aria-pressed={listening}><Icon n="mic" /></button>
             <button id="ai-send" className="btn primary" disabled={busy || !q.trim()} onClick={send}><Icon n="spark" />{t("send", lang)}</button></div>
         </div>
