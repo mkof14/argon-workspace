@@ -3,12 +3,13 @@ import { allSections, defaultRules, ROLES } from "@/config/workspace.config.mjs"
 import type * as DemoMod from "./demo";
 import { SEED_FAQ, l2, loadLearnLang } from "@/config/learn";
 import { localizeRec, unlocalize, type Shown } from "./tr";
+import { nextOccurrence } from "./recur";
 
 export type Rec = {
   id: string; section: string; title: string; status: string | null; data: Record<string, any>;
   company: string | null; controlled: boolean; created_by?: string | null; created_at?: string; updated_at?: string;
 };
-export type Profile = { id: string; email: string; full_name: string; role: string; company: string | null; us_person: boolean; lang: string; ai_monthly_tokens: number; title?: string | null; phone?: string | null; created_at?: string; super?: boolean };
+export type Profile = { id: string; email: string; full_name: string; role: string; company: string | null; us_person: boolean; lang: string; ai_monthly_tokens: number; title?: string | null; phone?: string | null; created_at?: string; super?: boolean; timezone?: string | null; prefs?: Record<string, any> };
 export type Rule = { section: string; role: string; can_write: boolean; external: boolean };
 export type FileItem = { name: string; path: string; size: number; type: string; created_at?: string };
 export const BUCKET = "files";
@@ -39,7 +40,8 @@ export function accessFor(role: string, rules?: Rule[] | null): Access {
 let demo: typeof DemoMod | null = null;
 export async function ensureDemo() { if (DEMO && !demo) demo = await import("./demo"); }
 const DKEY = "agronws.demo.v1";
-type DemoDB = { records: Rec[]; comments: Comment[]; activity: Activity[]; role: string; profiles: Profile[]; rules?: Rule[]; files?: (FileItem & { data: string })[]; faq?: Faq[] };
+export type TrashItem = { id: string; section: string; title: string; controlled: boolean; deleted_by: string | null; deleted_at: string; comments: number };
+type DemoDB = { trash?: (TrashItem & { record: Rec; cmts: Comment[] })[]; records: Rec[]; comments: Comment[]; activity: Activity[]; role: string; profiles: Profile[]; rules?: Rule[]; files?: (FileItem & { data: string })[]; faq?: Faq[] };
 function demoLoad(): DemoDB {
   try { const s = localStorage.getItem(DKEY); if (s) return JSON.parse(s); } catch {}
   if (!demo) throw new Error("Demo data not loaded");
@@ -127,6 +129,9 @@ export const store = {
         const i = db.records.findIndex((x) => x.id === r.id); const old = db.records[i];
         db.records[i] = { ...old, ...r, updated_at: now } as Rec;
         db.activity.unshift({ id: Date.now(), record_id: r.id, section: r.section, actor: me.id, action: old.status !== r.status ? "status" : "updated", detail: { title: r.title, from: old.status, to: r.status }, created_at: now });
+        // Repeating record completed → the next one (on the live site the server does this)
+        const sec: any = (allSections() as any[]).find((x) => x.id === r.section);
+        if (old.status !== r.status && sec && !db.records.some((x) => x.data?._prev === r.id)) { const n = nextOccurrence(db.records[i], sec.fields, sec.statuses[0]); if (n) db.records.push({ id: uid(), company: old.company, controlled: old.controlled, ...n, section: r.section, created_by: me.id, created_at: now, updated_at: now } as Rec); }
         demoSave(db); return db.records[i];
       }
       const rec = { id: uid(), data: {}, company: null, controlled: false, status: null, ...r, created_by: me.id, created_at: now, updated_at: now } as Rec;
@@ -147,8 +152,20 @@ export const store = {
     if (error) throw error; automate({ id: data.id, kind: "created" }); translateLater({ id: data.id }); return data as Rec;
   },
   async remove(id: string) {
-    if (DEMO) { const db = demoLoad(); const r = db.records.find((x) => x.id === id); db.records = db.records.filter((x) => x.id !== id); if (r) db.activity.unshift({ id: Date.now(), record_id: id, section: r.section, actor: demoMe(db).id, action: "deleted", detail: { title: r.title }, created_at: new Date().toISOString() }); demoSave(db); return; }
+    if (DEMO) { const db = demoLoad(); const r = db.records.find((x) => x.id === id); db.records = db.records.filter((x) => x.id !== id);
+      if (r) { const cmts = db.comments.filter((c) => c.record_id === id); db.comments = db.comments.filter((c) => c.record_id !== id); db.trash = [{ id, section: r.section, title: r.title, controlled: r.controlled, deleted_by: demoMe(db).id, deleted_at: new Date().toISOString(), comments: cmts.length, record: r, cmts }, ...(db.trash || [])]; } if (r) db.activity.unshift({ id: Date.now(), record_id: id, section: r.section, actor: demoMe(db).id, action: "deleted", detail: { title: r.title }, created_at: new Date().toISOString() }); demoSave(db); return; }
     const { error } = await sb().from("records").delete().eq("id", id); if (error) throw error;
+  },
+  /* ----- Recycle bin: deleted records stay 30 days ----- */
+  async trashList(): Promise<TrashItem[]> {
+    if (DEMO) return (demoLoad().trash || []).map(({ record, cmts, ...x }) => x);
+    const r = await fetch("/api/trash", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list" }) });
+    if (!r.ok) throw new Error(await r.text()); return r.json();
+  },
+  async trashAct(action: "restore" | "purge", id: string) {
+    if (DEMO) { const db = demoLoad(); const x = (db.trash || []).find((t) => t.id === id); if (!x) return; db.trash = db.trash!.filter((t) => t.id !== id); if (action === "restore") { db.records.push(x.record); db.comments.push(...x.cmts); } demoSave(db); return; }
+    const r = await fetch("/api/trash", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, id }) });
+    if (!r.ok) throw new Error(await r.text());
   },
   async comments(recordId: string): Promise<Comment[]> {
     if (DEMO) return demoLoad().comments.filter((c) => c.record_id === recordId);
@@ -159,13 +176,27 @@ export const store = {
     const { data: u } = await sb().auth.getUser();
     const { error } = await sb().from("comments").insert({ record_id: recordId, body, author: u?.user?.id }); if (error) throw error;
     translateLater({ id: recordId });
+    if (/@\p{L}/u.test(body)) try { fetch("/api/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "mention", record_id: recordId }), keepalive: true }).catch(() => {}); } catch {}
   },
-  async activity(opts: { recordId?: string; limit?: number; log?: boolean } = {}): Promise<Activity[]> {
-    if (DEMO) { const db = demoLoad(); const acc = accessFor(demoMe(db).role, db.rules); return db.activity.filter((a) => (!opts.recordId || a.record_id === opts.recordId) && acc.read.has(a.section)).slice(0, opts.limit || 20); }
+  async activity(opts: { recordId?: string; limit?: number; log?: boolean; since?: string } = {}): Promise<Activity[]> {
+    if (DEMO) { const db = demoLoad(); const acc = accessFor(demoMe(db).role, db.rules); return db.activity.filter((a) => (!opts.recordId || a.record_id === opts.recordId) && (!opts.since || a.created_at > opts.since) && acc.read.has(a.section)).slice(0, opts.limit || 20); }
     let q = sb().from("activity").select("*").order("created_at", { ascending: false }).limit(opts.limit || 20);
+    if (opts.since) q = q.gt("created_at", opts.since);
     if (opts.recordId) q = q.eq("record_id", opts.recordId);
     q = opts.log ? q.eq("section", "security.log") : q.neq("section", "security.log"); // the access log is shown only on the Security overview
     const { data } = await q; return (data || []) as Activity[];
+  },
+  /** Which of these records the person may open now (US-persons-only and deleted ones drop out). */
+  async visibleIds(ids: string[]): Promise<Set<string>> {
+    const u = [...new Set(ids)].slice(0, 300); if (!u.length) return new Set();
+    if (DEMO) { const db = demoLoad(); return new Set(db.records.filter((r) => u.includes(r.id) && demoVisible(db, r)).map((r) => r.id)); }
+    const { data } = await sb().from("records").select("id").in("id", u); return new Set((data || []).map((r: any) => r.id));
+  },
+  /** New comments by other people since a moment (for "What changed since your last visit"). */
+  async commentsSince(since: string, notBy: string): Promise<(Comment & { section?: string; title?: string })[]> {
+    if (DEMO) { const db = demoLoad(); return db.comments.filter((c) => c.created_at > since && c.author !== notBy).map((c) => { const r = db.records.find((x) => x.id === c.record_id); return { ...c, section: r?.section, title: r?.title }; }).filter((c) => c.section); }
+    const { data } = await sb().from("comments").select("*, records(section,title)").gt("created_at", since).neq("author", notBy).order("created_at", { ascending: false }).limit(40);
+    return (data || []).map((c: any) => ({ ...c, section: c.records?.section, title: c.records?.title }));
   },
   /** Comments that mention a person with @Name (last 30 days). */
   async mentions(name: string): Promise<(Comment & { section?: string; title?: string })[]> {

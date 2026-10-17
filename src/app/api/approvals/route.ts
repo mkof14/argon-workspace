@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { adminClient, currentProfile, userClient } from "@/lib/server/supabase";
 import { sendMail } from "@/lib/server/mailer";
+import { localizeMail } from "@/lib/server/translate";
+import { PUSH, pushTo } from "@/lib/server/push";
 import { renderEmail, plainText, COMPANY, SITE } from "@/lib/mail";
 import { APPROVALS, approvalNeeds } from "@/config/approvals";
 import { allSections } from "@/config/workspace.config.mjs";
@@ -45,13 +47,17 @@ async function decide(db: any, a: any, decision: "approved" | "rejected", commen
   await db.from("comments").insert({ record_id: r.id, author: by.id, body: `${decision === "approved" ? "✓ Approved" : "✗ Rejected"} by ${who}${comment ? `: ${comment}` : ""}` });
   const { data: req } = await db.from("profiles").select("email,full_name,lang").eq("id", a.requested_by).single();
   if (req?.email) {
-    const lang = req.lang === "ru" || req.lang === "uk" ? "ru" : "en"; const s = sec(r.section);
+    const lang = req.lang === "ru" ? "ru" : "en"; const s = sec(r.section);
     const ok = decision === "approved";
     const subject = `${ok ? L(lang, "Approved", "Согласовано") : L(lang, "Rejected", "Отклонено")}: ${r.title}`;
     const body = `${L(lang, `${who} ${ok ? "approved" : "rejected"} your request.`, `${who} ${ok ? "согласовал(а)" : "отклонил(а)"} ваш запрос.`)}\n\n**${r.title}** · ${s?.label?.[lang] || s?.label?.en}${comment ? `\n\n${L(lang, "Comment", "Комментарий")}: ${comment}` : ""}`;
     const cta = { label: L(lang, "Open in Workspace", "Открыть в Workspace"), url: `${SITE}/${r.section.replace(".", "/")}?r=${r.id}` };
-    await sendMail({ to: req.email, subject, html: renderEmail({ subject, heading: subject, body, cta, lang, sender: COMPANY }), text: plainText({ body, cta, sender: COMPANY, lang }) });
+    // Ukrainian and Arabic readers get the same letter translated
+    const m = ["uk", "ar"].includes(req.lang) ? await localizeMail(db, req.lang, { subject, body, text: cta.label }) : { subject, body, text: cta.label };
+    const ml = (["uk", "ar"].includes(req.lang) ? req.lang : lang) as any; const c2 = { ...cta, label: m.text };
+    await sendMail({ to: req.email, subject: m.subject, html: renderEmail({ subject: m.subject, heading: m.subject, body: m.body!, cta: c2, lang: ml, sender: COMPANY }), text: plainText({ body: m.body!, cta: c2, sender: COMPANY, lang: ml }) });
   }
+  await pushTo(db, [a.requested_by], (l) => ({ title: PUSH.decided_t[l], body: `${r.controlled ? "US-persons-only record" : r.title} — ${(decision === "approved" ? PUSH.approved : PUSH.rejected)[l]} (${who})`, url: `/${r.section.replace(".", "/")}?r=${r.id}`, tag: `ap-${a.id}` })).catch(() => 0);
   return null;
 }
 
@@ -112,13 +118,17 @@ export async function POST(req: Request) {
     const note = String(b.note || "").slice(0, 2000);
     const { data: a, error } = await db.from("approvals").insert({ token, record_id: r.id, section: r.section, requested_by: me.id, approver_id: ap.id, note: note || null }).select("id,status,created_at,expires_at").single();
     if (error) return new Response(error.message, { status: 500 });
-    const lang = ap.lang === "ru" || ap.lang === "uk" ? "ru" : "en"; const s = sec(r.section);
+    const lang = ap.lang === "ru" ? "ru" : "en"; const s = sec(r.section);
     const lines = details(r).map((d: any) => `- **${lang === "ru" ? d.label_ru : d.label}:** ${d.value}`).join("\n");
     const subject = `${L(lang, "Approval needed", "Нужно согласование")}: ${r.title}`;
     const body = `${L(lang, `${me.full_name || me.email} asks you to approve:`, `${me.full_name || me.email} просит согласовать:`)}\n\n**${r.title}** · ${s?.label?.[lang] || s?.label?.en}\n\n${lines}${note ? `\n\n${L(lang, "Note", "Комментарий")}: ${note}` : ""}${r.controlled ? `\n\n${L(lang, "Contains export-controlled data — US persons only.", "Содержит данные под экспортным контролем — только для US persons.")}` : ""}`;
     const url = `${SITE}/approve/${token}`;
     const cta = { label: L(lang, "Approve or reject", "Согласовать или отклонить"), url };
-    const err = await sendMail({ to: ap.email, subject, html: renderEmail({ subject, heading: subject, body: body + `\n\n${L(lang, "One click opens the decision page; the link works for 14 days.", "Кнопка откроет страницу решения; ссылка действует 14 дней.")}`, cta, lang, sender: COMPANY }), text: plainText({ body, cta, sender: COMPANY, lang }), replyTo: me.email });
+    const full = body + `\n\n${L(lang, "One click opens the decision page; the link works for 14 days.", "Кнопка откроет страницу решения; ссылка действует 14 дней.")}`;
+    const m = ["uk", "ar"].includes(ap.lang) ? await localizeMail(db, ap.lang, { subject, body: full, text: cta.label }) : { subject, body: full, text: cta.label };
+    const ml = (["uk", "ar"].includes(ap.lang) ? ap.lang : lang) as any; const c2 = { ...cta, label: m.text };
+    const err = await sendMail({ to: ap.email, subject: m.subject, html: renderEmail({ subject: m.subject, heading: m.subject, body: m.body!, cta: c2, lang: ml, sender: COMPANY }), text: plainText({ body: m.body!, cta: c2, sender: COMPANY, lang: ml }), replyTo: me.email });
+    await pushTo(db, [ap.id], (l) => ({ title: PUSH.approve_t[l], body: `${r.controlled ? "US-persons-only record" : r.title} — ${me.full_name || me.email}`, url, tag: `ap-${a.id}` })).catch(() => 0);
     await sb.from("comments").insert({ record_id: r.id, author: me.id, body: `→ Sent for approval to ${ap.full_name || ap.email}${note ? `: ${note}` : ""}` });
     return Response.json({ ...a, approver: ap.full_name || ap.email, mail_error: err });
   }

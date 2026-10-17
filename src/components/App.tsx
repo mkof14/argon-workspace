@@ -19,6 +19,7 @@ const Roles = dynamic(() => import("./Roles"), { ssr: false });
 const System = dynamic(() => import("./System"), { ssr: false });
 const MyProfile = dynamic(() => import("./MyProfile"), { ssr: false });
 const Learn = dynamic(() => import("./Learn"), { ssr: false });
+const Trash = dynamic(() => import("./Trash"), { ssr: false });
 const AiPanel = dynamic(() => import("./AiPanel"), { ssr: false });
 const ComposerModal = dynamic(() => import("./Mail").then((m) => m.ComposerModal), { ssr: false });
 const Reports = dynamic(() => import("./Reports"), { ssr: false });
@@ -31,7 +32,7 @@ const Bell = dynamic(() => import("./Inbox").then((m) => m.Bell), { ssr: false }
 const Intake = dynamic(() => import("./Intake"), { ssr: false });
 const DocsAsk = dynamic(() => import("./DocsAsk"), { ssr: false });
 const StarDome = dynamic(() => import("./StarDome"), { ssr: false });
-export const VERSION = "2.23";
+export const VERSION = "2.24";
 
 type Ctx = {
   lang: Lang; me: Profile; access: Access; toast: (m: string, err?: boolean) => void;
@@ -115,6 +116,8 @@ export default function App({ slug }: { slug: string[] }) {
     // A new device: take the language from the profile
     try { if (p?.lang && !localStorage.getItem("agronws.lang") && ["en", "ru", "uk", "ar"].includes(p.lang)) { setLangState(p.lang as Lang); store.setLang(p.lang); localStorage.setItem("agronws.lang", p.lang); document.documentElement.lang = p.lang; document.documentElement.dir = p.lang === "ar" ? "rtl" : "ltr"; } } catch {}
     try { const l = localStorage.getItem("agronws.lang"); if (p && l && p.lang !== l && !DEMO) { store.updateProfile(p.id, { lang: l }).catch(() => {}); p.lang = l; } } catch {}
+    // First visit: remember the person's time zone (digest at 8:00 local, local time for colleagues)
+    try { if (p && !p.timezone && !DEMO) { const z = Intl.DateTimeFormat().resolvedOptions().timeZone; if (z) { store.updateProfile(p.id, { timezone: z }).catch(() => {}); p.timezone = z; } } } catch {}
     setMe(p); setLoaded(true); setTick((x) => x + 1);
     if (!p && !DEMO) router.replace("/login");
     if (p && !isExternal(p.role)) store.profiles().then(setPeople).catch(() => {});
@@ -158,7 +161,7 @@ export default function App({ slug }: { slug: string[] }) {
   const depts = DEPARTMENTS.map((d: any) => ({ ...d, secs: SECTIONS.filter((s) => s.dept === d.key && access.read.has(s.id)) })).filter((d: any) => d.secs.length);
   const isAdmin = me.role === "owner" || me.role === "admin";
   const dept = section ? DEPARTMENTS.find((d: any) => d.key === section.dept) : null;
-  const special: Record<string, [string, string]> = { today: [t("workspace", lang), tx({ en: "My day", ru: "Мой день", uk: "Мій день", ar: "يومي" }, lang)], stardome: [t("workspace", lang), t("sd_title", lang)], "admin/users": [t("admin", lang), t("users", lang)], "admin/roles": [t("admin", lang), t("roles", lang)], "admin/system": [t("admin", lang), t("sys_title", lang)], me: [t("workspace", lang), t("my_profile", lang)], learn: [t("workspace", lang), t("learn", lang)], reports: [t("workspace", lang), t("reports", lang)], templates: [t("workspace", lang), t("templates", lang)], ask: [t("workspace", lang), t("ask_docs", lang)] };
+  const special: Record<string, [string, string]> = { trash: [t("workspace", lang), t("trash", lang)], today: [t("workspace", lang), tx({ en: "My day", ru: "Мой день", uk: "Мій день", ar: "يومي" }, lang)], stardome: [t("workspace", lang), t("sd_title", lang)], "admin/users": [t("admin", lang), t("users", lang)], "admin/roles": [t("admin", lang), t("roles", lang)], "admin/system": [t("admin", lang), t("sys_title", lang)], me: [t("workspace", lang), t("my_profile", lang)], learn: [t("workspace", lang), t("learn", lang)], reports: [t("workspace", lang), t("reports", lang)], templates: [t("workspace", lang), t("templates", lang)], ask: [t("workspace", lang), t("ask_docs", lang)] };
   const hubD = hubDept ? DEPARTMENTS.find((d: any) => d.key === hubDept) : null;
   const crumbGroup = hubD ? tx(hubD.label, lang) : section ? tx(dept.label, lang) : special[route]?.[0] || t("workspace", lang);
   const crumbTitle = hubD ? t("dept_overview", lang) : section ? tx(section.label, lang) : special[route]?.[1] || t("overview", lang);
@@ -184,6 +187,7 @@ export default function App({ slug }: { slug: string[] }) {
   else if (route === "today") body = <Today />;
   else if (route === "me") body = <MyProfile />;
   else if (route === "learn") body = <Learn />;
+  else if (route === "trash" && !isExternal(me.role)) body = <Trash />;
   else if (route === "ask") body = <DocsAsk />;
   else if (route === "stardome") body = <StarDome />;
   else if (hubD && depts.some((d: any) => d.key === hubDept)) {
@@ -228,6 +232,7 @@ export default function App({ slug }: { slug: string[] }) {
             <Link href="/templates" className={`nav-item top ${route === "templates" ? "active" : ""}`} style={{ ["--dc" as any]: "#C9971C" }}><Icon n="file" /><span>{t("templates", lang)}</span></Link>
             {access.read.has("company.tasks") && <Link href="/company/tasks" className={`nav-item top ${route === "company/tasks" ? "active" : ""}`} style={{ ["--dc" as any]: "#5B6CF0" }}><Icon n="bell" /><span>{tx(findSection("company.tasks")?.label, lang)}</span></Link>}
             <Link href="/learn" className={`nav-item top ${route === "learn" ? "active" : ""}`} style={{ ["--dc" as any]: "#14B8A6" }}><Icon n="lifebuoy" /><span>{t("learn", lang)}</span></Link>
+            {!isExternal(me.role) && <Link href="/trash" className={`nav-item top ${route === "trash" ? "active" : ""}`} style={{ ["--dc" as any]: "#94A3B8" }}><Icon n="trash" /><span>{t("trash", lang)}</span></Link>}
             <div className="nav-label nav-depts"><Icon n="layers" /><span>{t("departments", lang)}</span><b>{depts.length}</b></div>
             {depts.map((d: any) => {
               const open = !!openDepts[d.key];

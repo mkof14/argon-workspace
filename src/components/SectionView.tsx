@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 const RecordDrawer = dynamic(() => import("./RecordDrawer"), { ssr: false });
 const SectionTemplates = dynamic(() => import("./Templates").then((m) => m.SectionTemplates), { ssr: false });
 import Icon from "./Icon";
+import { PEOPLE_KEYS } from "@/lib/insights";
 import { useApp } from "./App";
 import dynamic from "next/dynamic";
 const MailCenter = dynamic(() => import("./Mail"), { ssr: false });
@@ -28,7 +29,7 @@ export const KIND: Record<string, { icon: string; c: string }> = {
 const days = (d: string) => Math.round((new Date(d).getTime() - new Date(new Date().toISOString().slice(0, 10)).getTime()) / 86400000);
 
 export default function SectionView({ section }: { section: any }) {
-  const { lang, access, toast, openAi, openMail, tick, openIntake } = useApp();
+  const { lang, access, toast, openAi, openMail, tick, openIntake, me, people } = useApp();
   const [rows, setRows] = useState<Rec[] | null>(null);
   const [q, setQ] = useState(() => (typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("q") || "" : ""));
   const [st, setSt] = useState(() => (typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("st") || "" : ""));
@@ -37,13 +38,21 @@ export default function SectionView({ section }: { section: any }) {
   const [dragOver, setDragOver] = useState("");
   const [sort, setSort] = useState<{ k: string; dir: 1 | -1 } | null>(null);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  // Selected rows for actions on many records at once
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [bulk, setBulk] = useState<{ status?: string; who?: string; date?: string; del?: boolean }>({});
+  const [bulkBusy, setBulkBusy] = useState(false);
+  // Saved views: name + search + status + sort, kept in the profile (all devices)
+  const [views, setViews] = useState<{ name: string; q: string; st: string; sort?: string }[]>(() => (me?.prefs?.views?.[section.id] || []));
+  const [naming, setNaming] = useState<string | null>(null);
   const canWrite = access.write.has(section.id);
   const fieldsByKey = useMemo(() => Object.fromEntries(section.fields.map((f: any) => [f.key, f])), [section]);
   const dept = DEPARTMENTS.find((d: any) => d.key === section.dept);
   const moneyKey = section.columns.find((k: string) => fieldsByKey[k]?.type === "money");
 
   const load = async () => { try { setRows(await store.list(section.id)); } catch (e: any) { toast(e.message || "Error", true); setRows([]); } };
-  useEffect(() => { if (section.view !== "mail") load(); }, [section.id, tick]); // eslint-disable-line
+  useEffect(() => { if (section.view !== "mail") load(); setSel(new Set()); }, [section.id, tick]); // eslint-disable-line
+  useEffect(() => { setViews(me?.prefs?.views?.[section.id] || []); const so = new URLSearchParams(window.location.search).get("sort"); if (so) { const [k, d] = so.split(":"); setSort({ k, dir: d === "-1" ? -1 : 1 }); } }, [section.id]); // eslint-disable-line
   useEffect(() => { // deep link ?r=<id>
     if (!rows) return; const id = new URLSearchParams(window.location.search).get("r");
     if (id) { const r = rows.find((x) => x.id === id); if (r) setOpen(r); }
@@ -85,6 +94,32 @@ export default function SectionView({ section }: { section: any }) {
     const d = days(r.data[key]); return d < 0 ? "due-over" : d <= 14 ? "due-soon" : "";
   };
 
+  const ownerKey = PEOPLE_KEYS.find((k) => fieldsByKey[k]);
+  const dateKey = DUE_KEYS.find((k) => fieldsByKey[k]?.type === "date");
+  const chosen = filtered.filter((r) => sel.has(r.id));
+  const toggle = (id: string) => setSel((x) => { const n = new Set(x); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const allOn = filtered.length > 0 && filtered.every((r) => sel.has(r.id));
+  const applyBulk = async () => {
+    if (!chosen.length) return; setBulkBusy(true); let ok = 0, blocked = 0;
+    try {
+      for (const r of chosen) {
+        if (bulk.del) { await store.remove(r.id); ok++; continue; }
+        const status = bulk.status || r.status; const data = { ...r.data };
+        if (bulk.who !== undefined && bulk.who !== "" && ownerKey) data[ownerKey] = bulk.who;
+        if (bulk.date && dateKey) data[dateKey] = bulk.date;
+        if (status !== r.status && gateBlocks(section.gate, status, data)) { blocked++; continue; }
+        await store.save({ ...r, status, data }); ok++;
+      }
+      toast(`${tx({ en: "Done", ru: "Готово", uk: "Готово", ar: "تم" }, lang)}: ${ok}${blocked ? ` · ${tx({ en: "not changed (a check is missing)", ru: "не изменено (не пройдена проверка)", uk: "не змінено (не пройдено перевірку)", ar: "لم يتغير (فحص ناقص)" }, lang)}: ${blocked}` : ""}`, !!blocked && !ok);
+      setBulk({}); setSel(new Set()); load();
+    } catch (e: any) { toast(e.message || "Error", true); } finally { setBulkBusy(false); }
+  };
+  const viewLink = (v: { q: string; st: string; sort?: string }) => `${location.origin}/${section.id.replace(".", "/")}?${new URLSearchParams({ ...(v.q ? { q: v.q } : {}), ...(v.st ? { st: v.st } : {}), ...(v.sort ? { sort: v.sort } : {}) })}`;
+  const saveViews = async (list: typeof views) => {
+    setViews(list); const prefs = { ...(me?.prefs || {}), views: { ...(me?.prefs?.views || {}), [section.id]: list } };
+    if (me) me.prefs = prefs; try { await store.updateProfile(me.id, { prefs }); } catch (e: any) { toast(e.message || "Error", true); }
+  };
+  const curSort = sort ? `${sort.k}:${sort.dir}` : "";
   const counts = section.statuses.map((s: string) => ({ s, n: (rows || []).filter((r) => r.status === s).length }));
   const sum = moneyKey ? filtered.reduce((a, r) => a + (Number(r.data?.[moneyKey]) || 0), 0) : 0;
 
@@ -129,8 +164,34 @@ export default function SectionView({ section }: { section: any }) {
           <select className="input" value={st} onChange={(e) => setSt(e.target.value)} aria-label={t("all_status", lang)}>
             <option value="">{t("all_status", lang)}</option>{section.statuses.map((s: string) => <option key={s}>{s}</option>)}
           </select>
+          <div className="views">
+            {views.map((v) => <span key={v.name} className={`chip view-chip ${v.q === q && v.st === st && (v.sort || "") === curSort ? "on" : ""}`}>
+              <button onClick={() => { setQ(v.q); setSt(v.st); if (v.sort) { const [k, d] = v.sort.split(":"); setSort({ k, dir: d === "-1" ? -1 : 1 }); } else setSort(null); }}>{v.name}</button>
+              <button aria-label={tx({ en: "Copy link", ru: "Скопировать ссылку", uk: "Скопіювати посилання", ar: "نسخ الرابط" }, lang)} title={tx({ en: "Copy link to share", ru: "Скопировать ссылку для коллеги", uk: "Скопіювати посилання для колеги", ar: "نسخ رابط لمشاركته" }, lang)} onClick={() => navigator.clipboard?.writeText(viewLink(v)).then(() => toast(t("copied", lang))).catch(() => {})}><Icon n="link" /></button>
+              <button aria-label={t("delete", lang)} onClick={() => saveViews(views.filter((x) => x.name !== v.name))}><Icon n="x" /></button></span>)}
+            {(q || st || sort) && (naming === null
+              ? <button className="btn ghost sm" onClick={() => setNaming("")}><Icon n="plus" />{tx({ en: "Save view", ru: "Сохранить вид", uk: "Зберегти вигляд", ar: "حفظ العرض" }, lang)}</button>
+              : <form className="toolbar" style={{ flexWrap: "nowrap", gap: 6 }} onSubmit={(e) => { e.preventDefault(); const n = (naming || "").trim(); if (n) { saveViews([...views.filter((x) => x.name !== n), { name: n, q, st, sort: curSort || undefined }]); setNaming(null); } }}>
+                  <input className="input" autoFocus style={{ width: 170 }} value={naming} placeholder={tx({ en: "View name", ru: "Название вида", uk: "Назва вигляду", ar: "اسم العرض" }, lang)} onChange={(e) => setNaming(e.target.value)} />
+                  <button className="btn primary sm" type="submit">{t("save", lang)}</button><button className="btn ghost sm" type="button" onClick={() => setNaming(null)}>{t("cancel", lang)}</button></form>)}
+          </div>
         </div>
 
+        {view === "table" && chosen.length > 0 && <div className="bulkbar" role="region" aria-label="bulk">
+          <b>{tx({ en: "Selected", ru: "Выбрано", uk: "Вибрано", ar: "المحدد" }, lang)}: {chosen.length}</b>
+          {canWrite && !bulk.del && <>
+            <select className="input" value={bulk.status || ""} onChange={(e) => setBulk({ ...bulk, status: e.target.value || undefined })} aria-label={t("status", lang)}><option value="">{t("status", lang)} —</option>{section.statuses.map((s: string) => <option key={s}>{s}</option>)}</select>
+            {ownerKey && <input className="input" list="people-bulk" style={{ width: 170 }} value={bulk.who || ""} placeholder={tx(fieldsByKey[ownerKey].label, lang)} onChange={(e) => setBulk({ ...bulk, who: e.target.value })} />}
+            <datalist id="people-bulk">{people.map((p) => <option key={p.id} value={p.full_name || p.email} />)}</datalist>
+            {dateKey && <input className="input" type="date" style={{ width: 160 }} value={bulk.date || ""} onChange={(e) => setBulk({ ...bulk, date: e.target.value || undefined })} aria-label={tx(fieldsByKey[dateKey].label, lang)} title={tx(fieldsByKey[dateKey].label, lang)} />}
+          </>}
+          {bulk.del && <span className="faint">{t("confirm_delete", lang)}</span>}
+          <span style={{ flex: 1 }} />
+          {canWrite && (bulk.status || bulk.who || bulk.date || bulk.del) && <button className={`btn sm ${bulk.del ? "danger" : "primary"}`} disabled={bulkBusy} onClick={applyBulk}><Icon n="check" />{bulkBusy ? "…" : tx({ en: "Apply", ru: "Применить", uk: "Застосувати", ar: "تطبيق" }, lang)}</button>}
+          <button className="btn ghost sm" onClick={() => saveBlob(`AGRON_${section.id}_selected.csv`, toCsv(section, chosen, lang), "text/csv;charset=utf-8")}><Icon n="download" />{t("export_csv", lang)}</button>
+          {canWrite && !bulk.del && <button className="btn ghost sm danger" onClick={() => setBulk({ del: true })}><Icon n="trash" />{t("delete", lang)}</button>}
+          <button className="btn ghost sm" onClick={() => { setSel(new Set()); setBulk({}); }}>{t("cancel", lang)}</button>
+        </div>}
         {rows === null ? <div className="empty">…</div> : !rows.length ? (
           <div className="empty"><span className="ic" style={{ display: "inline-grid", placeItems: "center", width: 64, height: 64, borderRadius: 18, background: "color-mix(in srgb,var(--dc) 15%,transparent)", color: "var(--dc)", marginBottom: 10 }}><Icon n={section.icon} /></span><b>{t("empty", lang)}</b>{canWrite ? t("empty_p", lang) : ""}{canWrite && <button className="btn sm" style={{ marginTop: 12 }} onClick={() => openIntake()}><Icon n="upload" />{t("intake_empty", lang)}</button>}</div>
         ) : view === "gallery" ? (
@@ -142,11 +203,13 @@ export default function SectionView({ section }: { section: any }) {
         ) : view === "table" ? (
           <>
             <div className="tablewrap"><table className="tb"><thead><tr>
+              <th className="col-sel"><input type="checkbox" checked={allOn} aria-label={tx({ en: "Select all", ru: "Выбрать все", uk: "Вибрати все", ar: "تحديد الكل" }, lang)} onChange={() => setSel(allOn ? new Set() : new Set(filtered.map((r) => r.id)))} /></th>
               {th("title", t("title", lang))}{th("status", t("status", lang))}
               {section.columns.map((k: string) => th(k, tx(fieldsByKey[k]?.label, lang)))}<th className="col-upd"><button onClick={() => setSort((s) => (s?.k === "updated" ? { k: "updated", dir: s.dir === 1 ? -1 : 1 } : { k: "updated", dir: -1 }))}>{t("updated", lang)}<Icon n="sort" /></button></th>
             </tr></thead><tbody>
               {filtered.map((r) => (
-                <tr key={r.id} className="row" tabIndex={0} onClick={() => setOpen(r)} onKeyDown={(e) => e.key === "Enter" && setOpen(r)}>
+                <tr key={r.id} className={`row ${sel.has(r.id) ? "picked" : ""}`} tabIndex={0} onClick={() => setOpen(r)} onKeyDown={(e) => e.key === "Enter" && setOpen(r)}>
+                  <td className="col-sel" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={sel.has(r.id)} onChange={() => toggle(r.id)} aria-label={r.title} /></td>
                   <td style={{ fontWeight: 600 }}>{r.controlled && <Icon n="lock" className="lockico" />} {r.title} {r.data?.sample && <span className="chip c-vio" style={{ marginInlineStart: 6 }}>{t("sample", lang)}</span>}</td>
                   <td>{r.status && <span className={`chip dot ${tone(r.status)}`}>{r.status}</span>}</td>
                   {section.columns.map((k: string) => <td key={k} className={dueCls(r, k)}>{cell(r, k)}</td>)}

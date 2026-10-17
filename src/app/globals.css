@@ -1017,3 +1017,14 @@ main.page{min-height:calc(100dvh - 90px);align-content:start}
 /* Automatic translation */
 .chip.tr-chip{cursor:pointer;border-style:dashed;background:transparent}
 .chip.tr-chip:hover{border-color:var(--dc,var(--ink-3))}
+.dup-warn{border:1px solid var(--warn,#8A4E00);border-radius:10px;padding:10px 12px;background:color-mix(in srgb,var(--warn,#8A4E00) 7%,transparent);display:grid;gap:8px}
+.dup-warn b{font-size:14px;font-weight:600}
+/* Bulk actions and saved views */
+.col-sel{width:34px;padding-inline:10px 4px!important}.col-sel input{width:17px;height:17px;cursor:pointer}
+tr.picked td{background:color-mix(in srgb,var(--dc) 8%,transparent)}
+.bulkbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--dc) 6%,var(--surface))}
+.bulkbar .input{width:auto;min-width:0}
+.views{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.view-chip{display:inline-flex;align-items:center;gap:2px;padding:0 4px 0 10px}.view-chip button{background:none;border:0;padding:4px;color:inherit;cursor:pointer;display:inline-grid;place-items:center}
+.view-chip button svg{width:14px;height:14px}.view-chip.on{border-color:var(--dc);color:var(--dc)}
+.team-clock{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:13.5px;color:var(--ink-3)}.team-clock>svg{width:16px;height:16px}.team-clock .chip.me{border-color:var(--dc)}

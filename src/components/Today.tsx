@@ -1,4 +1,6 @@
 "use client";
+import { NotifyHint } from "./Notify";
+import SinceLast, { TeamClock } from "./SinceLast";
 import Link from "next/link";
 import Icon from "./Icon";
 import { useTr } from "@/lib/useTr";
@@ -44,6 +46,8 @@ export default function Today() {
           <Link href="#tasks" className="dstat"><b>{tasks.length}</b><span>{T(L("My open tasks", "Мои открытые задачи", "Мої відкриті задачі", "مهامي المفتوحة"))}</span></Link>
           <Link href="#men" className="dstat"><b>{d.newMentions.length}</b><span>{T(L("New mentions", "Новые упоминания", "Нові згадки", "إشارات جديدة"))}</span><small>{d.mentions.length} {T(L("in 30 days", "за 30 дней", "за 30 днів", "خلال 30 يوماً"))}</small></Link>
         </div></section>
+      <TeamClock />
+      <NotifyHint />
       <div className="toolbar"><button className="btn primary sm" onClick={() => openIntake()}><Icon n="upload" />{T(L("Smart upload", "Умная загрузка", "Розумне завантаження", "رفع ذكي"))}</button>
         <Link href="/company/tasks?new=1" className="btn sm"><Icon n="plus" />{T(L("New task", "Новая задача", "Нова задача", "مهمة جديدة"))}</Link>
         <Link href="/ask" className="btn ghost sm"><Icon n="spark" />{T(L("Ask documents", "Спросить документы", "Запитати документи", "اسأل المستندات"))}</Link></div>
@@ -61,6 +65,7 @@ export default function Today() {
         {d.company.length > 0 && <div className="wide"><Box icon="alert" title={L("Company: overdue items (leaders)", "Компания: просрочено (для руководства)", "Компанія: прострочено (для керівництва)", "الشركة: متأخرات")} n={d.company.length} empty={L("", "", "", "")}>
           {d.company.slice(0, 15).map((x) => <Link key={x.r.id + x.k} href={href(x.r)} className="hub-row"><span><b>{x.r.title}</b><small>{tx(findSection(x.r.section)?.label, lang as Lang)}{x.r.data?.owner ? ` · ${x.r.data.owner}` : ""}</small></span><span className="chip c-bad">{rel(x.d)}</span></Link>)}</Box></div>}
       </div>
+      <SinceLast />
     </div>
   );
 }

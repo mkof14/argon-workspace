@@ -2,11 +2,13 @@ import Anthropic from "@anthropic-ai/sdk";
 import { readState, saveState } from "./backup";
 import { sendMail } from "./mailer";
 import { localizeMail } from "./translate";
+import { PUSH, pushTo } from "./push";
 import { renderEmail, SITE } from "@/lib/mail";
 import { fileRecord, readInbox } from "./mailIntake";
 import { draftEmail } from "./drafts";
 import { allSections } from "@/config/workspace.config.mjs";
 import { REFS } from "@/config/links";
+import { nextOccurrence } from "@/lib/recur";
 import { dueItems, isMine, money, PEOPLE_KEYS } from "@/lib/insights";
 import { dealEmail, financeFindings, hrFindings, legalFindings, marketingFindings, securityFindings, technicalFindings, operationsFindings, salesFindings, type Finding } from "@/lib/deptAgents";
 import { AGENTS, DEPT_AGENTS, DEFAULT_RULES, aiCost, dateDue, isWorkday, matchEvent, qualityIssues, render, withDefaults, type Action, type AgentId, type Ev, type Rule, type Settings } from "@/lib/automation";
@@ -79,6 +81,8 @@ async function flushMail(c: Ctx, subject: string) {
     const m = await inLang(c, p, { subject, html, text: lines.map((l) => "- " + l.replace(/<[^>]+>/g, "")).join("\n") });
     const err = await sendMail({ to: p.email, subject: m.subject, html: renderEmail({ subject: m.subject, heading: m.subject, body: "", html: m.html, lang: (p.lang as any) || "en", sender: null }), text: m.text });
     if (!err) sent++; else c.log.push({ at: new Date().toISOString(), agent: "system", kind: "error", text: `Email to ${p.email}: ${err}` });
+    // A short signal on the phone too (only on devices where the person turned notifications on)
+    await pushTo(c.db, [p.id], (l) => ({ title: PUSH.agents_t[l], body: PUSH.agents_b[l].replace("{n}", String(lines.length)), url: "/today", tag: "agents" })).catch(() => 0);
   }
   c.mail.clear(); return sent;
 }
@@ -162,17 +166,30 @@ const ruleMode = (c: Ctx, r: Rule): "auto" | "suggest" => (c.settings.agents.rul
 
 /* ---------------- Events from the app ---------------- */
 /** Called right after someone saves a record. Runs the matching rules once per record and status. */
+/** A repeating record was completed: the next occurrence is created once, with the dates moved forward. */
+async function repeatNext(db: any, rec: any) {
+  const sec: any = (allSections() as any[]).find((s) => s.id === rec.section); if (!sec) return null;
+  const n = nextOccurrence(rec, sec.fields, sec.statuses[0]); if (!n) return null;
+  const { data: ex } = await db.from("records").select("id").eq("section", rec.section).eq("data->>_prev", rec.id).limit(1);
+  if (ex?.length) return null; // already prepared
+  const { data } = await db.from("records").insert({ section: rec.section, title: n.title, status: n.status, data: n.data, company: rec.company ?? null, controlled: !!rec.controlled, created_by: rec.created_by ?? null }).select("id").single();
+  return data?.id || null;
+}
+
 export async function onRecordEvent(db: any, rec: any, ev: Ev) {
+  const next = ev.kind === "status" ? await repeatNext(db, rec).catch(() => null) : null;
   const c = await context(db);
-  if (c.settings.agents.rules === "off") return { matched: 0 };
+  if (next) c.log.push({ at: new Date().toISOString(), agent: "rules", kind: "action", text: `Repeating: next “${rec.title}” prepared`, record: next, section: rec.section } as any);
+  if (c.settings.agents.rules === "off") { if (next) await save(c); return { matched: 0, next }; }
   const rules = (await getRules(db)).filter((r) => matchEvent(r, rec, ev));
   for (const r of rules) {
     const key = `${r.id}|${rec.id}|${ev.kind === "created" ? "new" : ev.to}`;
     if (c.fired[key]) continue; c.fired[key] = today();
     for (const a of r.actions) await act(c, "rules", a, rec, ruleMode(c, r), `Rule “${r.name}”`);
   }
-  if (rules.length) { await flushMail(c, "AGRON Workspace: automatic update"); await save(c); }
-  return { matched: rules.length };
+  if (rules.length) await flushMail(c, "AGRON Workspace: automatic update");
+  if (rules.length || next) await save(c);
+  return { matched: rules.length, next };
 }
 
 /* ---------------- Agents ---------------- */
@@ -419,6 +436,10 @@ export async function runAgents(db: any, opts: { only?: AgentId; manual?: boolea
     } catch (e: any) { out[a] = `error: ${e?.message || e}`; c.log.push({ at: new Date().toISOString(), agent: a, kind: "error", text: String(e?.message || e) }); }
   }
   out.emails = String(await flushMail(c, "AGRON Workspace: what the agents found today"));
+  if (c.queue.length) { // new proposals wait for a decision
+    const admins = c.profiles.filter((p) => ["owner", "admin"].includes(p.role)).map((p) => p.id);
+    await pushTo(db, admins, (l) => ({ title: PUSH.queue_t[l], body: PUSH.queue_b[l].replace("{n}", String(c.queue.length)), url: "/admin/system?tab=auto", tag: "queue" })).catch(() => 0);
+  }
   await save(c);
   await saveState(db, "agents", { at: new Date().toISOString(), result: out, manual: !!opts.manual });
   return out;

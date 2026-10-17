@@ -9,6 +9,15 @@ export type Tx = { en: string; ru: string; uk: string; ar: string };
 export const tx = (o: Partial<Tx> | undefined, lang: Lang) => (o ? o[lang] || o.en || "" : "");
 
 const S: Record<string, Tx> = {
+  trash: { en: "Recycle bin", ru: "Корзина", uk: "Кошик", ar: "سلة المحذوفات" },
+  trash_sub: { en: "Deleted records stay here for 30 days with their comments and files. Restore puts them back exactly where they were.", ru: "Удалённые записи хранятся здесь 30 дней вместе с комментариями и файлами. «Вернуть» ставит их на прежнее место.", uk: "Видалені записи зберігаються тут 30 днів разом із коментарями та файлами. «Повернути» ставить їх на попереднє місце.", ar: "تبقى السجلات المحذوفة هنا 30 يوماً مع تعليقاتها وملفاتها. «استعادة» تعيدها إلى مكانها تماماً." },
+  restore: { en: "Restore", ru: "Вернуть", uk: "Повернути", ar: "استعادة" },
+  restored: { en: "Restored", ru: "Возвращено", uk: "Повернено", ar: "تمت الاستعادة" },
+  purge: { en: "Delete for good", ru: "Удалить навсегда", uk: "Видалити назавжди", ar: "حذف نهائي" },
+  purge_q: { en: "Delete for good? This cannot be undone.", ru: "Удалить навсегда? Это необратимо.", uk: "Видалити назавжди? Це незворотно.", ar: "حذف نهائي؟ لا يمكن التراجع." },
+  trash_empty: { en: "The recycle bin is empty.", ru: "Корзина пуста.", uk: "Кошик порожній.", ar: "سلة المحذوفات فارغة." },
+  days_left: { en: "{n} days left", ru: "осталось {n} дн.", uk: "залишилося {n} дн.", ar: "متبقٍ {n} يوماً" },
+  deleted_by: { en: "Deleted by", ru: "Удалил", uk: "Видалив", ar: "حذفه" },
   tr_from: { en: "Translated automatically from {l}", ru: "Переведено автоматически с {l}", uk: "Перекладено автоматично з {l}", ar: "تُرجم تلقائياً من {l}" },
   tr_auto: { en: "Translated automatically", ru: "Переведено автоматически", uk: "Перекладено автоматично", ar: "تُرجم تلقائياً" },
   tr_orig: { en: "Show original", ru: "Показать оригинал", uk: "Показати оригінал", ar: "عرض الأصل" },
@@ -342,10 +351,10 @@ const S: Record<string, Tx> = {
   save: { en: "Save", ru: "Сохранить", uk: "Зберегти", ar: "حفظ" },
   cancel: { en: "Cancel", ru: "Отмена", uk: "Скасувати", ar: "إلغاء" },
   delete: { en: "Delete", ru: "Удалить", uk: "Видалити", ar: "حذف" },
-  confirm_delete: { en: "Delete this record? This can't be undone.", ru: "Удалить запись? Это действие необратимо.", uk: "Видалити запис? Цю дію не можна скасувати.", ar: "حذف هذا السجل؟ لا يمكن التراجع." },
+  confirm_delete: { en: "Move this record to the recycle bin? It can be restored for 30 days.", ru: "Переместить запись в корзину? Её можно вернуть в течение 30 дней.", uk: "Перемістити запис у кошик? Його можна повернути протягом 30 днів.", ar: "نقل السجل إلى سلة المحذوفات؟ يمكن استعادته خلال 30 يوماً." },
   close: { en: "Close", ru: "Закрыть", uk: "Закрити", ar: "إغلاق" },
   saved: { en: "Saved", ru: "Сохранено", uk: "Збережено", ar: "تم الحفظ" },
-  deleted: { en: "Deleted", ru: "Удалено", uk: "Видалено", ar: "تم الحذف" },
+  deleted: { en: "Moved to the recycle bin", ru: "Перемещено в корзину", uk: "Переміщено в кошик", ar: "نُقل إلى سلة المحذوفات" },
   copied: { en: "Copied", ru: "Скопировано", uk: "Скопійовано", ar: "تم النسخ" },
   copy: { en: "Copy", ru: "Копировать", uk: "Копіювати", ar: "نسخ" },
   print: { en: "Print", ru: "Печать", uk: "Друк", ar: "طباعة" },

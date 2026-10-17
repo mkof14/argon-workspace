@@ -38,3 +38,10 @@ jobs:
         run: |
           if [ -z "$CRON_SECRET" ]; then echo "CRON_SECRET is not set in GitHub — translation of agent records runs once a day"; exit 0; fi
           curl -sS --max-time 65 -o /dev/null -w 'translate: %{http_code}\n' -H "authorization: Bearer $CRON_SECRET" "https://workspace.agron1.com/api/ops?job=translate" || true
+      - name: Morning digest at 8:00 in each person's time zone (needs CRON_SECRET)
+        if: ${{ github.event_name == 'schedule' }}
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then echo "CRON_SECRET is not set in GitHub — the digest goes out once a day at 11:00 UTC"; exit 0; fi
+          curl -sS --max-time 65 -o /dev/null -w 'digest: %{http_code}\n' -H "authorization: Bearer $CRON_SECRET" "https://workspace.agron1.com/api/digest?local=1" || true

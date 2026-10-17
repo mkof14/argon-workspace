@@ -10,7 +10,7 @@ import Icon from "./Icon";
 import { useApp } from "./App";
 import { t, tx } from "@/lib/i18n";
 import { trFields, trPending, trText } from "@/lib/tr";
-import { Activity, Comment, DEMO, Rec, isExternal, store } from "@/lib/store";
+import { Activity, Comment, DEMO, Rec, isExternal, store, textSim } from "@/lib/store";
 import { fmt, printHtml, recordMarkdown, saveBlob, slug, tone } from "@/lib/format";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
@@ -73,6 +73,23 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
     store.activity({ recordId: rec.id, limit: 15 }).then(setHist).catch(() => {});
   }, [rec]);
   useEffect(() => { const k = (e: KeyboardEvent) => e.key === "Escape" && onClose(); window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
+
+  // Before a new record is saved: similar records that already exist (same company, same e-mail, close title)
+  const [similar, setSimilar] = useState<Rec[]>([]);
+  useEffect(() => {
+    if (rec) return; const q = title.trim(); const mail = String(data.email || data.contact_email || "").trim().toLowerCase();
+    if (q.length < 3 && !mail) { setSimilar([]); return; }
+    const h = setTimeout(async () => {
+      try {
+        const found = [...(q.length >= 3 ? await store.searchRecords(q.split(/\s+/).slice(0, 3).join(" "), 15) : []), ...(mail ? await store.searchRecords(mail, 5) : [])];
+        const norm = (x: string) => x.toLowerCase().replace(/\(sample\)|[^\p{L}\p{N} ]/gu, " ").replace(/\s+/g, " ").trim();
+        const hit = found.filter((r, i, a) => r.section === section.id && a.findIndex((x) => x.id === r.id) === i
+          && ((q.length >= 3 && (norm(r.title) === norm(q) || textSim(r.title, q) >= 0.6)) || (mail && JSON.stringify(r.data || {}).toLowerCase().includes(mail))));
+        setSimilar(hit.slice(0, 4));
+      } catch { setSimilar([]); }
+    }, 500);
+    return () => clearTimeout(h);
+  }, [title, data.email, data.contact_email, rec, section.id]); // eslint-disable-line
 
   const save = async () => {
     if (!title.trim()) return;
@@ -145,7 +162,13 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
           </div>}
           <div className="fgrid">
             <div className="field wide"><label htmlFor="f-title">{t("title", lang)}</label><input id="f-title" className="input" value={title} readOnly={!canWrite} onChange={(e) => setTitle(e.target.value)} /></div>
+            {!rec && similar.length > 0 && <div className="field wide dup-warn" role="status"><b><Icon n="dup" className="lockico" /> {tx({ en: "Similar records already exist — maybe one of them is what you need:", ru: "Похожие записи уже есть — возможно, нужная среди них:", uk: "Схожі записи вже є — можливо, потрібна серед них:", ar: "توجد سجلات مشابهة — ربما ما تحتاجه بينها:" }, lang)}</b>
+              <div className="toolbar" style={{ gap: 6 }}>{similar.map((r) => <a key={r.id} className="chip" href={`/${section.id.replace(".", "/")}?r=${r.id}`}>{r.title}{r.status ? ` · ${r.status}` : ""}</a>)}</div></div>}
             <div className="field"><label htmlFor="f-status">{t("status", lang)}</label><select id="f-status" className="input" value={status} disabled={!canWrite} onChange={(e) => setStatus(e.target.value)}>{section.statuses.map((s: string) => <option key={s}>{s}</option>)}</select></div>
+            {section.fields.some((f: any) => f.type === "date") && !section.fields.some((f: any) => f.key === "frequency" && f.type === "select") && <div className="field"><label htmlFor="f-repeat">{tx({ en: "Repeat", ru: "Повторять", uk: "Повторювати", ar: "تكرار" }, lang)}</label>
+              <select id="f-repeat" className="input" value={data.repeat || ""} disabled={!canWrite} onChange={(e) => setData((d) => ({ ...d, repeat: e.target.value || undefined }))}>
+                {([["", "No", "Нет", "Ні", "لا"], ["weekly", "Every week", "Каждую неделю", "Щотижня", "كل أسبوع"], ["monthly", "Every month", "Каждый месяц", "Щомісяця", "كل شهر"], ["quarterly", "Every quarter", "Каждый квартал", "Щокварталу", "كل ربع سنة"], ["yearly", "Every year", "Каждый год", "Щороку", "كل سنة"]] as string[][]).map(([v, en, ru, uk, ar]) => <option key={v} value={v}>{tx({ en, ru, uk, ar }, lang)}</option>)}
+              </select>{data.repeat && <span className="hint">{tx({ en: "When this one is completed, the next one is created with the dates moved forward.", ru: "Когда эта будет завершена, следующая создастся сама с перенесёнными датами.", uk: "Коли цю буде завершено, наступна створиться сама з перенесеними датами.", ar: "عند إكمال هذا يُنشأ التالي تلقائياً بتواريخ مُرحّلة." }, lang)}</span>}</div>}
             {section.fields.map((f: any, i: number) => { const g = f.group && f.group !== section.fields[i - 1]?.group ? <div key={`g-${f.group}`} className="fgroup wide">{(GROUPS[f.group] as any)?.[lang]}</div> : null; return g ? [g, field(f)] : field(f); })}
             {gateBlocked && <div className="gate-msg wide">{tx(gate.msg, lang)}</div>}
             {canWrite && section.controlled && me.us_person && <label className="check wide"><input type="checkbox" checked={controlled} onChange={(e) => setControlled(e.target.checked)} /><Icon n="lock" className="lockico" />{t("controlled", lang)}</label>}

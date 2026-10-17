@@ -3,7 +3,8 @@ import { adminClient, currentProfile } from "@/lib/server/supabase";
 import { allSections, defaultRules } from "@/config/workspace.config.mjs";
 import { dueItems, isMine } from "@/lib/insights";
 import { COMPANY, SITE, plainText, renderEmail } from "@/lib/mail";
-import { readState } from "@/lib/server/backup";
+import { readState, saveState } from "@/lib/server/backup";
+import { localHour, localDate } from "@/lib/tz";
 import { localizeRec } from "@/lib/tr";
 
 export const runtime = "nodejs";
@@ -47,7 +48,8 @@ export async function GET(req: Request) {
   await cleanIntake().catch(() => {});
   const st = await readState(adminClient(), "settings").catch(() => null);
   if (st && st.notify?.digest === false) return Response.json({ ok: true, sent: 0, off: true }); // switched off in System → Settings
-  return run(null);
+  // ?local=1 (every 15 minutes): only people for whom it is now 8–11 in the morning; the daily 11:00 UTC run sends to everyone not served yet
+  return run(null, new URL(req.url).searchParams.get("local") === "1");
 }
 export async function POST() {
   const me = await currentProfile();
@@ -55,7 +57,7 @@ export async function POST() {
   return run(me.id);
 }
 
-async function run(only: string | null) {
+async function run(only: string | null, localOnly = false) {
   if (!process.env.SMTP_USER || !process.env.SMTP_PASS) return new Response("Email sending is not configured (SMTP_PASS)", { status: 501 });
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return new Response("Service key missing", { status: 501 });
   const db = adminClient();
@@ -68,10 +70,19 @@ async function run(only: string | null) {
   const transport = nodemailer.createTransport({ host: process.env.SMTP_HOST || "smtp.gmail.com", port: Number(process.env.SMTP_PORT || 465), secure: Number(process.env.SMTP_PORT || 465) === 465, auth: { user: (process.env.SMTP_USER || "").trim(), pass: (process.env.SMTP_PASS || "").replace(/\s+/g, "") } /* Google app passwords are shown with spaces; Gmail needs the 16 letters only */ });
   const from = process.env.SMTP_FROM || process.env.SMTP_USER!;
   let sent = 0; const skipped: string[] = [];
+  // One digest per person per local day, sent around 8:00 in their own time zone
+  const served: Record<string, string> = only ? {} : ((await readState(db, "digest-sent").catch(() => null)) || {});
+  const now = new Date();
 
   for (const p of (profiles || []) as any[]) {
     if (only && p.id !== only) continue;
     if (!INTERNAL.includes(p.role) || !p.email) continue;
+    if (!only) {
+      const tz = p.timezone || "America/New_York"; const day = localDate(now, tz); const h = localHour(now, tz);
+      if (served[p.id] === day) continue;                     // already sent today
+      if (localOnly && (h < 8 || h > 11)) continue;            // not morning there yet
+      served[p.id] = day;
+    }
     // Same visibility the database enforces for this user
     const full = p.role === "owner" || p.role === "admin";
     const readable = new Set(full ? SECS.map((s) => s.id) : rr.filter((r) => r.role === p.role).map((r) => r.section));
@@ -100,6 +111,7 @@ async function run(only: string | null) {
       sent++;
     } catch (e: any) { skipped.push(`${p.email}: ${e?.message || "send failed"}`); }
   }
+  if (!only) await saveState(db, "digest-sent", served).catch(() => {});
   return Response.json({ ok: true, sent, skipped: skipped.length });
 }
 

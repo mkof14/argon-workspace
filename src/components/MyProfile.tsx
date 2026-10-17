@@ -1,4 +1,6 @@
 "use client";
+import { TIMEZONES, city, localTime } from "@/lib/tz";
+import { NotifyCard } from "./Notify";
 import { useState } from "react";
 import Icon from "./Icon";
 import { useApp } from "./App";
@@ -14,9 +16,10 @@ export default function MyProfile() {
   const [name, setName] = useState(me.full_name || "");
   const [title, setTitle] = useState(me.title || "");
   const [phone, setPhone] = useState(me.phone || "");
+  const [tz, setTz] = useState(me.timezone || (typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "") || "America/New_York");
   const [pw, setPw] = useState(""); const [pw2, setPw2] = useState("");
   const c = (ROLE_COLORS as any)[me.role];
-  const save = async () => { try { await store.updateProfile(me.id, { full_name: name.trim(), title: title.trim() || null, phone: phone.trim() || null }); toast(t("saved", lang)); reload(); } catch (e: any) { toast(e.message || "Error", true); } };
+  const save = async () => { try { await store.updateProfile(me.id, { full_name: name.trim(), title: title.trim() || null, phone: phone.trim() || null, timezone: tz || null }); toast(t("saved", lang)); reload(); } catch (e: any) { toast(e.message || "Error", true); } };
   const savePw = async (e: React.FormEvent) => {
     e.preventDefault();
     if (pw.length < 8) { toast(t("pw_short", lang), true); return; }
@@ -39,6 +42,9 @@ export default function MyProfile() {
             <div className="field"><label htmlFor="p-name">{t("name", lang)}</label><input id="p-name" className="input" value={name} onChange={(e) => setName(e.target.value)} /></div>
             <div className="field"><label htmlFor="p-title">{t("job_title", lang)}</label><input id="p-title" className="input" value={title} onChange={(e) => setTitle(e.target.value)} /></div>
             <div className="field"><label htmlFor="p-phone">{t("phone", lang)}</label><input id="p-phone" className="input" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+1 …" /></div>
+            <div className="field"><label htmlFor="p-tz">{tx({ en: "Time zone", ru: "Часовой пояс", uk: "Часовий пояс", ar: "المنطقة الزمنية" }, lang)}</label>
+              <select id="p-tz" className="input" value={tz} onChange={(e) => setTz(e.target.value)}>{Array.from(new Set([tz, ...TIMEZONES])).filter(Boolean).map((z) => <option key={z} value={z}>{city(z)} · {localTime(new Date(), z)}</option>)}</select>
+              <span className="hint">{tx({ en: "The morning digest comes at about 8:00 your time; colleagues see your local time.", ru: "Утренняя сводка приходит около 8:00 по вашему времени; коллеги видят ваше местное время.", uk: "Ранкове зведення надходить близько 8:00 за вашим часом; колеги бачать ваш місцевий час.", ar: "يصل ملخص الصباح نحو الساعة 8:00 بتوقيتك؛ ويرى زملاؤك وقتك المحلي." }, lang)}</span></div>
             <div><button className="btn primary" onClick={save}>{t("save", lang)}</button></div>
             <p className="faint" style={{ margin: 0, fontSize: 14 }}><Icon n="mail" className="lockico" /> {t("company_sig", lang)}</p>
           </div></div>
@@ -52,6 +58,7 @@ export default function MyProfile() {
           </form></div>
       </section>
       <InstallApp />
+      <NotifyCard />
       {!["partner", "vendor", "investor"].includes(me.role) && <CalendarLink />}
     </div>
   );
