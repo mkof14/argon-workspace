@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import Icon from "./Icon";
 import { useApp } from "./App";
 import { t, tx } from "@/lib/i18n";
+import { trFields, trPending, trText } from "@/lib/tr";
 import { Activity, Comment, DEMO, Rec, isExternal, store } from "@/lib/store";
 import { fmt, printHtml, recordMarkdown, saveBlob, slug, tone } from "@/lib/format";
 import { marked } from "marked";
@@ -46,6 +47,13 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
   const [hist, setHist] = useState<Activity[]>([]);
   const [cmt, setCmt] = useState("");
   const [busy, setBusy] = useState(false);
+  // Automatic translation: the record is shown in the reader's language; one click shows the original
+  const trd: any = (rec as any)?._o ? rec : null;
+  const [orig, setOrig] = useState(false);
+  const flip = () => { const to = orig ? (rec as any)._l : (rec as any)._o; setTitle(to.title); setData({ ...to.data }); setOrig(!orig); };
+  const LN: Record<string, Record<string, string>> = { en: { en: "English", ru: "Russian", uk: "Ukrainian", ar: "Arabic" }, ru: { en: "английского", ru: "русского", uk: "украинского", ar: "арабского" }, uk: { en: "англійської", ru: "російської", uk: "української", ar: "арабської" }, ar: { en: "الإنجليزية", ru: "الروسية", uk: "الأوكرانية", ar: "العربية" } };
+  const srcName = (trd?._src && LN[lang]?.[trd._src]) || "";
+  const cmtText = (c: Comment) => (orig ? c.body : trText(c.body, (rec as any)?.data?._tr?.c?.[c.id], lang));
   const [confirmDel, setConfirmDel] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
   const gate = section.gate;
@@ -55,7 +63,13 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
   useEffect(() => { if (rec?.controlled && !DEMO) fetch("/api/log", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ record_id: rec.id }) }).catch(() => {}); }, [rec?.id]); // eslint-disable-line
   useEffect(() => {
     if (!rec) return;
-    store.comments(rec.id).then(setComments).catch(() => {});
+    store.comments(rec.id).then((cs) => {
+      setComments(cs);
+      // Written by an agent, by e-mail intake or before translation was on: translate it now (in the background)
+      if (DEMO) return; const o = store.original(rec);
+      const need = Object.keys(trPending(trFields(section.fields, o.title, o.data || {}), o.data?._tr)).length || cs.some((c) => o.data?._tr?.c?.[c.id] === undefined && /\p{L}{2,}/u.test(c.body));
+      if (need) fetch("/api/translate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rec.id }) }).catch(() => {});
+    }).catch(() => {});
     store.activity({ recordId: rec.id, limit: 15 }).then(setHist).catch(() => {});
   }, [rec]);
   useEffect(() => { const k = (e: KeyboardEvent) => e.key === "Escape" && onClose(); window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
@@ -112,7 +126,8 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
           <div style={{ minWidth: 0, flex: 1 }}>
             <div className="eyebrow">{tx(section.label, lang)}</div>
             <h2>{rec ? title : t("new", lang)}</h2>
-            <div className="toolbar">{status && <span className={`chip dot ${tone(status)}`}>{status}</span>}{controlled && <span className="chip c-warn"><Icon n="lock" className="lockico" />{t("controlled_short", lang)}</span>}{data.sample && <span className="chip c-vio">{t("sample", lang)}</span>}</div>
+            <div className="toolbar">{status && <span className={`chip dot ${tone(status)}`}>{status}</span>}{controlled && <span className="chip c-warn"><Icon n="lock" className="lockico" />{t("controlled_short", lang)}</span>}{data.sample && <span className="chip c-vio">{t("sample", lang)}</span>}
+              {trd && <button className="chip tr-chip" onClick={flip} title={orig ? t("tr_orig_note", lang) : t("tr_from", lang).replace("{l}", srcName)}><Icon n="globe" className="lockico" />{orig ? t("tr_back", lang) : `${srcName ? t("tr_from", lang).replace("{l}", srcName) : t("tr_auto", lang)} · ${t("tr_orig", lang)}`}</button>}</div>
           </div>
           <button className="iconbtn" onClick={onClose} aria-label={t("close", lang)}><Icon n="x" /></button>
         </div>
@@ -152,7 +167,7 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
           {section.id !== "mail.outbox" && <Attachments section={section} rec={rec} canWrite={canWrite} title={title} />}
           {rec && <div className="thread">
             <div className="eyebrow">{t("comments", lang)}</div>
-            {comments.map((c) => <div key={c.id} className="cmt"><small>{(c.created_at || "").slice(0, 16).replace("T", " ")}</small><div style={{ whiteSpace: "pre-wrap" }}>{c.body}</div></div>)}
+            {comments.map((c) => <div key={c.id} className="cmt"><small>{(c.created_at || "").slice(0, 16).replace("T", " ")}</small><div style={{ whiteSpace: "pre-wrap" }}>{cmtText(c)}</div>{!orig && cmtText(c) !== c.body && <small className="faint"><Icon n="globe" className="lockico" /> {t("tr_auto", lang)}</small>}</div>)}
             <div className="toolbar" style={{ flexWrap: "nowrap" }}><input className="input" value={cmt} placeholder={t("add_comment_at", lang)} onChange={(e) => setCmt(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addCmt()} aria-label={t("add_comment", lang)} /><button className="btn" onClick={addCmt}>{t("send", lang)}</button></div>
           </div>}
           {rec && hist.length > 0 && <div className="thread">

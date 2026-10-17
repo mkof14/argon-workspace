@@ -1013,3 +1013,7 @@ main.page{min-height:calc(100dvh - 90px);align-content:start}
 .hb-toc button{gap:6px}
 .guide-row.hb{scroll-margin-top:80px}
 .guides.hb-list{grid-template-columns:1fr}
+
+/* Automatic translation */
+.chip.tr-chip{cursor:pointer;border-style:dashed;background:transparent}
+.chip.tr-chip:hover{border-color:var(--dc,var(--ink-3))}

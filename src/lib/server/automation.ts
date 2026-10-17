@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { readState, saveState } from "./backup";
 import { sendMail } from "./mailer";
+import { localizeMail } from "./translate";
 import { renderEmail, SITE } from "@/lib/mail";
 import { fileRecord, readInbox } from "./mailIntake";
 import { draftEmail } from "./drafts";
@@ -41,10 +42,10 @@ async function addQueue(db: any, items: QueueItem[]) {
 }
 
 /* ---------------- Context ---------------- */
-type P = { id: string; email: string; full_name: string; role: string; us_person: boolean };
+type P = { id: string; email: string; full_name: string; role: string; us_person: boolean; lang?: string };
 type Ctx = { db: any; settings: Settings; profiles: P[]; access: { section: string; role: string }[]; log: LogEntry[]; queue: QueueItem[]; mail: Map<string, { p: P; lines: string[] }>; fired: Record<string, string>; known: Set<string> };
 async function context(db: any): Promise<Ctx> {
-  const [settings, { data: profiles }, { data: access }, fired, queue] = await Promise.all([getSettings(db), db.from("profiles").select("id,email,full_name,role,us_person"), db.from("section_access").select("section,role"), readState(db, "fired").catch(() => null), getQueue(db)]);
+  const [settings, { data: profiles }, { data: access }, fired, queue] = await Promise.all([getSettings(db), db.from("profiles").select("id,email,full_name,role,lang,us_person"), db.from("section_access").select("section,role"), readState(db, "fired").catch(() => null), getQueue(db)]);
   // Proposals already waiting or rejected are not proposed again
   const known = new Set(queue.filter((q) => q.status === "pending" || q.status === "rejected").map((q) => `${q.record_id}|${q.title}`));
   return { db, settings, profiles: (profiles || []).filter((p: P) => p.email && p.role !== "pending"), access: access || [], log: [], queue: [], mail: new Map(), fired: fired || {}, known };
@@ -67,11 +68,16 @@ function recipients(c: Ctx, to: string, rec: any): P[] {
   return list.filter((p) => canRead(c, p, rec.section) && (!rec.controlled || p.us_person));
 }
 function tell(c: Ctx, people: P[], line: string) { for (const p of people) { const e = c.mail.get(p.email) || { p, lines: [] }; if (!e.lines.includes(line)) e.lines.push(line); c.mail.set(p.email, e); } }
+/** A system e-mail in the reader's language (English stays as written; other languages are translated and cached). */
+async function inLang(c: Ctx, p: P, m: { subject: string; html: string; text: string }) {
+  return c.settings.translate?.emails === false ? m : localizeMail(c.db, p.lang, m);
+}
 async function flushMail(c: Ctx, subject: string) {
   let sent = 0;
   for (const { p, lines } of c.mail.values()) {
     const html = `<p style="font-size:15px;line-height:1.6;color:#2A3440">Hello${p.full_name ? ` ${esc(p.full_name.split(" ")[0])}` : ""}, the Workspace automation has news for you:</p><ul style="padding-left:18px;font-size:15px;line-height:1.6;color:#2A3440">${lines.map((l) => `<li>${l}</li>`).join("")}</ul><p style="font-size:13px;color:#7A8796">Rules and agents: Administration → System → Automation.</p>`;
-    const err = await sendMail({ to: p.email, subject, html: renderEmail({ subject, heading: subject, body: "", html, lang: "en", sender: null }), text: lines.map((l) => "- " + l.replace(/<[^>]+>/g, "")).join("\n") });
+    const m = await inLang(c, p, { subject, html, text: lines.map((l) => "- " + l.replace(/<[^>]+>/g, "")).join("\n") });
+    const err = await sendMail({ to: p.email, subject: m.subject, html: renderEmail({ subject: m.subject, heading: m.subject, body: "", html: m.html, lang: (p.lang as any) || "en", sender: null }), text: m.text });
     if (!err) sent++; else c.log.push({ at: new Date().toISOString(), agent: "system", kind: "error", text: `Email to ${p.email}: ${err}` });
   }
   c.mail.clear(); return sent;
@@ -306,7 +312,10 @@ async function briefAgent(c: Ctx, recsAll: any[], force: boolean) {
   }
   const html = `<table style="border-collapse:collapse;width:100%;font-size:14px;margin:6px 0 14px">${rows.map(([k, v]) => `<tr><td style="border:1px solid #D5DCE4;padding:6px 8px;color:#5B6875;width:44%">${esc(k)}</td><td style="border:1px solid #D5DCE4;padding:6px 8px;color:#0E141A"><b>${esc(v)}</b></td></tr>`).join("")}</table>${ai ? `<p style="font-size:14px;color:#5B6875;margin:12px 0 4px">AI conclusions</p><div style="font-size:15px;line-height:1.6;color:#2A3440;white-space:pre-line">${esc(ai)}</div>` : ""}<p style="font-size:13px;color:#7A8796">US-persons-only records are not included. <a href="${SITE}/today">Open My day</a></p>`;
   const subject = `AGRON weekly brief — ${today()}`; let sent = 0;
-  for (const p of c.profiles.filter((x) => c.settings.notify.brief_roles.includes(x.role))) if (!(await sendMail({ to: p.email, subject, html: renderEmail({ subject, heading: subject, body: "", html, lang: "en", sender: null }), text: rows.map(([k, v]) => `${k}: ${v}`).join("\n") + (ai ? `\n\n${ai}` : "") }))) sent++;
+  for (const p of c.profiles.filter((x) => c.settings.notify.brief_roles.includes(x.role))) {
+    const m = await inLang(c, p, { subject, html, text: rows.map(([k, v]) => `${k}: ${v}`).join("\n") + (ai ? `\n\n${ai}` : "") });
+    if (!(await sendMail({ to: p.email, subject: m.subject, html: renderEmail({ subject: m.subject, heading: m.subject, body: "", html: m.html, lang: (p.lang as any) || "en", sender: null }), text: m.text }))) sent++;
+  }
   await saveState(c.db, "brief", { at: new Date().toISOString(), rows, ai, sent });
   return `sent to ${sent}`;
 }

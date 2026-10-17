@@ -2,6 +2,7 @@
 import { allSections, defaultRules, ROLES } from "@/config/workspace.config.mjs";
 import type * as DemoMod from "./demo";
 import { SEED_FAQ, l2, loadLearnLang } from "@/config/learn";
+import { localizeRec, unlocalize, type Shown } from "./tr";
 
 export type Rec = {
   id: string; section: string; title: string; status: string | null; data: Record<string, any>;
@@ -71,6 +72,21 @@ function automate(ev: { id: string; kind: "created" | "status"; from?: string | 
   try { fetch("/api/automation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "event", ...ev }), keepalive: true }).catch(() => {}); } catch {}
 }
 
+/* ---------------- Automatic translation ---------------- */
+// Records are shown in the reader's language; what they did not change is saved back in its original wording.
+let LANG = "en";
+const SHOWN = new Map<string, { o: Shown; l: Shown }>();
+function loc<T extends Rec>(r: T): T {
+  if (!r?.data?._tr) return r;
+  const x = localizeRec(r, LANG); if (!x) return r;
+  SHOWN.set(r.id, { o: x._o, l: x._l }); return x as unknown as T;
+}
+/** Asks the server to translate a record's new texts (in the background; never blocks saving). */
+function translateLater(body: Record<string, string>) {
+  if (DEMO) return;
+  try { fetch("/api/translate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), keepalive: true }).catch(() => {}); } catch {}
+}
+
 /* ---------------- Public API ---------------- */
 export const store = {
   async me(): Promise<Profile | null> {
@@ -80,22 +96,31 @@ export const store = {
     const { data } = await sb().from("profiles").select("*").eq("id", u.user.id).single();
     return data as Profile;
   },
+  setLang(l: string) { LANG = l || "en"; },
+  lang() { return LANG; },
+  /** The record exactly as written (no translation). */
+  original<T extends Rec>(r: T): T { const m = (r as any)._o || SHOWN.get(r.id)?.o; return m ? { ...r, title: m.title, data: m.data, _o: undefined, _l: undefined } : r; },
   demoRole(): string { return DEMO ? demoLoad().role : ""; },
   setDemoRole(role: string) { const db = demoLoad(); db.role = role; demoSave(db); },
   resetDemo() { try { localStorage.removeItem(DKEY); } catch {} },
 
   async list(section: string): Promise<Rec[]> {
-    if (DEMO) { const db = demoLoad(); return db.records.filter((r) => r.section === section && demoVisible(db, r)).sort((a, b) => (b.updated_at || "").localeCompare(a.updated_at || "")); }
+    if (DEMO) { const db = demoLoad(); return db.records.filter((r) => r.section === section && demoVisible(db, r)).sort((a, b) => (b.updated_at || "").localeCompare(a.updated_at || "")).map(loc); }
     const { data, error } = await sb().from("records").select("*").eq("section", section).order("updated_at", { ascending: false }).limit(2000);
-    if (error) throw error; return (data || []) as Rec[];
+    if (error) throw error; return ((data || []) as Rec[]).map(loc);
   },
   async listMany(sections: string[]): Promise<Rec[]> {
-    if (DEMO) { const db = demoLoad(); return db.records.filter((r) => sections.includes(r.section) && demoVisible(db, r)); }
+    if (DEMO) { const db = demoLoad(); return db.records.filter((r) => sections.includes(r.section) && demoVisible(db, r)).map(loc); }
     const { data } = await sb().from("records").select("*").in("section", sections).limit(3000);
-    return (data || []) as Rec[];
+    return ((data || []) as Rec[]).map(loc);
   },
-  async save(r: Partial<Rec> & { section: string; title: string }): Promise<Rec> {
+  async save(r0: Partial<Rec> & { section: string; title: string }): Promise<Rec> {
     const now = new Date().toISOString();
+    // Texts shown translated and left untouched keep their original wording
+    const meta = (r0 as any)._o ? { o: (r0 as any)._o as Shown, l: (r0 as any)._l as Shown } : r0.id ? SHOWN.get(r0.id) : undefined;
+    const { _o, _l, _src, ...clean } = r0 as any;
+    const back = meta ? unlocalize(clean.title, clean.data || {}, meta.o, meta.l) : null;
+    const r: Partial<Rec> & { section: string; title: string } = back ? { ...clean, title: back.title, data: back.data } : clean;
     if (DEMO) {
       const db = demoLoad(); const me = demoMe(db);
       if (r.id) {
@@ -114,11 +139,12 @@ export const store = {
       const { data, error } = await sb().from("records").update(body).eq("id", r.id).select().single();
       if (error) throw error;
       if ((before?.status || "") !== (data.status || "")) automate({ id: data.id, kind: "status", from: before?.status ?? null });
-      return data as Rec;
+      SHOWN.delete(data.id); translateLater({ id: data.id });
+      return loc(data as Rec);
     }
     const { data: u } = await sb().auth.getUser();
     const { data, error } = await sb().from("records").insert({ ...body, created_by: u?.user?.id }).select().single();
-    if (error) throw error; automate({ id: data.id, kind: "created" }); return data as Rec;
+    if (error) throw error; automate({ id: data.id, kind: "created" }); translateLater({ id: data.id }); return data as Rec;
   },
   async remove(id: string) {
     if (DEMO) { const db = demoLoad(); const r = db.records.find((x) => x.id === id); db.records = db.records.filter((x) => x.id !== id); if (r) db.activity.unshift({ id: Date.now(), record_id: id, section: r.section, actor: demoMe(db).id, action: "deleted", detail: { title: r.title }, created_at: new Date().toISOString() }); demoSave(db); return; }
@@ -132,6 +158,7 @@ export const store = {
     if (DEMO) { const db = demoLoad(); db.comments.push({ id: uid(), record_id: recordId, author: demoMe(db).id, body, created_at: new Date().toISOString() }); demoSave(db); return; }
     const { data: u } = await sb().auth.getUser();
     const { error } = await sb().from("comments").insert({ record_id: recordId, body, author: u?.user?.id }); if (error) throw error;
+    translateLater({ id: recordId });
   },
   async activity(opts: { recordId?: string; limit?: number; log?: boolean } = {}): Promise<Activity[]> {
     if (DEMO) { const db = demoLoad(); const acc = accessFor(demoMe(db).role, db.rules); return db.activity.filter((a) => (!opts.recordId || a.record_id === opts.recordId) && acc.read.has(a.section)).slice(0, opts.limit || 20); }
@@ -151,10 +178,10 @@ export const store = {
   /** Server-side search across every record the user may see (titles and field values). */
   async searchRecords(q: string, n = 25): Promise<Rec[]> {
     if (!q.trim()) return [];
-    if (DEMO) { const db = demoLoad(); const s = q.toLowerCase(); return db.records.filter((r) => demoVisible(db, r) && (r.title + " " + JSON.stringify(r.data)).toLowerCase().includes(s)).slice(0, n); }
+    if (DEMO) { const db = demoLoad(); const s = q.toLowerCase(); return db.records.filter((r) => demoVisible(db, r) && (r.title + " " + JSON.stringify(r.data)).toLowerCase().includes(s)).slice(0, n).map(loc); }
     const { data, error } = await sb().rpc("search_records", { q, n });
-    if (!error) return (data || []) as Rec[];
-    const { data: d2 } = await sb().from("records").select("*").ilike("title", `%${q}%`).limit(n); return (d2 || []) as Rec[];
+    if (!error) return ((data || []) as Rec[]).map(loc);
+    const { data: d2 } = await sb().from("records").select("*").ilike("title", `%${q}%`).limit(n); return ((d2 || []) as Rec[]).map(loc);
   },
   async profiles(): Promise<Profile[]> {
     if (DEMO) return demoLoad().profiles;
@@ -241,13 +268,15 @@ export const store = {
     if (seed.length) { const { error } = await sb().from("faq").insert(seed); if (!error) rows = await get(); }
     return rows as Faq[];
   },
-  async faqSave(f: Partial<Faq> & { question: string; answer: string; lang: string }) {
+  async faqSave(f: Partial<Faq> & { question: string; answer: string; lang: string }, opts: { translate?: boolean } = {}) {
     if (DEMO) await loadLearnLang("uk");
     if (DEMO) { const db = demoLoad(); const list = demoFaq(db); if (f.id) db.faq = list.map((x) => (x.id === f.id ? { ...x, ...f } as Faq : x)); else db.faq = [{ id: uid(), section: null, verified: false, hits: 0, source: "manual", ...f } as Faq, ...list]; demoSave(db); return; }
     const body: any = { question: f.question, answer: f.answer, lang: f.lang, section: f.section ?? null, source: f.source || "manual" };
     if (f.verified !== undefined) body.verified = f.verified;
-    const { error } = f.id ? await sb().from("faq").update({ ...body, updated_at: new Date().toISOString() }).eq("id", f.id) : await sb().from("faq").insert(body);
+    const { data, error } = f.id ? await sb().from("faq").update({ ...body, updated_at: new Date().toISOString() }).eq("id", f.id).select("id").single() : await sb().from("faq").insert(body).select("id").single();
     if (error) throw error;
+    // Only the question or the answer changed → the other three languages follow
+    if (data?.id && opts.translate !== false && f.source !== "seed") translateLater({ faq: data.id });
   },
   async faqDelete(id: string) {
     if (DEMO) await loadLearnLang("uk");

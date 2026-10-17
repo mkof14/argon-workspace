@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import Icon from "./Icon";
+import { useTr } from "@/lib/useTr";
 import { useApp } from "./App";
 import { tx, type Lang } from "@/lib/i18n";
 import { DEMO } from "@/lib/sb";
@@ -64,6 +65,8 @@ const KIND: Record<string, string> = { run: "c-info", action: "c-ok", queued: "c
 export default function Automation({ a }: { a: ReturnType<typeof useAuto> }) {
   const { lang, toast } = useApp(); const T = (x: T4) => tx(x, lang as Lang);
   const { s, setS, load, call } = a;
+  // Agent proposals and log lines are written in English; they are shown in the reader's language
+  const tr = useTr([...(s?.queue || []).slice(0, 80).flatMap((q: any) => [q.title, q.detail]), ...(s?.log || []).slice(0, 60).map((l: any) => l.text)], lang);
   const [busy, setBusy] = useState("");
   const [hist, setHist] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, { subject: string; body: string }>>({}); // emails opened for reading or editing
@@ -115,8 +118,8 @@ export default function Automation({ a }: { a: ReturnType<typeof useAuto> }) {
       {(hist ? [...pending, ...done] : pending).length ? <div className="feed">{(hist ? [...pending, ...done] : pending).slice(0, 80).map((q: any) => (
         <div key={q.id} className="feed-row auto-q">
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div className="toolbar" style={{ gap: 8 }}><span className="chip">{T(AGENT_INFO[q.agent as AgentId]?.name || L(q.agent, q.agent, q.agent, q.agent))}</span><b style={{ overflowWrap: "anywhere" }}>{q.title}</b></div>
-            <div className="faint" style={{ fontSize: 13 }}>{q.detail} · {q.at.slice(0, 16).replace("T", " ")}{q.section && q.record_id ? <> · <a href={`/${q.section.replace(".", "/")}?r=${q.record_id}`}>{secLabel(q.section)}</a></> : null}</div>
+            <div className="toolbar" style={{ gap: 8 }}><span className="chip">{T(AGENT_INFO[q.agent as AgentId]?.name || L(q.agent, q.agent, q.agent, q.agent))}</span><b style={{ overflowWrap: "anywhere" }}>{tr(q.title)}</b></div>
+            <div className="faint" style={{ fontSize: 13 }}>{tr(q.detail)} · {q.at.slice(0, 16).replace("T", " ")}{q.section && q.record_id ? <> · <a href={`/${q.section.replace(".", "/")}?r=${q.record_id}`}>{secLabel(q.section)}</a></> : null}</div>
             {q.status === "pending" && q.action?.type === "email" && q.action.body && (drafts[q.id]
               ? <div className="auto-act" style={{ marginTop: 8 }}>
                   <div className="faint" style={{ fontSize: 12.5 }}>{T(L("To", "Кому", "Кому", "إلى"))}: {q.action.to}</div>
@@ -153,7 +156,7 @@ export default function Automation({ a }: { a: ReturnType<typeof useAuto> }) {
         <select className="input" style={{ width: "auto", marginInlineStart: "auto", padding: "6px 10px" }} value={agentF} onChange={(e) => setAgentF(e.target.value)}>
           <option value="">{T(L("All agents", "Все агенты", "Усі агенти", "كل الوكلاء"))}</option>{AGENTS.map((g) => <option key={g} value={g}>{T(AGENT_INFO[g].name)}</option>)}</select></div>
       {log.length ? <div className="feed">{log.slice(0, 80).map((l: any, i: number) => (
-        <div key={i} className="feed-row"><span className={`chip ${KIND[l.kind] || ""}`}>{l.kind}</span><span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>{l.section && l.record ? <a href={`/${l.section.replace(".", "/")}?r=${l.record}`}>{l.text}</a> : l.text}</span><small className="faint mono">{l.agent} · {l.at.slice(5, 16).replace("T", " ")}</small></div>))}</div>
+        <div key={i} className="feed-row"><span className={`chip ${KIND[l.kind] || ""}`}>{l.kind}</span><span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>{l.section && l.record ? <a href={`/${l.section.replace(".", "/")}?r=${l.record}`}>{tr(l.text)}</a> : tr(l.text)}</span><small className="faint mono">{l.agent} · {l.at.slice(5, 16).replace("T", " ")}</small></div>))}</div>
         : <div className="empty">{T(L("No entries yet.", "Записей пока нет.", "Записів поки немає.", "لا توجد إدخالات بعد."))}</div>}
     </section>
 

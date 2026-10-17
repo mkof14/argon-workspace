@@ -9,6 +9,11 @@ export type Tx = { en: string; ru: string; uk: string; ar: string };
 export const tx = (o: Partial<Tx> | undefined, lang: Lang) => (o ? o[lang] || o.en || "" : "");
 
 const S: Record<string, Tx> = {
+  tr_from: { en: "Translated automatically from {l}", ru: "Переведено автоматически с {l}", uk: "Перекладено автоматично з {l}", ar: "تُرجم تلقائياً من {l}" },
+  tr_auto: { en: "Translated automatically", ru: "Переведено автоматически", uk: "Перекладено автоматично", ar: "تُرجم تلقائياً" },
+  tr_orig: { en: "Show original", ru: "Показать оригинал", uk: "Показати оригінал", ar: "عرض الأصل" },
+  tr_back: { en: "Show translation", ru: "Показать перевод", uk: "Показати переклад", ar: "عرض الترجمة" },
+  tr_orig_note: { en: "Original text. Saving keeps your changes as written.", ru: "Оригинальный текст. При сохранении ваши правки останутся как написаны.", uk: "Оригінальний текст. Під час збереження ваші правки залишаться як написані.", ar: "النص الأصلي. عند الحفظ تبقى تعديلاتك كما كتبتها." },
   mk_ideas_go: { en: "Suggest posts", ru: "Предложить посты", uk: "Запропонувати дописи", ar: "اقترح منشورات" },
   mk_studio: { en: "AI marketing studio", ru: "ИИ-студия маркетинга", uk: "ШІ-студія маркетингу", ar: "استوديو التسويق بالذكاء الاصطناعي" },
   mk_studio_p: { en: "The buttons prepare drafts from the Brand center and company documents. Nothing goes public without the compliance check and approval.", ru: "Кнопки готовят черновики на основе Бренд-центра и документов компании. Ничего не уходит наружу без проверки комплаенса и согласования.", uk: "Кнопки готують чернетки на основі Бренд-центру та документів компанії. Нічого не виходить назовні без перевірки комплаєнсу та погодження.", ar: "تُعدّ الأزرار مسودات من مركز العلامة التجارية ومستندات الشركة. لا يُنشر شيء دون فحص الامتثال والموافقة." },

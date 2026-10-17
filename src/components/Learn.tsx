@@ -52,7 +52,7 @@ export default function Learn() {
     try { await store.faqSave({ ...(edit as any), question: edit.question.trim(), answer: edit.answer.trim(), lang: edit.lang || fl }); toast(t("saved", lang)); setEdit(null); loadFaq(); }
     catch (e: any) { toast(e.message || "Error", true); }
   };
-  const toggleVerified = async (f: Faq) => { try { await store.faqSave({ ...f, verified: !f.verified }); loadFaq(); } catch (e: any) { toast(e.message, true); } };
+  const toggleVerified = async (f: Faq) => { try { await store.faqSave({ ...f, verified: !f.verified }, { translate: false }); loadFaq(); } catch (e: any) { toast(e.message, true); } };
   const del = async (f: Faq) => { try { await store.faqDelete(f.id); loadFaq(); } catch (e: any) { toast(e.message, true); } };
 
   return (
@@ -62,7 +62,7 @@ export default function Learn() {
         <div style={{ position: "relative", zIndex: 1, minWidth: 0 }}><div className="eyebrow" style={{ color: "var(--dc)" }}>{t("workspace", lang)}</div><h2>{t("learn", lang)}</h2>
           <div className="sec-desc">{t("learn_sub", lang)}</div></div>
         <div className="stats">
-          <button className={`stat ${tab === "how" ? "on" : ""}`} onClick={() => setTab("how")}><b style={{ color: "var(--dc)" }}>{hb.length || 16}</b><small>{HOW[lang] || HOW.en}</small></button>
+          <button className={`stat ${tab === "how" ? "on" : ""}`} onClick={() => setTab("how")}><b style={{ color: "var(--dc)" }}>{hb.length || 17}</b><small>{HOW[lang] || HOW.en}</small></button>
           <button className={`stat ${tab === "guide" ? "on" : ""}`} onClick={() => setTab("guide")}><b style={{ color: "var(--dc)" }}>{depts.reduce((a: number, d: any) => a + d.secs.length, 0)}</b><small>{t("guide", lang)}</small></button>
           <button className={`stat ${tab === "terms" ? "on" : ""}`} onClick={() => setTab("terms")}><b style={{ color: "var(--dc)" }}>{Object.values(GLOSSARY).reduce((a, x) => a + x.length, 0)}</b><small>{t("terms", lang)}</small></button>
           <button className={`stat ${tab === "faq" ? "on" : ""}`} onClick={() => setTab("faq")}><b style={{ color: "var(--dc)" }}>{faq.filter((f) => f.lang === fl).length}</b><small>FAQ</small></button>

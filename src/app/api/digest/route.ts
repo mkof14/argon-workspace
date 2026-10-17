@@ -4,6 +4,7 @@ import { allSections, defaultRules } from "@/config/workspace.config.mjs";
 import { dueItems, isMine } from "@/lib/insights";
 import { COMPANY, SITE, plainText, renderEmail } from "@/lib/mail";
 import { readState } from "@/lib/server/backup";
+import { localizeRec } from "@/lib/tr";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,8 +12,29 @@ export const dynamic = "force-dynamic";
 const INTERNAL = ["owner", "admin", "management", "engineering", "operations", "finance", "sales", "marketing", "hr", "legal", "security"];
 const LEADS = ["owner", "admin", "management"];
 const SECS: any[] = allSections() as any[];
-const label = (id: string) => SECS.find((s) => s.id === id)?.label?.en || id;
-const when = (d: number) => (d < 0 ? `${-d} day${d === -1 ? "" : "s"} overdue` : d === 0 ? "today" : d === 1 ? "tomorrow" : `in ${d} days`);
+type Lg = "en" | "ru" | "uk" | "ar";
+const LG = (l: any): Lg => (["en", "ru", "uk", "ar"].includes(l) ? l : "en");
+const label = (id: string, l: Lg) => { const x = SECS.find((s) => s.id === id)?.label; return x?.[l] || x?.en || id; };
+// Russian and Ukrainian plural forms: 1 день, 2 дня, 5 дней
+const pl = (n: number, one: string, few: string, many: string) => { const a = Math.abs(n) % 100, b = a % 10; return a > 10 && a < 20 ? many : b === 1 ? one : b >= 2 && b <= 4 ? few : many; };
+const when = (d: number, l: Lg) => {
+  const n = Math.abs(d);
+  if (l === "ru") return d < 0 ? `просрочено на ${n} ${pl(n, "день", "дня", "дней")}` : d === 0 ? "сегодня" : d === 1 ? "завтра" : `через ${n} ${pl(n, "день", "дня", "дней")}`;
+  if (l === "uk") return d < 0 ? `прострочено на ${n} ${pl(n, "день", "дні", "днів")}` : d === 0 ? "сьогодні" : d === 1 ? "завтра" : `через ${n} ${pl(n, "день", "дні", "днів")}`;
+  if (l === "ar") return d < 0 ? `متأخر ${n} يوم` : d === 0 ? "اليوم" : d === 1 ? "غداً" : `خلال ${n} أيام`;
+  return d < 0 ? `${n} day${n === 1 ? "" : "s"} overdue` : d === 0 ? "today" : d === 1 ? "tomorrow" : `in ${n} days`;
+};
+const TXT: Record<string, Record<Lg, string>> = {
+  hello: { en: "Good morning{n}. Here is what needs attention today.", ru: "Доброе утро{n}. Вот что требует внимания сегодня.", uk: "Доброго ранку{n}. Ось що потребує уваги сьогодні.", ar: "صباح الخير{n}. هذا ما يحتاج انتباهك اليوم." },
+  mine: { en: "Your deadlines and tasks", ru: "Ваши сроки и задачи", uk: "Ваші строки та задачі", ar: "مواعيدك ومهامك" },
+  none: { en: "Nothing due in the next 7 days.", ru: "В ближайшие 7 дней сроков нет.", uk: "Найближчі 7 днів строків немає.", ar: "لا شيء مستحق خلال الأيام السبعة القادمة." },
+  late: { en: "Overdue across the company", ru: "Просрочено по компании", uk: "Прострочено в компанії", ar: "المتأخرات في الشركة" },
+  soon: { en: "Due in the next 3 days", ru: "Сроки в ближайшие 3 дня", uk: "Строки в найближчі 3 дні", ar: "مستحق خلال 3 أيام" },
+  subj: { en: "AGRON Workspace · {k} for today", ru: "AGRON Workspace · на сегодня: {k}", uk: "AGRON Workspace · на сьогодні: {k}", ar: "AGRON Workspace · لليوم: {k}" },
+  head: { en: "Your morning digest", ru: "Ваша утренняя сводка", uk: "Ваше ранкове зведення", ar: "ملخصك الصباحي" },
+  open: { en: "Open AGRON Workspace", ru: "Открыть AGRON Workspace", uk: "Відкрити AGRON Workspace", ar: "افتح AGRON Workspace" },
+};
+const items = (n: number, l: Lg) => (l === "ru" ? `${n} ${pl(n, "пункт", "пункта", "пунктов")}` : l === "uk" ? `${n} ${pl(n, "пункт", "пункти", "пунктів")}` : l === "ar" ? `${n} بنود` : `${n} item${n === 1 ? "" : "s"}`);
 
 /**
  * Morning digest. Vercel Cron calls GET daily (Authorization: Bearer CRON_SECRET) and every internal user
@@ -53,26 +75,28 @@ async function run(only: string | null) {
     // Same visibility the database enforces for this user
     const full = p.role === "owner" || p.role === "admin";
     const readable = new Set(full ? SECS.map((s) => s.id) : rr.filter((r) => r.role === p.role).map((r) => r.section));
-    const visible = (recs || []).filter((r: any) => readable.has(r.section) && (!r.controlled || p.us_person));
+    const l = LG(p.lang);
+    // Titles in the reader's language when a translation exists
+    const visible = (recs || []).filter((r: any) => readable.has(r.section) && (!r.controlled || p.us_person)).map((r: any) => localizeRec(r, l) || r);
     const due = dueItems(visible as any, 7);
     const mine = due.filter((x) => isMine(x.r, p)).slice(0, 15);
     const company = LEADS.includes(p.role) ? due.filter((x) => x.d < 0 && !isMine(x.r, p)).slice(0, 12) : [];
     const soon = LEADS.includes(p.role) ? due.filter((x) => x.d >= 0 && x.d <= 3 && !isMine(x.r, p)).slice(0, 8) : [];
     if (!mine.length && !company.length && !soon.length && !only) { skipped.push(p.email); continue; }
 
-    const line = (x: any) => `- **${x.r.title}** — ${label(x.r.section)}, ${when(x.d)}${x.r.data?.owner && !isMine(x.r, p) ? ` (${x.r.data.owner})` : ""}`;
+    const line = (x: any) => `- **${x.r.title}** — ${label(x.r.section, l)}, ${when(x.d, l)}${x.r.data?.owner && !isMine(x.r, p) ? ` (${x.r.data.owner})` : ""}`;
     const parts = [
-      `Good morning${p.full_name ? `, ${String(p.full_name).split(" ")[0]}` : ""}. Here is what needs attention today.`,
-      mine.length ? `**Your deadlines and tasks**\n${mine.map(line).join("\n")}` : "**Your deadlines and tasks**\nNothing due in the next 7 days.",
-      company.length ? `**Overdue across the company**\n${company.map(line).join("\n")}` : "",
-      soon.length ? `**Due in the next 3 days**\n${soon.map(line).join("\n")}` : "",
+      TXT.hello[l].replace("{n}", p.full_name ? `, ${String(p.full_name).split(" ")[0]}` : ""),
+      `**${TXT.mine[l]}**\n${mine.length ? mine.map(line).join("\n") : TXT.none[l]}`,
+      company.length ? `**${TXT.late[l]}**\n${company.map(line).join("\n")}` : "",
+      soon.length ? `**${TXT.soon[l]}**\n${soon.map(line).join("\n")}` : "",
     ].filter(Boolean);
     const body = parts.join("\n\n");
-    const subject = `AGRON Workspace · ${mine.length + company.length} item${mine.length + company.length === 1 ? "" : "s"} for today`;
-    const cta = { label: "Open AGRON Workspace", url: `${SITE}/reports` };
+    const subject = TXT.subj[l].replace("{k}", items(mine.length + company.length, l));
+    const cta = { label: TXT.open[l], url: `${SITE}/reports` };
     try {
       await transport.sendMail({ from: { name: "AGRON Workspace", address: from }, to: p.email, subject,
-        html: renderEmail({ subject, heading: "Your morning digest", body, cta, lang: "en", sender: COMPANY }), text: plainText({ body, cta, sender: COMPANY, lang: "en" }) });
+        html: renderEmail({ subject, heading: TXT.head[l], body, cta, lang: l, sender: COMPANY }), text: plainText({ body, cta, sender: COMPANY, lang: l }) });
       sent++;
     } catch (e: any) { skipped.push(`${p.email}: ${e?.message || "send failed"}`); }
   }

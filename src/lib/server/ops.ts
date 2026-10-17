@@ -2,6 +2,7 @@ import { marked } from "marked";
 import { checkSystems } from "./systems";
 import { scan, type Check } from "./domainscan";
 import { sendMail } from "./mailer";
+import { localizeMail } from "./translate";
 import { listBackups, readState, runBackup, saveState } from "./backup";
 import { renderEmail, SITE } from "@/lib/mail";
 import { departmentReport } from "@/lib/reports";
@@ -12,7 +13,13 @@ const roles = async (db: any) => withDefaults(await readState(db, "settings").ca
 
 /** Scheduled company jobs: weekly backup, daily monitoring with alerts, monthly department reports. */
 const people = async (db: any, roles: string[]) => ((await db.from("profiles").select("email,full_name,role,lang").in("role", roles)).data || []).filter((p: any) => p.email);
-const page = (subject: string, html: string) => renderEmail({ subject, heading: subject, body: "", html, lang: "en", sender: null });
+const page = (subject: string, html: string, lang: any = "en") => renderEmail({ subject, heading: subject, body: "", html, lang, sender: null });
+/** Sends a system e-mail in the reader's language (Settings → translation of e-mails). */
+async function mailTo(db: any, p: { email: string; lang?: string }, m: { subject: string; html: string; text: string }, attachments?: any[]) {
+  const on = withDefaults(await readState(db, "settings").catch(() => null)).translate.emails;
+  const x = on ? await localizeMail(db, p.lang, m) : m;
+  return sendMail({ to: p.email, subject: x.subject, html: page(x.subject, x.html, on && p.lang ? p.lang : "en"), text: x.text, attachments });
+}
 
 /* ---------- Backup ---------- */
 export async function backupJob(db: any) {
@@ -23,7 +30,7 @@ export async function backupJob(db: any) {
 <p style="font-size:15px;line-height:1.6;color:#2A3440">${r.encrypted ? (small ? "The encrypted copy is attached. Keep it on your computer or drive; open it in Workspace → Administration → System → Backup with the backup password." : "The file is larger than an email allows; download it from Workspace → Administration → System → Backup.") : "<b>The copy is stored in Workspace but not encrypted, so it is not emailed.</b> Add BACKUP_PASSPHRASE in Vercel to receive an encrypted copy every week."}</p>
 <p style="font-size:14px;color:#7A8796">Files (PDF, images) stay in storage; make a full local copy with files from the same System page.</p>`;
   const subject = `AGRON Workspace backup ${new Date().toISOString().slice(0, 10)}`;
-  for (const p of to) await sendMail({ to: p.email, subject, html: page(subject, html), text: `Weekly backup saved: ${r.name}. ${r.counts.records} records.`, attachments: small ? [{ filename: r.name.split("/").pop()!, content: r.body, contentType: "application/octet-stream" }] : undefined });
+  for (const p of to) await mailTo(db, p, { subject, html, text: `Weekly backup saved: ${r.name}. ${r.counts.records} records.` }, small ? [{ filename: r.name.split("/").pop()!, content: r.body, contentType: "application/octet-stream" }] : undefined);
   await saveState(db, "backup", { at: new Date().toISOString(), name: r.name, bytes: r.bytes, encrypted: r.encrypted, counts: r.counts, emailed: small ? to.length : 0 });
   return { name: r.name, bytes: r.bytes, encrypted: r.encrypted, counts: r.counts };
 }
@@ -50,7 +57,7 @@ export async function monitorJob(db: any, opts: { alwaysEmail?: boolean } = {}) 
     const subject = problems.length ? `AGRON monitoring: ${problems.length} issue${problems.length > 1 ? "s" : ""}` : "AGRON monitoring: all systems OK";
     const list = problems.length ? `<ul style="padding-left:18px;font-size:15px;line-height:1.6;color:#2A3440">${problems.map((p) => `<li><b style="color:${p.level === "fail" ? "#B4232F" : "#A15C00"}">${esc(p.what)}</b> — ${esc(p.detail)}</li>`).join("")}</ul>` : `<p style="font-size:16px;color:#1F7A4D">All monitored systems and domains are fine.</p>`;
     const html = `${list}<p style="font-size:14px;color:#7A8796">Checked ${(systems as any[]).filter((s) => !s.skipped).length} systems and ${scans.length} domains. Details: <a href="${SITE}/technical/overview">Technical</a> · <a href="${SITE}/security/overview">Security</a>.</p>`;
-    for (const p of to) { if (!(await sendMail({ to: p.email, subject, html: page(subject, html), text: problems.map((x) => `- ${x.what}: ${x.detail}`).join("\n") || "All systems OK" }))) emailed++; }
+    for (const p of to) { if (!(await mailTo(db, p, { subject, html, text: problems.map((x) => `- ${x.what}: ${x.detail}`).join("\n") || "All systems OK" }))) emailed++; }
   }
   return { problems: problems.length, emailed, changed };
 }
@@ -70,7 +77,7 @@ export async function reportsJob(db: any, period?: string) {
   const html = `<p style="font-size:15px;line-height:1.6;color:#2A3440">Department reports for <b>${p}</b>, built from Workspace records (export-controlled records are not included in email). Open any department overview → Report for AI conclusions and PDF.</p>${tableStyle(await marked.parse(md))}`;
   const subject = `AGRON monthly report — ${p}`;
   const to = await people(db, (await roles(db)).report_roles);
-  let sent = 0; for (const x of to) if (!(await sendMail({ to: x.email, subject, html: page(subject, html), text: md }))) sent++;
+  let sent = 0; for (const x of to) if (!(await mailTo(db, x, { subject, html, text: md }))) sent++;
   await saveState(db, "reports", { at: new Date().toISOString(), period: p, sent, departments: depts.length });
   return { period: p, sent, departments: depts.length };
 }

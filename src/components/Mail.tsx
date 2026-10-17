@@ -129,14 +129,16 @@ function Composer({ tpl, init, onDone, templates, setTpl }: { tpl: MailTemplate;
     const src = { subject: pick(tpl.subject, "en"), heading: pick(tpl.heading, "en"), body: pick(tpl.body, "en"), cta: tpl.cta ? pick(tpl.cta.label, "en") : "" };
     setBusy("tr");
     try {
-      const name = LANGS.find((l) => l.code === lang)?.name;
-      const r = await fetch("/api/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tier: "quick", context: "Task: translate a business email for AGRON Inc. Professional, warm, concise.", messages: [{ role: "user", content: `Translate this email JSON into ${name}. Keep every {{variable}}, **bold** marker, "- " bullet and line break exactly. Keep product names (AGRON, StarDome, AGRON 1) and codes in English. Return only the JSON object with the same keys.\n\n${JSON.stringify(src)}` }] }) });
+      // Same translator as the rest of Workspace; each template is translated once and then comes from the cache
+      const parts = [src.subject, src.heading, src.body, src.cta];
+      const r = await fetch("/api/translate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ texts: parts, lang }) });
       if (!r.ok) throw new Error(await r.text());
-      const raw = await r.text(); const j = JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1));
-      setSubject(j.subject || ""); setHeading(j.heading || ""); setBody(j.body || ""); if (j.cta) setCtaLabel(j.cta);
-      toast(t("saved", lang));
+      const j = (await r.json()).texts || parts;
+      setSubject(j[0] || ""); setHeading(j[1] || ""); setBody(j[2] || ""); if (src.cta) setCtaLabel(j[3] || src.cta);
     } catch (e: any) { toast(e.message || "Translation failed", true); } finally { setBusy(""); }
   };
+  // A template without this language is translated automatically when chosen
+  useEffect(() => { if (missingLang && !tpl.system && !DEMO) translate(); }, [tpl.id, lang]); // eslint-disable-line
 
   return (
     <div className="card" style={{ display: "grid", gap: 0, ["--cc" as any]: MAIL_CATS[tpl.cat]?.color }}>

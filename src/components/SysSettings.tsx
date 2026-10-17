@@ -74,6 +74,10 @@ export default function SysSettings({ a }: { a: ReturnType<typeof useAuto> }) {
           <Roles {...cx} p="notify.monitor_roles" v={f.notify.monitor_roles} t={L("Monitoring alerts", "Сигналы мониторинга", "Сигнали моніторингу", "تنبيهات المراقبة")} />
           <Roles {...cx} p="notify.report_roles" v={f.notify.report_roles} t={L("Monthly department reports", "Ежемесячные отчёты департаментов", "Щомісячні звіти департаментів", "تقارير الأقسام الشهرية")} />
           <Roles {...cx} p="notify.brief_roles" v={f.notify.brief_roles} t={L("Monday brief", "Сводка по понедельникам", "Зведення щопонеділка", "ملخص الاثنين")} /></div>
+        <div style={{ display: "grid", gap: 12 }}><div className="eyebrow">{T(L("Languages", "Языки", "Мови", "اللغات"))}</div>
+          <label className="check"><input type="checkbox" disabled={ro} checked={f.translate.auto} onChange={(e) => set("translate.auto", e.target.checked)} />{T(L("Translate everything people write into English, Russian, Ukrainian and Arabic", "Переводить всё, что пишут люди, на английский, русский, украинский и арабский", "Перекладати все, що пишуть люди, англійською, російською, українською та арабською", "ترجمة كل ما يكتبه الناس إلى الإنجليزية والروسية والأوكرانية والعربية"))}</label>
+          <label className="check"><input type="checkbox" disabled={ro} checked={f.translate.emails} onChange={(e) => set("translate.emails", e.target.checked)} />{T(L("Send system e-mails in each person's language", "Отправлять системные письма на языке каждого человека", "Надсилати системні листи мовою кожної людини", "إرسال رسائل النظام بلغة كل شخص"))}</label>
+          <span className="hint">{T(L("Originals are never changed; translations are stored next to them. Translation uses the AI budget below.", "Оригиналы не меняются; переводы хранятся рядом с ними. Перевод расходует бюджет ИИ ниже.", "Оригінали не змінюються; переклади зберігаються поруч із ними. Переклад витрачає бюджет ШІ нижче.", "لا تتغير النصوص الأصلية؛ تُحفظ الترجمات بجانبها. تستهلك الترجمة ميزانية الذكاء الاصطناعي أدناه."))}</span></div>
         <div><div className="eyebrow" style={{ marginBottom: 8 }}>{T(L("AI budget", "Бюджет ИИ", "Бюджет ШІ", "ميزانية الذكاء الاصطناعي"))}</div>
           <div className="fgrid">
             <Num {...cx} p="ai.monthly_usd" v={f.ai.monthly_usd} t={L("Monthly limit for agents, USD (0 = no limit)", "Месячный лимит для агентов, USD (0 = без лимита)", "Місячний ліміт для агентів, USD (0 = без ліміту)", "الحد الشهري للوكلاء بالدولار (0 = بلا حد)")} hint={L("Over the limit agents keep working without AI conclusions.", "При превышении агенты работают дальше, но без выводов ИИ.", "Після перевищення агенти працюють далі, але без висновків ШІ.", "عند التجاوز يواصل الوكلاء العمل دون استنتاجات الذكاء الاصطناعي.")} />
@@ -82,6 +86,8 @@ export default function SysSettings({ a }: { a: ReturnType<typeof useAuto> }) {
           </div></div>
       </div>
     </section>
+
+    <TranslateNow T={T} />
 
     <section className="card">
       <div className="card-h toolbar"><h2><Icon n="spark" />{T(L("AI usage this month", "Расход ИИ за месяц", "Витрати ШІ за місяць", "استخدام الذكاء الاصطناعي هذا الشهر"))}</h2><span className="chip mono">{u.month}</span></div>
@@ -105,4 +111,22 @@ export default function SysSettings({ a }: { a: ReturnType<typeof useAuto> }) {
           <span className="faint" style={{ fontSize: 12.5 }}>{T(KEY_INFO[k.key] || L(k.what, k.what, k.what, k.what))}</span></div>))}</div>
     </section>
   </div>);
+}
+
+/** Existing records written before translation was on: shows how many wait and translates them batch by batch. */
+function TranslateNow({ T }: { T: (x: T4) => string }) {
+  const { toast } = useApp();
+  const [left, setLeft] = useState<number | null>(null); const [run, setRun] = useState(false); const [done, setDone] = useState(0);
+  const api = async (action: string) => { const r = await fetch("/api/translate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) }); if (!r.ok) throw new Error(await r.text()); return r.json(); };
+  useEffect(() => { api("status").then((j) => setLeft(j.left)).catch(() => setLeft(null)); }, []);
+  const go = async () => {
+    setRun(true); setDone(0);
+    try { for (let i = 0; i < 200; i++) { const j = await api("sweep"); setDone((d) => d + (j.done || 0)); setLeft(j.left); if (!j.left || (!j.done && !j.faq)) break; } toast(T(L("Translation finished", "Перевод завершён", "Переклад завершено", "اكتملت الترجمة"))); }
+    catch (e: any) { toast(e.message || "Error", true); } finally { setRun(false); }
+  };
+  return <section className="card">
+    <div className="card-h toolbar"><h2><Icon n="globe" />{T(L("Translation of existing data", "Перевод существующих данных", "Переклад наявних даних", "ترجمة البيانات الموجودة"))}</h2>
+      <button className="btn primary sm" style={{ marginInlineStart: "auto" }} disabled={run || left === 0} onClick={go}><Icon n="play" />{run ? `${done}…` : T(L("Translate now", "Перевести сейчас", "Перекласти зараз", "ترجم الآن"))}</button></div>
+    <p className="faint" style={{ margin: "0 20px 16px", fontSize: 14 }}>{left === null ? "…" : left === 0 ? T(L("All records are available in all four languages.", "Все записи доступны на всех четырёх языках.", "Усі записи доступні всіма чотирма мовами.", "كل السجلات متاحة باللغات الأربع.")) : `${T(L("Records waiting for translation", "Записей ждут перевода", "Записів чекають перекладу", "سجلات بانتظار الترجمة"))}: ${left}. ${T(L("New and changed texts are translated automatically within seconds; this button translates older ones now.", "Новые и изменённые тексты переводятся автоматически за секунды; эта кнопка переводит старые сейчас.", "Нові та змінені тексти перекладаються автоматично за секунди; ця кнопка перекладає старі зараз.", "تُترجم النصوص الجديدة والمعدلة تلقائياً خلال ثوانٍ؛ وهذا الزر يترجم القديمة الآن."))}`}</p>
+  </section>;
 }
