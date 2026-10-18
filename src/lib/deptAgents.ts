@@ -3,7 +3,7 @@
 import type { Action } from "./automation";
 
 type R = { id: string; section: string; title: string; status: string | null; data: Record<string, any>; controlled?: boolean; created_at?: string; updated_at?: string };
-export type Th = { remind_before: number; escalate_after: number; stalled_deal: number; /** 90-day forecast, computed by the caller (lib/cashforecast) */ /** SLA of a support request, computed by the caller (lib/sla) */ sla?: (t: any, fleet: any[]) => { respond: string; resolve: string; respondBy: string; resolveBy: string; tier: string; severity: string } | null; /** Parts shortages for builds, computed by the caller (lib/parts) */ parts?: (all: any[], today: string) => { b: any; lines: { line: any; short: number; free: number }[] }[]; cash?: { opening: number | null; gap: { week: number; start: string; balance: number } | null; lines: { id: string; title: string; usd: number; date: string; kind: string }[] } };
+export type Th = { remind_before: number; escalate_after: number; stalled_deal: number; /** 90-day forecast, computed by the caller (lib/cashforecast) */ /** SLA of a support request, computed by the caller (lib/sla) */ sla?: (t: any, fleet: any[]) => { respond: string; resolve: string; respondBy: string; resolveBy: string; tier: string; severity: string } | null; /** Vendors delivering late too often, computed by the caller (lib/vendors) */ vendors?: (all: any[]) => { vendor: string; onTime: number | null; avgDelay: number | null; received: number; defectPct: number | null }[]; /** Parts shortages for builds, computed by the caller (lib/parts) */ parts?: (all: any[], today: string) => { b: any; lines: { line: any; short: number; free: number }[] }[]; cash?: { opening: number | null; gap: { week: number; start: string; balance: number } | null; lines: { id: string; title: string; usd: number; date: string; kind: string }[] } };
 /**
  * One thing an agent noticed.
  * who: "owner" (the person named in the record), "role:<role>" or "leads"; key: raised once, then again every `repeat` days while still true.
@@ -71,6 +71,13 @@ export function financeFindings(all: R[], today: string, th: Th): Finding[] {
     const d = days(today, r.data.renewal); const st = stepFor(d, [60, 30, 7]); if (!st) continue;
     out.push({ rec: r, level: d <= 7 ? "bad" : "warn", who: d <= 7 ? ["role:finance", "leads"] : ["role:finance"], key: `fin-ins|${r.id}|${st}`, repeat: 365, text: d < 0 ? `Insurance “${r.title}” renewal date ${r.data.renewal} has passed — check cover.` : `Insurance “${r.title}” (${r.data?.type || ""}) renews on ${r.data.renewal}.`,
       action: r.status === "Active" && d <= 60 ? { type: "set", field: "status", value: "Renewal due" } : undefined, why: "Renewal within 60 days" });
+  }
+  // Payments by project milestones: acceptance is done, the draft invoice waits to be checked and sent
+  for (const r of of(all, "finance.invoices")) {
+    if (r.status !== "Draft" || !r.data?.milestone || !isDate(r.data?.ready_on)) continue;
+    const d = days(r.data.ready_on, today);
+    out.push({ rec: r, level: d >= 3 ? "warn" : "info", who: d >= 3 ? ["role:finance", "leads"] : ["role:finance"], key: `fin-msinv|${r.id}|${d >= 3 ? "late" : "new"}`, repeat: 3,
+      text: `Invoice “${r.title}” (${money(r.data?.amount, r.data?.currency)}) is ready since ${r.data.ready_on}: check it and send it to ${r.data?.counterparty || "the client"}.` });
   }
   // Cash runway from the latest monthly KPIs (cash ÷ net burn)
   const kpi = of(all, "finance.metrics").filter((r) => Number(r.data?.cash) > 0 && Number(r.data?.burn) > 0).sort((a, b) => String(b.data?.period || b.title).localeCompare(String(a.data?.period || a.title)))[0];
@@ -154,6 +161,12 @@ export function operationsFindings(all: R[], today: string, _th: Th): Finding[] 
     out.push({ rec: { ...x.b, data: { ...x.b.data, parts_short: list } }, level: "warn", who: ["role:operations"], key: `ops-parts|${x.b.id}|${list}`, repeat: 7,
       text: `Build “${x.b.title}” is short of parts: ${list}. Open the build → Parts for this build → Draft orders for the shortage.` });
   }
+  // Vendors that deliver late too often: buy elsewhere or agree firmer dates
+  for (const v of _th.vendors ? _th.vendors(all) : []) {
+    const r = all.find((x) => x.section === "operations.vendors" && x.title.trim().toLowerCase() === v.vendor.toLowerCase()) || all.find((x) => x.section === "operations.procurement" && String(x.data?.vendor || "").trim().toLowerCase() === v.vendor.toLowerCase());
+    if (r) out.push({ rec: { ...r, data: { ...r.data, vendor_name: v.vendor, on_time: `${v.onTime}%`, avg_delay: String(v.avgDelay ?? 0), received_n: String(v.received) } }, level: "warn", who: ["role:operations", "role:finance"], key: `ops-vendor|${v.vendor}|${today.slice(0, 7)}`, repeat: 30,
+      text: `Vendor ${v.vendor} delivered only ${v.onTime}% of ${v.received} orders on time (average delay ${v.avgDelay ?? 0} days). Agree firmer dates or look for a second source.` });
+  }
   // Service levels: a response or a resolution past its deadline
   if (_th.sla) {
     const fleet = of(all, "operations.fleet");
@@ -171,6 +184,9 @@ export function operationsFindings(all: R[], today: string, _th: Th): Finding[] 
   // Export control before anything ships
   for (const b of builds) if (["Shipping", "Testing"].includes(b.status || "") && b.data?.export_check !== "Cleared")
     out.push({ rec: b, level: b.status === "Shipping" ? "bad" : "warn", who: b.status === "Shipping" ? ["leads", "role:security", "role:operations"] : ["role:operations", "role:security"], key: `ops-export|${b.id}|${b.status}`, repeat: 3, text: `Build “${b.title}” is at ${b.status} but the export check is “${b.data?.export_check || "Not started"}”. It must not ship until cleared.` });
+  // End-user certificate: ask for it while the build is still being tested, not on the shipping day
+  for (const b of builds) if (["Integration", "Testing"].includes(b.status || "") && !["Signed", "Not required"].includes(b.data?.euc))
+    out.push({ rec: { ...b, data: { ...b.data, euc: b.data?.euc || "Not requested" } }, level: "warn", who: ["role:operations", "role:sales", "role:legal"], key: `ops-euc|${b.id}|${b.status}`, repeat: 7, text: `Build “${b.title}” is at ${b.status} and the end-user certificate is “${b.data?.euc || "Not requested"}”. It cannot ship without a signed certificate.` });
   for (const l of of(all, "operations.logistics")) {
     const b = byId.get(l.data?.build_ref);
     if (["In transit", "Customs"].includes(l.status || "") && b && b.data?.export_check !== "Cleared") out.push({ rec: l, level: "bad", who: ["leads", "role:security"], key: `ops-ship-exp|${l.id}`, repeat: 3, text: `Shipment “${l.title}” is ${l.status} while build “${b.title}” has no export clearance.` });
@@ -195,12 +211,14 @@ export function operationsFindings(all: R[], today: string, _th: Th): Finding[] 
         const title = `Scheduled service — ${u.title}`;
         const has = all.some((t) => t.section === "operations.support" && t.data?.unit_ref === u.id && t.title === title && t.status !== "Resolved");
         out.push({ rec: u, level: d < 0 ? "warn" : "info", who: ["role:operations"], key: `ops-svc|${u.id}|${u.data.next_service}`, repeat: d < 0 ? 7 : 365, text: d < 0 ? `Service of “${u.title}” was due on ${u.data.next_service}.` : `Service of “${u.title}” (${u.data?.site || u.data?.client || ""}) is due on ${u.data.next_service} — a service ticket is prepared.`,
-          action: has ? (u.status === "Active" ? { type: "set", field: "status", value: "Maintenance due" } : undefined) : { type: "create", section: "operations.support", title, status: "New", link: "unit_ref", fields: { client: "{client}", severity: "Medium", notes: "Planned maintenance. Site: {site}. SLA: {sla}." } }, why: "Service date close" });
+          action: has ? (u.status === "Active" ? { type: "set", field: "status", value: "Maintenance due" } : undefined) : { type: "create", section: "operations.support", title, status: "New", link: "unit_ref", fields: { client: "{client}", severity: "Medium", pm: "yes", notes: "Planned maintenance. Site: {site}. SLA: {sla}." } }, why: "Service date close" });
       }
     }
     if (isDate(u.data?.warranty_end)) {
       const st = stepFor(days(today, u.data.warranty_end), [60, 14]);
-      if (st) out.push({ rec: u, level: "info", who: ["role:sales", "role:operations"], key: `ops-warr|${u.id}|${st}`, repeat: 365, text: st === "late" ? `Warranty of “${u.title}” ended on ${u.data.warranty_end} — offer a service contract.` : `Warranty of “${u.title}” ends on ${u.data.warranty_end} — a good moment to offer a service contract (${u.data?.sla || "no SLA"}).` });
+      const title = `Service contract — ${u.title}`; const offered = all.some((d) => d.section === "sales.pipeline" && d.title === title);
+      if (st) out.push({ rec: u, level: "info", who: ["role:sales", "role:operations"], key: `ops-warr|${u.id}|${st}`, repeat: 365, text: st === "late" ? `Warranty of “${u.title}” ended on ${u.data.warranty_end} — offer a service contract.` : `Warranty of “${u.title}” ends on ${u.data.warranty_end} — a good moment to offer a service contract (${u.data?.sla || "no SLA"}).`,
+        action: offered ? undefined : { type: "create", section: "sales.pipeline", title, status: "Qualified", fields: { client: "{client}", country: "{country}", expected_close: u.data.warranty_end, next_step: "Offer the service contract before the warranty ends" } }, why: "Warranty ends soon" });
     }
   }
   // Purchasing, support, quality, repairs

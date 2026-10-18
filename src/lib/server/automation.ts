@@ -1,3 +1,4 @@
+import { weakVendors } from "@/lib/vendors";
 import Anthropic from "@anthropic-ai/sdk";
 import { readState, saveState } from "./backup";
 import { sendMail } from "./mailer";
@@ -10,6 +11,9 @@ import { allSections } from "@/config/workspace.config.mjs";
 import { REFS } from "@/config/links";
 import { nextOccurrence } from "@/lib/recur";
 import { cashForecast } from "@/lib/cashforecast";
+import { milestoneReady } from "@/lib/milestones";
+import { serviceDone } from "@/lib/service";
+import { poStamps } from "@/lib/vendors";
 import { slaFor } from "@/lib/sla";
 import { shortages } from "@/lib/parts";
 import { dueItems, isMine, money, PEOPLE_KEYS } from "@/lib/insights";
@@ -189,8 +193,32 @@ async function slaStamps(db: any, rec: any, ev: Ev) {
   if (ch) await db.from("records").update({ data: d }).eq("id", rec.id);
 }
 
+/** Factory or site acceptance closed: the draft invoices waiting for it become ready to send (a person sends them). */
+async function milestoneStamps(db: any, rec: any, ev: Ev) {
+  if (ev.kind !== "status" || !rec.data?.project || !["fat", "sat"].includes(rec.data?.project_step)) return 0;
+  const { data: inv } = await db.from("records").select("id,section,status,data").eq("section", "finance.invoices").eq("data->>project", rec.data.project).eq("data->>trigger", rec.data.project_step);
+  const ch = milestoneReady(rec, inv || [], new Date().toISOString().slice(0, 10));
+  for (const c of ch) await db.from("records").update({ data: c.data }).eq("id", c.id);
+  if (ch.length) {
+    const { data: fin } = await db.from("profiles").select("id").in("role", ["finance", "owner"]);
+    await pushTo(db, (fin || []).map((p: any) => p.id), (l) => ({ title: PUSH.pay_t[l], body: PUSH.pay_b[l].replace("{n}", String(ch.length)), url: `/finance/invoices?r=${ch[0].id}`, tag: `pay-${rec.id}` })).catch(() => 0);
+  }
+  return ch.length;
+}
+
+/** A planned service is done: the unit's next service moves forward by its plan interval. */
+async function serviceStamps(db: any, rec: any, ev: Ev) {
+  if (ev.kind !== "status" || rec.section !== "operations.support" || !rec.data?.pm || !rec.data?.unit_ref) return;
+  const { data: u } = await db.from("records").select("id,section,status,data").eq("id", rec.data.unit_ref).maybeSingle();
+  const ch = serviceDone(rec, u, new Date().toISOString().slice(0, 10));
+  if (ch) await db.from("records").update({ status: ch.status, data: ch.data }).eq("id", ch.id);
+}
+
 export async function onRecordEvent(db: any, rec: any, ev: Ev) {
+  await serviceStamps(db, rec, ev).catch(() => {});
+  if (ev.kind === "status") { const d = poStamps(ev.from, rec, new Date().toISOString().slice(0, 10)); if (d) await db.from("records").update({ data: d }).eq("id", rec.id).then(() => 0, () => 0); }
   await slaStamps(db, rec, ev).catch(() => {});
+  await milestoneStamps(db, rec, ev).catch(() => 0);
   const next = ev.kind === "status" ? await repeatNext(db, rec).catch(() => null) : null;
   const c = await context(db);
   if (next) c.log.push({ at: new Date().toISOString(), agent: "rules", kind: "action", text: `Repeating: next “${rec.title}” prepared`, record: next, section: rec.section } as any);
@@ -353,7 +381,7 @@ async function briefAgent(c: Ctx, recsAll: any[], force: boolean) {
 
 /* ---------------- Department agents ---------------- */
 type Finder = (all: any[], today: string, th: Settings["thresholds"]) => Finding[];
-const FINDERS: Partial<Record<AgentId, Finder>> = { finance: (all, t, th) => financeFindings(all, t, { ...th, cash: cashForecast(all, t) }), sales: salesFindings, operations: (all, t, th) => operationsFindings(all, t, { ...th, sla: (x, f) => slaFor(x, f), parts: shortages }), hr: hrFindings, legal: legalFindings, marketing: marketingFindings, technical: technicalFindings, security: securityFindings };
+const FINDERS: Partial<Record<AgentId, Finder>> = { finance: (all, t, th) => financeFindings(all, t, { ...th, cash: cashForecast(all, t) }), sales: salesFindings, operations: (all, t, th) => operationsFindings(all, t, { ...th, sla: (x, f) => slaFor(x, f), parts: shortages, vendors: weakVendors }), hr: hrFindings, legal: legalFindings, marketing: marketingFindings, technical: technicalFindings, security: securityFindings };
 const DEPT_OF: Partial<Record<AgentId, string>> = { finance: "finance", sales: "sales", operations: "operations", hr: "hr", legal: "legal", marketing: "marketing", technical: "technical", security: "security" };
 const COLOR = { bad: "#B4232F", warn: "#A15C00", info: "#2A3440" };
 

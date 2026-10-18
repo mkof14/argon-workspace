@@ -1,4 +1,5 @@
 "use client";
+import { weakVendors } from "@/lib/vendors";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Icon from "./Icon";
@@ -18,7 +19,7 @@ type T4 = { en: string; ru: string; uk: string; ar: string };
 export const DEPT_FINDERS: Record<string, { agent: keyof typeof AGENT_INFO; run: (all: any[], today: string, th: any) => Finding[]; extra: string[] }> = {
   finance: { agent: "finance", run: (all, t, th) => financeFindings(all, t, { ...th, cash: cashForecast(all, t) }), extra: ["sales.pipeline", "sales.clients", "marketing.leads", "operations.procurement"] },
   sales: { agent: "sales", run: salesFindings, extra: ["marketing.leads", "company.tasks"] },
-  operations: { agent: "operations", run: (all, t, th) => operationsFindings(all, t, { ...th, sla: (x: any, f: any[]) => slaFor(x, f), parts: shortages }), extra: ["technical.bom"] },
+  operations: { agent: "operations", run: (all, t, th) => operationsFindings(all, t, { ...th, sla: (x: any, f: any[]) => slaFor(x, f), parts: shortages, vendors: weakVendors }), extra: ["technical.bom"] },
   hr: { agent: "hr", run: hrFindings, extra: ["company.tasks", "security.access"] },
   legal: { agent: "legal", run: legalFindings, extra: ["sales.pipeline"] },
   marketing: { agent: "marketing", run: marketingFindings, extra: [] },

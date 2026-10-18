@@ -6,6 +6,8 @@ import { useApp } from "./App";
 import { tx, type Lang } from "@/lib/i18n";
 import { store, type Rec } from "@/lib/store";
 import { buildParts } from "@/lib/parts";
+import { vendorScore } from "@/lib/vendors";
+import { GRADE } from "./VendorScore";
 
 type T4 = { en: string; ru: string; uk: string; ar: string };
 const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk, ar });
@@ -19,7 +21,8 @@ export default function BuildParts({ build }: { build: Rec }) {
   useEffect(() => { load(); }, [build.id]); // eslint-disable-line
   if (!all) return null;
   const b = store.original(build);
-  const lines = buildParts(b as any, all.map((r) => store.original(r)) as any);
+  const orig = all.map((r) => store.original(r));
+  const lines = buildParts(b as any, orig as any);
   const head = <div className="appr-h"><Icon n="box" /><b>{T(L("Parts for this build", "Комплектующие для сборки", "Комплектуючі для збирання", "قطع هذا التجميع"))}</b>{b.data?.config && <span className="chip" style={{ marginInlineStart: 8 }}>{b.data.config}</span>}</div>;
   if (!b.data?.config) return <section className="appr">{head}<small className="faint">{T(L("Choose the configuration to see the parts.", "Выберите конфигурацию, чтобы увидеть комплектующие.", "Оберіть конфігурацію, щоб побачити комплектуючі.", "اختر التهيئة لرؤية القطع."))}</small></section>;
   if (!lines.length) return <section className="appr">{head}<small className="faint">{T(L("No approved bill of materials for this configuration yet (Technical → Bill of materials).", "Для этой конфигурации ещё нет согласованной спецификации (Технический → Спецификация BOM).", "Для цієї конфігурації ще немає погодженої специфікації (Технічний → Специфікація BOM).", "لا توجد قائمة مواد معتمدة لهذه التهيئة بعد (التقني ← قائمة المواد)."))} <Link href="/technical/bom">→</Link></small></section>;
@@ -39,7 +42,7 @@ export default function BuildParts({ build }: { build: Rec }) {
   return <section className="appr">{head}
     <div className="tablewrap"><table className="tb"><thead><tr>
       <th>{T(L("Part", "Позиция", "Позиція", "القطعة"))}</th><th>{T(L("Need", "Нужно", "Потрібно", "المطلوب"))}</th><th>{T(L("Reserved", "В резерве", "У резерві", "محجوز"))}</th><th>{T(L("Free in stock", "Свободно на складе", "Вільно на складі", "متاح في المخزون"))}</th><th>{T(L("On order", "Заказано", "Замовлено", "قيد الطلب"))}</th><th>{T(L("Short", "Не хватает", "Бракує", "النقص"))}</th></tr></thead>
-      <tbody>{lines.map((l) => { const s = Math.max(0, l.short - l.free); return <tr key={l.line.id}><td>{l.line.data?.item || l.line.title}{l.line.data?.part_no ? <small className="faint mono"> · {l.line.data.part_no}</small> : null}</td>
+      <tbody>{lines.map((l) => { const s = Math.max(0, l.short - l.free); return <tr key={l.line.id}><td>{l.line.data?.item || l.line.title}{l.line.data?.part_no ? <small className="faint mono"> · {l.line.data.part_no}</small> : null}{l.line.data?.supplier ? (() => { const g = vendorScore(l.line.data.supplier, orig as any).grade; return <><br /><small className="faint">{l.line.data.supplier}</small> <span className={`chip ${GRADE[g].cls}`} style={{ padding: "0 6px", fontSize: 11.5 }} title={T(GRADE[g].t)}>{g === "new" ? "—" : g}</span></>; })() : null}</td>
         <td className="mono">{l.need}</td><td className="mono">{l.reserved}</td><td className="mono">{l.free}</td><td className="mono">{l.onOrder}</td>
         <td>{s ? <span className="chip c-bad"><Icon n="alert" className="lockico" /> {s}</span> : l.short ? <span className="chip c-warn">{T(L("reserve from stock", "взять со склада", "взяти зі складу", "احجز من المخزون"))}</span> : <span className="chip c-ok">✓</span>}</td></tr>; })}</tbody></table></div>
     <div className="toolbar">

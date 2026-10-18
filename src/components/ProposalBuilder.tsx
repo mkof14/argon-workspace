@@ -61,7 +61,7 @@ export default function ProposalBuilder({ deal, onDone }: { deal: Rec; onDone: (
     try {
       const rec = await store.save({ section: "sales.proposals", title, status: "Draft", data: {
         deal_ref: deal.id, number, client: store.original(deal).data?.client || deal.title, config: f.config, qty: f.qty, unit_price: f.unit, discount: f.discount, value: doc.total, currency: f.currency,
-        lease_month: f.leaseOn ? doc.lease : undefined, payment_terms: termsText(f.terms, f.plang), delivery: `${f.weeks} weeks`, valid_until: doc.valid_until, language: f.plang.toUpperCase(), document: doc.md,
+        lease_month: f.leaseOn ? doc.lease : undefined, payment_terms: termsText(f.terms, f.plang), terms_key: f.terms, delivery: `${f.weeks} weeks`, valid_until: doc.valid_until, language: f.plang.toUpperCase(), document: doc.md,
       } });
       const blob = await markdownToPdf(doc.md, { title, filename: pdfName, blob: true });
       if (blob) await store.upload(`sales.proposals/${rec.id}`, new File([blob], `${pdfName}.pdf`, { type: "application/pdf" })).catch(() => {});

@@ -1,5 +1,6 @@
 // Project templates: a won deal becomes a full plan — build, purchases, export check, shipping, installation,
 // acceptance, training and the first service visit — with dates and responsible roles.
+// Payments are added by lib/milestones from the payment terms (advance, before shipping, on acceptance).
 
 type T4 = { en: string; ru: string; uk: string; ar: string };
 const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk, ar });
@@ -19,7 +20,6 @@ const base = (assembly: "United States" | "UAE", ship: number, k: number): Step[
   { key: "install", section: "operations.installation", title: L("Installation at {site}", "Установка на объекте {site}", "Встановлення на об'єкті {site}", "التركيب في {site}"), status: "Planned", day: ship + k, role: "operations", dateKey: "due", link: "build", fields: { site: "{site}" } },
   { key: "sat", section: "operations.quality", title: L("Site acceptance and handover: {client}", "Приёмка на объекте и передача: {client}", "Приймання на об'єкті та передача: {client}", "القبول في الموقع والتسليم: {client}"), status: "Planned", day: ship + k + 5, role: "engineering", dateKey: "date", fields: { check_type: "Site acceptance (SAT)", build: "{client}" } },
   { key: "training", section: "company.tasks", title: L("Operator training for {client}", "Обучение операторов клиента {client}", "Навчання операторів клієнта {client}", "تدريب مشغلي {client}"), status: "Open", day: ship + k + 7, role: "operations", dateKey: "due", link: "deal", fields: { priority: "Medium" } },
-  { key: "final", section: "finance.invoices", title: L("Final payment on acceptance — {client}", "Финальный платёж после приёмки — {client}", "Фінальний платіж після приймання — {client}", "الدفعة النهائية عند القبول — {client}"), status: "Draft", day: ship + k + 10, role: "finance", dateKey: "due", link: "deal", fields: { direction: "Receivable", counterparty: "{client}", currency: "{currency}" } },
   { key: "service", section: "company.tasks", title: L("First service visit: {client}", "Первый сервисный визит: {client}", "Перший сервісний візит: {client}", "أول زيارة صيانة: {client}"), status: "Open", day: ship + k + 90, role: "operations", dateKey: "due", link: "deal", fields: { priority: "Medium" } },
 ];
 

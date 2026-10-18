@@ -19,6 +19,7 @@ import Link from "next/link";
 import { t, tx } from "@/lib/i18n";
 import { Rec, store } from "@/lib/store";
 import { fmt, saveBlob, spendMsg, toCsv, tone } from "@/lib/format";
+import { shipMsg } from "@/lib/shipgate";
 
 export const DUE_KEYS = ["due", "deadline", "expires", "renewal", "next_service", "valid_until", "eta", "warranty_end", "publish", "session", "starts", "book_by"];
 export const KIND: Record<string, { icon: string; c: string }> = {
@@ -83,6 +84,7 @@ export default function SectionView({ section }: { section: any }) {
     const g = section.gate;
     if (gateBlocks(g, status, r.data)) { toast(tx(g.msg, lang), true); return; }
     const sp = await store.spendCheck(section.id, r.id, status, r.data); if (sp) { toast(spendMsg(sp.roles, lang, (x) => tx((ROLES as any)[x]?.label, lang)), true); return; }
+    { const sm = await store.shipCheck(section.id, status, r.data); if (sm.length) { toast(shipMsg(sm, lang), true); return; } }
     try { await store.save({ ...r, status }); toast(t("saved", lang)); load(); } catch (e: any) { toast(e.message || "Error", true); }
   };
 
@@ -111,7 +113,7 @@ export default function SectionView({ section }: { section: any }) {
         const status = bulk.status || r.status; const data = { ...r.data };
         if (bulk.who !== undefined && bulk.who !== "" && ownerKey) data[ownerKey] = bulk.who;
         if (bulk.date && dateKey) data[dateKey] = bulk.date;
-        if (status !== r.status && (gateBlocks(section.gate, status, data) || (await store.spendCheck(section.id, r.id, status, data)))) { blocked++; continue; }
+        if (status !== r.status && (gateBlocks(section.gate, status, data) || (await store.spendCheck(section.id, r.id, status, data)) || (await store.shipCheck(section.id, status, data)).length)) { blocked++; continue; }
         await store.save({ ...r, status, data }); ok++;
       }
       toast(`${tx({ en: "Done", ru: "Готово", uk: "Готово", ar: "تم" }, lang)}: ${ok}${blocked ? ` · ${tx({ en: "not changed (a check is missing)", ru: "не изменено (не пройдена проверка)", uk: "не змінено (не пройдено перевірку)", ar: "لم يتغير (فحص ناقص)" }, lang)}: ${blocked}` : ""}`, !!blocked && !ok);

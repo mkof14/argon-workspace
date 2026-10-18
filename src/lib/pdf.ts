@@ -37,7 +37,7 @@ function inline(tokens: any[] | undefined, raw = "", b = false, i = false): Run[
 const decode = (s: string) => s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
 const plain = (runs: Run[]) => runs.map((r) => r.t).join("");
 
-export async function markdownToPdf(md: string, opts: { title: string; filename: string; subtitle?: string; confidential?: boolean; blob?: boolean }): Promise<Blob | void> {
+export async function markdownToPdf(md: string, opts: { title: string; filename: string; subtitle?: string; confidential?: boolean; blob?: boolean; /** Photos added after the text (data URLs, JPEG or PNG) */ images?: { title: string; data: string }[] }): Promise<Blob | void> {
   const [{ jsPDF }, { marked }, { autoTable }] = await Promise.all([import("jspdf"), import("marked"), import("jspdf-autotable")]);
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   await loadFonts(doc);
@@ -138,6 +138,16 @@ export async function markdownToPdf(md: string, opts: { title: string; filename:
     }
   };
   for (const tk of tokens) block(tk);
+
+  // Photos: each fitted to the page width (never enlarged more than 1.5×), with its caption
+  for (const im of opts.images || []) {
+    try {
+      const p = doc.getImageProperties(im.data); const maxH = PAGE.h - PAGE.mt - PAGE.mb - 40;
+      const r = Math.min(W / p.width, maxH / p.height, 1.5); const w = p.width * r, h = p.height * r;
+      ensure(h + 30); font(true); doc.setFontSize(9.5); doc.setTextColor(...MUTED); doc.text(im.title.slice(0, 110), PAGE.ml, y); y += 10;
+      doc.addImage(im.data, /^data:image\/png/i.test(im.data) ? "PNG" : "JPEG", PAGE.ml, y, w, h); y += h + 20;
+    } catch { /* a broken image is skipped */ }
+  }
 
   // Running header (pages 2+) and footer with page numbers
   const n = doc.getNumberOfPages();

@@ -6,10 +6,13 @@ import { useApp, SECTIONS } from "./App";
 import { tx, type Lang } from "@/lib/i18n";
 import { store, type Rec } from "@/lib/store";
 import { PROJECT_TEMPLATES, projectPlan, shiftPlan, stepDate, stepDone } from "@/lib/projects";
+import ProjectPack from "./ProjectPack";
+import { DEFAULT_TERMS, milestonePlan, SCHEDULES, TRIGGER_TEXT } from "@/lib/milestones";
+import { termsText, type PLang } from "@/lib/proposal";
 
 type T4 = { en: string; ru: string; uk: string; ar: string };
 const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk, ar });
-const PLAN_SECS = Array.from(new Set(PROJECT_TEMPLATES.flatMap((t) => t.steps.map((s) => s.section))));
+const PLAN_SECS = Array.from(new Set([...PROJECT_TEMPLATES.flatMap((t) => t.steps.map((s) => s.section)), "finance.invoices"]));
 const ROLE: Record<string, T4> = { sales: L("Sales", "Продажи", "Продажі", "المبيعات"), security: L("Security", "Безопасность", "Безпека", "الأمن"), operations: L("Operations", "Операции", "Операції", "العمليات"), engineering: L("Engineering", "Инженеры", "Інженери", "الهندسة"), finance: L("Finance", "Финансы", "Фінанси", "المالية") };
 
 /** Inside a won deal: unfold the whole project — build, purchases, checks, shipping, installation, acceptance, training, service. */
@@ -21,6 +24,13 @@ export default function ProjectPlanner({ deal, onDone }: { deal: Rec; onDone: ()
   const [start, setStart] = useState(new Date().toISOString().slice(0, 10));
   const [owners, setOwners] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [terms, setTerms] = useState(DEFAULT_TERMS);
+  const [value, setValue] = useState<number>(Number(store.original(deal).data?.value) || 0);
+  useEffect(() => { // payment terms and amount from the latest proposal of this deal
+    if (!access.read.has("sales.proposals")) return;
+    store.list("sales.proposals").then((ps) => { const p = ps.filter((x) => x.data?.deal_ref === deal.id && x.status !== "Rejected").sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)))[0];
+      if (p?.data?.terms_key && SCHEDULES[p.data.terms_key]) setTerms(p.data.terms_key); if (Number(p?.data?.value)) setValue(Number(p.data.value)); }).catch(() => {});
+  }, [deal.id]); // eslint-disable-line
   const readable = PLAN_SECS.filter((s) => access.read.has(s));
   const load = () => store.listMany(readable).then((r) => setExisting(r.filter((x) => x.data?.project === deal.id || (x.section === "operations.builds" && x.data?.deal_ref === deal.id)))).catch(() => setExisting([]));
   useEffect(() => { load(); }, [deal.id]); // eslint-disable-line
@@ -29,7 +39,13 @@ export default function ProjectPlanner({ deal, onDone }: { deal: Rec; onDone: ()
   }, [people.length]); // eslint-disable-line
   const t = PROJECT_TEMPLATES.find((x) => x.id === tpl)!;
   const orig = store.original(deal);
-  const plan = useMemo(() => projectPlan(orig, t, start, (lang === "ar" ? "en" : lang) as any, owners), [orig, t, start, owners, lang]);
+  const plan = useMemo(() => {
+    const steps = projectPlan(orig, t, start, (lang === "ar" ? "en" : lang) as any, owners);
+    const at = (k: string) => steps.find((x) => x.key === k)?.due || start;
+    const pays = milestonePlan({ dealId: deal.id, client: orig.data?.client || deal.title, value, currency: orig.data?.currency || "USD", terms, dates: { start, fat: at("fat"), sat: at("sat") }, lang: (lang === "ar" ? "en" : lang) as any, today: new Date().toISOString().slice(0, 10) });
+    if (owners.finance) for (const p of pays) p.data.owner = owners.finance;
+    return [...steps, ...pays].sort((a, b) => a.due.localeCompare(b.due));
+  }, [orig, t, start, owners, lang, terms, value, deal.id, deal.title]);
   const done = (existing || []).filter((x) => x.data?.project === deal.id);
   const build0 = (existing || []).find((x) => x.section === "operations.builds");
   const cannot = plan.filter((p) => !access.write.has(p.section));
@@ -64,6 +80,7 @@ export default function ProjectPlanner({ deal, onDone }: { deal: Rec; onDone: ()
     {open && <button className="btn ghost sm" style={{ marginInlineStart: "auto" }} onClick={() => setOpen(false)}>{T(L("Close", "Закрыть", "Закрити", "إغلاق"))}</button>}</div>;
   if (!open) return <section className="appr">{head}
     {done.length > 0 && <Timeline recs={done} onShift={shift} lang={lang as Lang} />}
+    {done.length > 0 && <ProjectPack deal={deal} />}
     <div className="toolbar"><button className="btn primary sm" onClick={() => setOpen(true)}><Icon n="layers" />{done.length ? T(L("Add missing steps", "Добавить недостающие шаги", "Додати відсутні кроки", "إضافة الخطوات الناقصة")) : T(L("Unfold the project", "Развернуть проект", "Розгорнути проєкт", "إنشاء المشروع"))}</button>
       {!done.length && <small className="faint">{T(L("Build, purchases, screening, shipping, installation, acceptance, training and service — with dates and owners", "Сборка, закупки, проверка, отгрузка, монтаж, приёмка, обучение и сервис — с датами и ответственными", "Збирання, закупівлі, перевірка, відвантаження, монтаж, приймання, навчання й сервіс — з датами та відповідальними", "التجميع والمشتريات والفحص والشحن والتركيب والقبول والتدريب والصيانة — بالتواريخ والمسؤولين"))}</small>}</div></section>;
 
@@ -71,6 +88,10 @@ export default function ProjectPlanner({ deal, onDone }: { deal: Rec; onDone: ()
     <div className="fgrid">
       <div className="field"><label>{T(L("Template", "Шаблон", "Шаблон", "القالب"))}</label><select className="input" value={tpl} onChange={(e) => setTpl(e.target.value)}>{PROJECT_TEMPLATES.map((x) => <option key={x.id} value={x.id}>{T(x.name)}</option>)}</select><span className="hint">{T(t.about)}</span></div>
       <div className="field"><label>{T(L("Start", "Старт", "Старт", "البداية"))}</label><input className="input" type="date" value={start} onChange={(e) => setStart(e.target.value)} /></div>
+      <div className="field"><label>{T(L("Payment terms", "Условия оплаты", "Умови оплати", "شروط الدفع"))}</label><select className="input" value={terms} onChange={(e) => setTerms(e.target.value)}>{Object.keys(SCHEDULES).map((k) => <option key={k} value={k}>{termsText(k, (lang === "ru" || lang === "uk" ? lang : "en") as PLang)}</option>)}</select>
+        <span className="hint">{SCHEDULES[terms].map((m) => `${m.pct}% ${T(TRIGGER_TEXT[m.after])}`).join(" · ")}</span></div>
+      <div className="field"><label>{T(L("Contract value", "Сумма контракта", "Сума контракту", "قيمة العقد"))} ({orig.data?.currency || "USD"})</label><input className="input" type="number" min={0} value={value || ""} onChange={(e) => setValue(Number(e.target.value) || 0)} />
+        {!value && <span className="hint">{T(L("Without the amount no payment invoices are drafted.", "Без суммы счета на оплату не создаются.", "Без суми рахунки на оплату не створюються.", "بدون المبلغ لا تُصاغ فواتير الدفع."))}</span>}</div>
       {Object.keys(ROLE).map((r) => <div key={r} className="field"><label>{T(ROLE[r])}</label><input className="input" list="people-list" value={owners[r] || ""} onChange={(e) => setOwners({ ...owners, [r]: e.target.value })} /></div>)}
     </div>
     <div className="tablewrap"><table className="tb"><thead><tr><th>{T(L("Date", "Дата", "Дата", "التاريخ"))}</th><th>{T(L("Step", "Шаг", "Крок", "الخطوة"))}</th><th>{T(L("Section", "Раздел", "Розділ", "القسم"))}</th><th>{T(L("Owner", "Ответственный", "Відповідальний", "المسؤول"))}</th></tr></thead>

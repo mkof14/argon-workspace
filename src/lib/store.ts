@@ -7,6 +7,10 @@ let SEED: any[] | null = null;
 const seedFaq = async () => (SEED ||= (await import("@/config/learn")).SEED_FAQ);
 import { localizeRec, unlocalize, type Shown } from "./tr";
 import { nextOccurrence } from "./recur";
+import { milestoneReady } from "./milestones";
+import { serviceDone } from "./service";
+import { poStamps } from "./vendors";
+import { SHIP_GUARD, shipMissing, shipMsg, type Missing } from "./shipgate";
 import { DEFAULT_LIMITS, LIMITED, limitRoles, overLimit, withLimits, type Limits } from "@/config/approvals";
 let LIM: Promise<Limits> | null = null;
 /** Spending above the self-approval limit needs an approved request first (any way of saving: form, board, bulk, AI command). */
@@ -132,12 +136,18 @@ export const store = {
     const r: Partial<Rec> & { section: string; title: string } = back ? { ...clean, title: back.title, data: back.data } : clean;
     if (DEMO) {
       const db = demoLoad(); const me = demoMe(db);
+      if (r.id ? db.records.find((x) => x.id === r.id)?.status !== r.status : true) { const m = await this.shipCheck(r.section, r.status, r.data || {}); if (m.length) throw new Error(shipMsg(m, "en")); }
       if (r.id) {
         const i = db.records.findIndex((x) => x.id === r.id); const old = db.records[i];
         db.records[i] = { ...old, ...r, updated_at: now } as Rec;
         db.activity.unshift({ id: Date.now(), record_id: r.id, section: r.section, actor: me.id, action: old.status !== r.status ? "status" : "updated", detail: { title: r.title, from: old.status, to: r.status }, created_at: now });
         // Support SLA stamps (on the live site the server does this)
         if (r.section === "operations.support" && old.status !== r.status) { const d = db.records[i].data = { ...db.records[i].data }; if (!d.responded_at && old.status === "New") d.responded_at = now; if (!d.resolved_at && /^(resolved|closed)$/i.test(r.status || "")) d.resolved_at = now; }
+        { const d = poStamps(old.status, db.records[i], now.slice(0, 10)); if (d) db.records[i].data = d; }
+        // Planned service done → the unit's next service moves forward
+        if (old.status !== r.status) { const u = db.records.find((x) => x.id === db.records[i].data?.unit_ref); const ch = serviceDone(db.records[i], u, now.slice(0, 10)); if (ch && u) Object.assign(u, { status: ch.status, data: ch.data, updated_at: now }); }
+        // Acceptance closed → milestone invoices ready (on the live site the server does this)
+        if (old.status !== r.status) for (const c of milestoneReady(db.records[i], db.records, now.slice(0, 10))) { const k = db.records.findIndex((x) => x.id === c.id); if (k >= 0) db.records[k] = { ...db.records[k], data: c.data, updated_at: now }; }
         // Repeating record completed → the next one (on the live site the server does this)
         const sec: any = (allSections() as any[]).find((x) => x.id === r.section);
         if (old.status !== r.status && sec && !db.records.some((x) => x.data?._prev === r.id)) { const n = nextOccurrence(db.records[i], sec.fields, sec.statuses[0]); if (n) db.records.push({ id: uid(), company: old.company, controlled: old.controlled, ...n, section: r.section, created_by: me.id, created_at: now, updated_at: now } as Rec); }
@@ -151,6 +161,7 @@ export const store = {
     if (r.id) {
       const { data: before } = await sb().from("records").select("status").eq("id", r.id).maybeSingle();
       if ((before?.status || "") !== (body.status || "") && (await this.spendCheck(r.section, r.id, body.status, body.data))) throw new Error(SPEND_ERR);
+      if ((before?.status || "") !== (body.status || "")) { const m = await this.shipCheck(r.section, body.status, body.data); if (m.length) throw new Error(shipMsg(m, "en")); }
       const { data, error } = await sb().from("records").update(body).eq("id", r.id).select().single();
       if (error) throw error;
       if ((before?.status || "") !== (data.status || "")) automate({ id: data.id, kind: "status", from: before?.status ?? null });
@@ -158,6 +169,7 @@ export const store = {
       return loc(data as Rec);
     }
     if (await this.spendCheck(r.section, undefined, body.status, body.data)) throw new Error(SPEND_ERR);
+    { const m = await this.shipCheck(r.section, body.status, body.data); if (m.length) throw new Error(shipMsg(m, "en")); }
     const { data: u } = await sb().auth.getUser();
     const { data, error } = await sb().from("records").insert({ ...body, created_by: u?.user?.id }).select().single();
     if (error) throw error; automate({ id: data.id, kind: "created" }); translateLater({ id: data.id }); return data as Rec;
@@ -179,6 +191,17 @@ export const store = {
     const lim = await this.limits(); if (!overLimit(section, data, lim)) return null;
     if (id && !DEMO) { const { data: a } = await sb().from("approvals").select("status").eq("record_id", id).eq("status", "approved").limit(1); if (a?.length) return null; }
     return { roles: limitRoles(section, data, lim) || [] };
+  },
+  /** Shipping needs export check, screening of the deal and the end-user certificate ([] = allowed). */
+  async shipCheck(section: string, status: string | null | undefined, data: Record<string, any>): Promise<Missing[]> {
+    if (!status || !SHIP_GUARD[section]?.includes(status)) return [];
+    const get = async (ids: string[]) => !ids.length ? [] : DEMO ? demoLoad().records.filter((x) => ids.includes(x.id)) : ((await sb().from("records").select("id,section,status,data").in("id", ids)).data || []) as Rec[];
+    const build = section === "operations.builds" ? null : (await get([data?.build_ref].filter(Boolean)))[0] || null;
+    const b = section === "operations.builds" ? data : build?.data;
+    const deal = b?.deal_ref, scr = b?.screening_ref;
+    const screenings = DEMO ? demoLoad().records.filter((x) => x.section === "security.screening" && ((deal && x.data?.deal_ref === deal) || x.id === scr))
+      : deal || scr ? (((await sb().from("records").select("id,section,status,data").eq("section", "security.screening").or([deal ? `data->>deal_ref.eq.${deal}` : "", scr ? `id.eq.${scr}` : ""].filter(Boolean).join(","))).data || []) as Rec[]) : [];
+    return shipMissing(section, status, data, build, screenings);
   },
   /* ----- Recycle bin: deleted records stay 30 days ----- */
   async trashList(): Promise<TrashItem[]> {

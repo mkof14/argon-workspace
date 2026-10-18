@@ -23,6 +23,8 @@ export function cashForecast(all: R[], today: string, weeks = 13) {
   for (const r of all) {
     const d = r.data || {};
     if (r.section === "finance.invoices" && !["Paid", "Draft"].includes(r.status || "")) add(r, usd(d.amount, d.currency), d.due, d.direction === "Payable" ? "out" : "in");
+    // Payments by project milestones are in the contract even while the invoice is still a draft
+    if (r.section === "finance.invoices" && r.status === "Draft" && d.milestone) add(r, usd(d.amount, d.currency), d.due, "in");
     if (r.section === "finance.expenses" && r.status === "Approved") add(r, usd(d.amount, d.currency), undefined, "out");
     if (r.section === "operations.procurement" && ["Approved", "Ordered"].includes(r.status || "")) add(r, usd(d.amount, d.currency), d.eta, "out");
     if (r.section === "sales.pipeline" && STAGE_P[r.status || ""]) {

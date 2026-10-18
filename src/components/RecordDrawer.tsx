@@ -6,6 +6,9 @@ const ProjectPlanner = dynamic(() => import("./ProjectPlanner"), { ssr: false })
 const PortalLinks = dynamic(() => import("./PortalLinks"), { ssr: false });
 const SlaPanel = dynamic(() => import("./SlaPanel"), { ssr: false });
 const BuildParts = dynamic(() => import("./BuildParts"), { ssr: false });
+const MilestoneNote = dynamic(() => import("./MilestoneNote"), { ssr: false });
+const ServicePanel = dynamic(() => import("./ServicePanel"), { ssr: false });
+const VendorScore = dynamic(() => import("./VendorScore"), { ssr: false });
 import MarketingStudio from "./MarketingStudio";
 import { RecordTools } from "./DeptTools";
 import { RefField, ChainPanel } from "./Links";
@@ -18,6 +21,7 @@ import { t, tx } from "@/lib/i18n";
 import { trFields, trPending, trText } from "@/lib/tr";
 import { Activity, Comment, DEMO, Rec, isExternal, store, textSim } from "@/lib/store";
 import { fmt, printHtml, recordMarkdown, saveBlob, slug, spendMsg, tone } from "@/lib/format";
+import { shipMsg } from "@/lib/shipgate";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import Attachments from "./Attachments";
@@ -101,6 +105,7 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
     if (!title.trim()) return;
     if (gateBlocked) { toast(tx(gate.msg, lang), true); return; }
     const sp = await store.spendCheck(section.id, rec?.id, status, data); if (sp) { toast(spendMsg(sp.roles, lang, (r) => tx((ROLES as any)[r]?.label, lang)), true); return; }
+    if (status !== rec?.status) { const sm = await store.shipCheck(section.id, status, data); if (sm.length) { toast(shipMsg(sm, lang), true); return; } }
     setBusy(true);
     try { await store.save({ id: rec?.id, section: section.id, title: title.trim(), status, data, company: company.trim() || null, controlled }); toast(t("saved", lang)); onSaved(); }
     catch (e: any) { toast(e.message || "Error", true); } finally { setBusy(false); }
@@ -195,6 +200,10 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
           {rec && section.id === "sales.clients" && !isExternal(me.role) && <PortalLinks client={rec} />}
           {rec && section.id === "operations.support" && <SlaPanel rec={rec} />}
           {rec && section.id === "operations.builds" && !isExternal(me.role) && <BuildParts build={rec} />}
+          {rec && section.id === "finance.invoices" && <MilestoneNote rec={rec} />}
+          {rec && section.id === "operations.fleet" && !isExternal(me.role) && <ServicePanel unit={rec} />}
+          {rec && section.id === "operations.vendors" && !isExternal(me.role) && <VendorScore vendor={store.original(rec).title} />}
+          {rec && section.id === "operations.procurement" && !isExternal(me.role) && <VendorScore vendor={String(store.original(rec).data?.vendor || "")} />}
           {rec && section.id === "sales.pipeline" && ["Won", "Negotiation"].includes(rec.status || "") && !isExternal(me.role) && <ProjectPlanner deal={rec} onDone={onReload || onSaved} />}
           {section.dept === "marketing" && <MarketingStudio section={section} title={title} data={data} setData={setData} canWrite={canWrite} saved={!!rec} />}
           <datalist id="people-list">{people.map((p) => <option key={p.id} value={p.full_name || p.email} />)}</datalist>
