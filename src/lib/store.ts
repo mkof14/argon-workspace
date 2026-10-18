@@ -11,6 +11,11 @@ import { milestoneReady } from "./milestones";
 import { serviceDone } from "./service";
 import { poStamps } from "./vendors";
 import { changeOrderEffects } from "./margin";
+import { enqueueSave, isNetworkError, isTemp, remap, type OutItem } from "./outboxlogic";
+import { offline, readQ, writeQ } from "./outbox";
+/** Lists loaded in this session (memory only, never stored on the device) — shown when the connection drops. */
+const MEM = new Map<string, Rec[]>();
+let FLUSHING = false;
 import { SHIP_GUARD, shipMissing, shipMsg, type Missing } from "./shipgate";
 import { DEFAULT_LIMITS, LIMITED, limitRoles, overLimit, withLimits, type Limits } from "@/config/approvals";
 let LIM: Promise<Limits> | null = null;
@@ -120,13 +125,19 @@ export const store = {
 
   async list(section: string): Promise<Rec[]> {
     if (DEMO) { const db = demoLoad(); return db.records.filter((r) => r.section === section && demoVisible(db, r)).sort((a, b) => (b.updated_at || "").localeCompare(a.updated_at || "")).map(loc); }
-    const { data, error } = await sb().from("records").select("*").eq("section", section).order("updated_at", { ascending: false }).limit(2000);
-    if (error) throw error; return ((data || []) as Rec[]).map(loc);
+    try {
+      if (offline()) throw new TypeError("Failed to fetch");
+      const { data, error } = await sb().from("records").select("*").eq("section", section).order("updated_at", { ascending: false }).limit(2000);
+      if (error) throw error; const out = ((data || []) as Rec[]).map(loc); MEM.set(section, out); return out;
+    } catch (e) { if (!isNetworkError(e)) throw e; return this.withPending([section], MEM.get(section) || []); }
   },
   async listMany(sections: string[]): Promise<Rec[]> {
     if (DEMO) { const db = demoLoad(); return db.records.filter((r) => sections.includes(r.section) && demoVisible(db, r)).map(loc); }
-    const { data } = await sb().from("records").select("*").in("section", sections).limit(3000);
-    return ((data || []) as Rec[]).map(loc);
+    try {
+      if (offline()) throw new TypeError("Failed to fetch");
+      const { data, error } = await sb().from("records").select("*").in("section", sections).limit(3000); if (error) throw error;
+      const out = ((data || []) as Rec[]).map(loc); for (const s of sections) MEM.set(s, out.filter((r) => r.section === s)); return out;
+    } catch (e) { if (!isNetworkError(e)) throw e; return this.withPending(sections, sections.flatMap((s) => MEM.get(s) || [])); }
   },
   async save(r0: Partial<Rec> & { section: string; title: string }): Promise<Rec> {
     const now = new Date().toISOString();
@@ -161,6 +172,12 @@ export const store = {
       demoSave(db); return rec;
     }
     const body: any = { section: r.section, title: r.title, status: r.status ?? null, data: r.data || {}, company: r.company || null, controlled: !!r.controlled };
+    // No connection: keep the change on the device and send it later (never export-controlled records)
+    if ((offline() || isTemp(r.id)) && !FLUSHING) { if (r.controlled) throw new Error("No connection — US-persons-only records are not kept on the device; save again when online."); return this.queueSave({ ...body, id: r.id }); }
+    try { return await this.saveLive(r, body); }
+    catch (e) { if (!FLUSHING && isNetworkError(e) && !r.controlled) return this.queueSave({ ...body, id: r.id }); throw e; }
+  },
+  async saveLive(r: Partial<Rec> & { section: string; title: string }, body: any): Promise<Rec> {
     if (r.id) {
       const { data: before } = await sb().from("records").select("status").eq("id", r.id).maybeSingle();
       if ((before?.status || "") !== (body.status || "") && (await this.spendCheck(r.section, r.id, body.status, body.data))) throw new Error(SPEND_ERR);
@@ -181,6 +198,44 @@ export const store = {
     if (DEMO) { const db = demoLoad(); const r = db.records.find((x) => x.id === id); db.records = db.records.filter((x) => x.id !== id);
       if (r) { const cmts = db.comments.filter((c) => c.record_id === id); db.comments = db.comments.filter((c) => c.record_id !== id); db.trash = [{ id, section: r.section, title: r.title, controlled: r.controlled, deleted_by: demoMe(db).id, deleted_at: new Date().toISOString(), comments: cmts.length, record: r, cmts }, ...(db.trash || [])]; } if (r) db.activity.unshift({ id: Date.now(), record_id: id, section: r.section, actor: demoMe(db).id, action: "deleted", detail: { title: r.title }, created_at: new Date().toISOString() }); demoSave(db); return; }
     const { error } = await sb().from("records").delete().eq("id", id); if (error) throw error;
+  },
+  /* ----- Offline outbox: changes wait on the device and go out in order when the connection is back ----- */
+  async me0() { try { const { data } = await sb().auth.getSession(); return data.session?.user?.id || ""; } catch { return ""; } },
+  async queue(x: any) { const q = await readQ(); await writeQ([...q, { ...x, id: `q-${uid()}`, at: new Date().toISOString(), user: await this.me0() } as OutItem]); },
+  async queueSave(rec: Record<string, any>): Promise<Rec> {
+    const now = new Date().toISOString(); const { q, id } = enqueueSave(await readQ(), rec, now, await this.me0(), uid); await writeQ(q);
+    return { company: null, controlled: false, ...rec, id, data: rec.data || {}, status: rec.status ?? null, updated_at: now, created_at: now, _offline: true } as any;
+  },
+  /** Lists shown offline: what was loaded in this session plus what waits in the outbox. */
+  async withPending(sections: string[], base: Rec[]): Promise<Rec[]> {
+    const q = await readQ(); const out = [...base];
+    for (const x of q) if (x.kind === "save" && sections.includes(x.rec.section)) { const i = out.findIndex((r) => r.id === x.rec.id); const r = { ...(i >= 0 ? out[i] : {}), ...x.rec, _offline: true } as any; if (i >= 0) out[i] = r; else out.unshift(r); }
+    return out;
+  },
+  async outboxCount() { return (await readQ()).filter((x) => !x.error).length; },
+  async outboxFailed() { return (await readQ()).filter((x) => x.error); },
+  async dropOutboxItem(id: string) { await writeQ((await readQ()).filter((x) => x.id !== id)); },
+  /** Sends the waiting changes in order; stops at the first connection error. Returns how many were sent. */
+  async flushOutbox(): Promise<number> {
+    if (DEMO || FLUSHING || offline()) return 0;
+    const me = await this.me0(); if (!me) return 0;
+    FLUSHING = true; let sent = 0;
+    try {
+      let q = await readQ();
+      for (const x0 of [...q]) {
+        const x = q.find((y) => y.id === x0.id); if (!x || x.error || x.user !== me) continue;
+        try {
+          if (x.kind === "save") { const { id, ...rest } = x.rec as any; const saved = await this.save(isTemp(id) ? rest : { ...rest, id }); if (isTemp(id)) q = remap(q, id, saved.id); }
+          else if (x.kind === "comment") await this.addComment(x.record_id, x.body);
+          else await this.upload(x.prefix, new File([x.file], x.name, { type: x.type }));
+          q = q.filter((y) => y.id !== x.id); sent++; await writeQ(q);
+        } catch (e: any) {
+          if (isNetworkError(e)) break;
+          q = q.map((y) => (y.id === x.id ? { ...y, error: String(e?.message || e).slice(0, 300) } : y)); await writeQ(q);
+        }
+      }
+    } finally { FLUSHING = false; }
+    return sent;
   },
   /* ----- Spending limits: above the self-approval amount a record needs an approved request ----- */
   async limits(): Promise<Limits> {
@@ -223,8 +278,9 @@ export const store = {
   },
   async addComment(recordId: string, body: string) {
     if (DEMO) { const db = demoLoad(); db.comments.push({ id: uid(), record_id: recordId, author: demoMe(db).id, body, created_at: new Date().toISOString() }); demoSave(db); return; }
+    if ((offline() || isTemp(recordId)) && !FLUSHING) { await this.queue({ kind: "comment", record_id: recordId, body }); return; }
     const { data: u } = await sb().auth.getUser();
-    const { error } = await sb().from("comments").insert({ record_id: recordId, body, author: u?.user?.id }); if (error) throw error;
+    const { error } = await sb().from("comments").insert({ record_id: recordId, body, author: u?.user?.id }); if (error) { if (!FLUSHING && isNetworkError(error)) { await this.queue({ kind: "comment", record_id: recordId, body }); return; } throw error; }
     translateLater({ id: recordId });
     if (/@\p{L}/u.test(body)) try { fetch("/api/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "mention", record_id: recordId }), keepalive: true }).catch(() => {}); } catch {}
   },
@@ -235,6 +291,12 @@ export const store = {
     if (opts.recordId) q = q.eq("record_id", opts.recordId);
     q = opts.log ? q.eq("section", "security.log") : q.neq("section", "security.log"); // the access log is shown only on the Security overview
     const { data } = await q; return (data || []) as Activity[];
+  },
+  /** Status changes of deals (for sales analytics). */
+  async dealHistory(): Promise<{ record_id: string | null; action: string; detail: any; created_at: string }[]> {
+    if (DEMO) return demoLoad().activity.filter((a) => a.section === "sales.pipeline" && a.action === "status");
+    const { data } = await sb().from("activity").select("record_id,action,detail,created_at").eq("section", "sales.pipeline").eq("action", "status").order("created_at").limit(5000);
+    return (data || []) as any;
   },
   /** Which of these records the person may open now (US-persons-only and deleted ones drop out). */
   async visibleIds(ids: string[]): Promise<Set<string>> {
@@ -315,8 +377,9 @@ export const store = {
       const db = demoLoad(); const item = { name: file.name, path, size: file.size, type: file.type, created_at: new Date().toISOString(), data };
       db.files = [item, ...(db.files || [])]; demoSave(db); const { data: _, ...f } = item; return f;
     }
+    if ((offline() || prefix.split("/").some(isTemp)) && !FLUSHING) { await this.queue({ kind: "upload", prefix, name: file.name, type: file.type, file }); return { name: file.name, path: `${prefix}/(waiting)_${safe}`, size: file.size, type: file.type }; }
     const { error } = await sb().storage.from(BUCKET).upload(path, file, { contentType: file.type || undefined, upsert: false });
-    if (error) throw error;
+    if (error) { if (!FLUSHING && isNetworkError(error)) { await this.queue({ kind: "upload", prefix, name: file.name, type: file.type, file }); return { name: file.name, path: `${prefix}/(waiting)_${safe}`, size: file.size, type: file.type }; } throw error; }
     return { name: file.name, path, size: file.size, type: file.type };
   },
   /** Temporary link. Default 1 hour; share links last up to 7 days. */

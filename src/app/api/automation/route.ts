@@ -33,12 +33,18 @@ export async function POST(req: Request) {
       if (ev.kind === "status" && (ev.from || "") === (ev.to || "")) return Response.json({ matched: 0 });
       return Response.json(await onRecordEvent(db, rec, ev));
     }
+    if (b.action === "targets") return Response.json({ sales_target: (await getSettings(db)).sales_target || 0 });
     if (b.action === "findings") return Response.json(await deptFindings(db, String(b.dept || ""), { role: me.role, us_person: !!me.us_person }));
     const admin = ["owner", "admin"].includes(me.role);
     if (!admin) return new Response("Only owners and administrators", { status: 403 });
     if (b.action === "pending") {
       const q = (await getQueue(db)).filter((x) => x.status === "pending");
       return Response.json({ n: q.length, items: q.slice(0, 8).map((x) => ({ id: x.id, agent: x.agent, title: x.controlled && !me.us_person ? "US-persons-only record" : x.title, at: x.at })) });
+    }
+    if (b.action === "queue") { // decision centre: pending proposals with what they would do
+      const q = (await getQueue(db)).filter((x) => x.status === "pending").slice(0, 60);
+      return Response.json(q.map((x) => x.controlled && !me.us_person ? { id: x.id, agent: x.agent, at: x.at, title: "US-persons-only record", detail: "", hidden: true, action: { type: x.action.type } }
+        : { id: x.id, agent: x.agent, at: x.at, title: x.title, detail: x.detail, record_id: x.record_id, section: x.section, action: x.action.type === "email" ? { ...x.action, body: String((x.action as any).body || "").slice(0, 1500) } : x.action }));
     }
     if (b.action === "state") {
       const settings = await getSettings(db);

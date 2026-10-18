@@ -17,6 +17,8 @@ export type Settings = {
   translate: { auto: boolean; emails: boolean };
   /** Who may approve spending, by amount — read through withLimits() in config/approvals. */
   limits: any;
+  /** Sales target per quarter, USD (0 = not set) */
+  sales_target: number;
 };
 
 /** Every agent starts in "suggest": it prepares the change and a person approves it with one click. */
@@ -28,6 +30,7 @@ export const DEFAULT_SETTINGS: Settings = {
   ai: { monthly_usd: 50, price_in: 3, price_out: 15 },
   translate: { auto: true, emails: true },
   limits: null,
+  sales_target: 0,
 };
 
 /** Merges saved settings over the defaults, so new options get sensible values. */
@@ -47,6 +50,7 @@ export function withDefaults(s: any): Settings {
     agents: Object.fromEntries(AGENTS.map((a) => [a, mode(s.agents?.[a], d.agents[a])])) as Record<AgentId, Mode>,
     translate: { auto: s.translate?.auto !== false, emails: s.translate?.emails !== false },
     limits: s.limits ?? null,
+    sales_target: num(s.sales_target, 0, 0, 1e10),
     ai: { monthly_usd: num(s.ai?.monthly_usd, d.ai.monthly_usd, 0, 100000), price_in: num(s.ai?.price_in, d.ai.price_in, 0, 1000), price_out: num(s.ai?.price_out, d.ai.price_out, 0, 1000) },
   };
 }

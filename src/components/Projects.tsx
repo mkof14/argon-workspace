@@ -10,6 +10,7 @@ import { LIMIT, workload } from "@/lib/workload";
 import { projectMoney } from "@/lib/margin";
 import { shortages } from "@/lib/parts";
 import { shipMissing } from "@/lib/shipgate";
+import WhatIf from "./WhatIf";
 
 type T4 = { en: string; ru: string; uk: string; ar: string };
 const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk, ar });
@@ -30,14 +31,14 @@ const REASON: Record<Reason["k"], (n: any) => T4> = {
 /** Projects: the portfolio of won deals with a traffic light, and the team's workload by week. */
 export default function Projects() {
   const { lang, access, people } = useApp(); const T = (x: T4) => tx(x, lang as Lang);
-  const [tab, setTab] = useState<"pf" | "wl">("pf"); const [all, setAll] = useState<Rec[] | null>(null); const [only, setOnly] = useState<Health | "">(""); const [open, setOpen] = useState<{ who: string; i: number } | null>(null);
-  useEffect(() => { const q = new URLSearchParams(window.location.search).get("tab"); if (q === "wl") setTab("wl");
-    const secs = SECTIONS.map((s) => s.id).filter((id: string) => access.read.has(id) && !id.endsWith(".metrics"));
+  const [tab, setTab] = useState<"pf" | "wl" | "wi">("pf"); const [all, setAll] = useState<Rec[] | null>(null); const [only, setOnly] = useState<Health | "">(""); const [open, setOpen] = useState<{ who: string; i: number } | null>(null);
+  useEffect(() => { const q = new URLSearchParams(window.location.search).get("tab"); if (q === "wl" || q === "wi") setTab(q);
+    const secs = SECTIONS.map((s) => s.id).filter((id: string) => access.read.has(id) && (!id.endsWith(".metrics") || id === "finance.metrics"));
     store.listMany(secs).then((r) => setAll(r.map((x) => ({ ...store.original(x), controlled: x.controlled }) as Rec))).catch(() => setAll([])); }, []); // eslint-disable-line
   const today = new Date().toISOString().slice(0, 10);
   const rows = useMemo(() => all ? portfolio(all as any, today, { money: projectMoney as any, parts: shortages as any, ship: (b: any) => shipMissing("operations.builds", "Shipping", b.data, null, all as any) }) : [], [all, today]);
   const wl = useMemo(() => all ? workload(all as any, people, today) : null, [all, people, today]);
-  const go = (k: "pf" | "wl") => { setTab(k); try { const u = new URL(window.location.href); u.searchParams.set("tab", k); window.history.replaceState(window.history.state, "", u.toString()); } catch {} };
+  const go = (k: "pf" | "wl" | "wi") => { setTab(k); try { const u = new URL(window.location.href); u.searchParams.set("tab", k); window.history.replaceState(window.history.state, "", u.toString()); } catch {} };
   const fmt = (d: string) => d ? new Date(d + "T00:00:00Z").toLocaleDateString(lang === "en" ? "en-US" : lang, { day: "numeric", month: "short", timeZone: "UTC" }) : "—";
   const count = (h: Health) => rows.filter((r) => r.health === h).length;
   const href = (r: { section: string; id: string }) => `/${r.section.replace(".", "/")}?r=${r.id}`;
@@ -45,8 +46,9 @@ export default function Projects() {
   return <div style={{ display: "grid", gap: 16 }}>
     <div className="tabs card" role="tablist" style={{ ["--dc" as any]: "#0E9F6E" }}>
       <button role="tab" aria-selected={tab === "pf"} className={tab === "pf" ? "on" : ""} onClick={() => go("pf")}><Icon n="layers" />{T(L("Portfolio", "Портфель", "Портфель", "المحفظة"))}</button>
-      <button role="tab" aria-selected={tab === "wl"} className={tab === "wl" ? "on" : ""} onClick={() => go("wl")}><Icon n="users" />{T(L("Team workload", "Загрузка команды", "Завантаження команди", "عبء عمل الفريق"))}</button></div>
-    {!all ? <div className="card" style={{ padding: 24 }}>…</div> : tab === "pf" ? <>
+      <button role="tab" aria-selected={tab === "wl"} className={tab === "wl" ? "on" : ""} onClick={() => go("wl")}><Icon n="users" />{T(L("Team workload", "Загрузка команды", "Завантаження команди", "عبء عمل الفريق"))}</button>
+      <button role="tab" aria-selected={tab === "wi"} className={tab === "wi" ? "on" : ""} onClick={() => go("wi")}><Icon n="trend" />{T(L("What if", "Что если", "Що якщо", "ماذا لو"))}</button></div>
+    {!all ? <div className="card" style={{ padding: 24 }}>…</div> : tab === "wi" ? <WhatIf all={all} /> : tab === "pf" ? <>
       <div className="toolbar">{(["red", "amber", "green"] as Health[]).map((h) => <button key={h} className={`chip ${HEALTH[h].cls} ${only === h ? "on" : ""}`} style={{ cursor: "pointer", outline: only === h ? "2px solid currentColor" : "none" }} onClick={() => setOnly(only === h ? "" : h)}>{T(HEALTH[h].t)} · {count(h)}</button>)}</div>
       {!rows.length ? <div className="card" style={{ padding: 24 }}><small className="faint">{T(L("No projects yet. Unfold a project in a won deal (Project plan) and it appears here.", "Проектов пока нет. Разверните проект в выигранной сделке («План проекта») — он появится здесь.", "Проєктів поки немає. Розгорніть проєкт у виграній угоді («План проєкту») — він з'явиться тут.", "لا مشاريع بعد. أنشئ مشروعاً في صفقة رابحة (خطة المشروع) وسيظهر هنا."))}</small></div>
         : <div className="pf">{rows.filter((r) => !only || r.health === only).map((r) => <div key={r.deal.id} className={`card pf-row h-${r.health}`}>

@@ -33,7 +33,10 @@ const Intake = dynamic(() => import("./Intake"), { ssr: false });
 const DocsAsk = dynamic(() => import("./DocsAsk"), { ssr: false });
 const StarDome = dynamic(() => import("./StarDome"), { ssr: false });
 const Projects = dynamic(() => import("./Projects"), { ssr: false });
-export const VERSION = "2.29";
+const Decisions = dynamic(() => import("./Decisions"), { ssr: false });
+const PhotoCapture = dynamic(() => import("./PhotoCapture"), { ssr: false });
+const OfflineBar = dynamic(() => import("./OfflineBar"), { ssr: false });
+export const VERSION = "2.30";
 
 type Ctx = {
   lang: Lang; me: Profile; access: Access; toast: (m: string, err?: boolean) => void;
@@ -81,6 +84,7 @@ export default function App({ slug }: { slug: string[] }) {
   const navStack = useRef<string[]>([]);
   const [search, setSearch] = useState<null | { voice?: boolean }>(null);
   const [intake, setIntake] = useState<null | { files?: File[] }>(null);
+  const [photo, setPhoto] = useState(false);
   const [dragFiles, setDragFiles] = useState(false);
   useEffect(() => { // Ctrl/⌘+K or "/" opens search anywhere
     const k = (e: KeyboardEvent) => {
@@ -163,7 +167,7 @@ export default function App({ slug }: { slug: string[] }) {
   const depts = DEPARTMENTS.map((d: any) => ({ ...d, secs: SECTIONS.filter((s) => s.dept === d.key && access.read.has(s.id)) })).filter((d: any) => d.secs.length);
   const isAdmin = me.role === "owner" || me.role === "admin";
   const dept = section ? DEPARTMENTS.find((d: any) => d.key === section.dept) : null;
-  const special: Record<string, [string, string]> = { trash: [t("workspace", lang), t("trash", lang)], today: [t("workspace", lang), tx({ en: "My day", ru: "Мой день", uk: "Мій день", ar: "يومي" }, lang)], stardome: [t("workspace", lang), t("sd_title", lang)], projects: [t("workspace", lang), tx({ en: "Projects", ru: "Проекты", uk: "Проєкти", ar: "المشاريع" }, lang)], "admin/users": [t("admin", lang), t("users", lang)], "admin/roles": [t("admin", lang), t("roles", lang)], "admin/system": [t("admin", lang), t("sys_title", lang)], me: [t("workspace", lang), t("my_profile", lang)], learn: [t("workspace", lang), t("learn", lang)], reports: [t("workspace", lang), t("reports", lang)], templates: [t("workspace", lang), t("templates", lang)], ask: [t("workspace", lang), t("ask_docs", lang)] };
+  const special: Record<string, [string, string]> = { trash: [t("workspace", lang), t("trash", lang)], today: [t("workspace", lang), tx({ en: "My day", ru: "Мой день", uk: "Мій день", ar: "يومي" }, lang)], stardome: [t("workspace", lang), t("sd_title", lang)], projects: [t("workspace", lang), tx({ en: "Projects", ru: "Проекты", uk: "Проєкти", ar: "المشاريع" }, lang)], decide: [t("workspace", lang), tx({ en: "Decisions", ru: "Решения", uk: "Рішення", ar: "القرارات" }, lang)], "admin/users": [t("admin", lang), t("users", lang)], "admin/roles": [t("admin", lang), t("roles", lang)], "admin/system": [t("admin", lang), t("sys_title", lang)], me: [t("workspace", lang), t("my_profile", lang)], learn: [t("workspace", lang), t("learn", lang)], reports: [t("workspace", lang), t("reports", lang)], templates: [t("workspace", lang), t("templates", lang)], ask: [t("workspace", lang), t("ask_docs", lang)] };
   const hubD = hubDept ? DEPARTMENTS.find((d: any) => d.key === hubDept) : null;
   const crumbGroup = hubD ? tx(hubD.label, lang) : section ? tx(dept.label, lang) : special[route]?.[0] || t("workspace", lang);
   const crumbTitle = hubD ? t("dept_overview", lang) : section ? tx(section.label, lang) : special[route]?.[1] || t("overview", lang);
@@ -193,6 +197,7 @@ export default function App({ slug }: { slug: string[] }) {
   else if (route === "ask") body = <DocsAsk />;
   else if (route === "stardome") body = <StarDome />;
   else if (route === "projects" && !isExternal(me.role)) body = <Projects />;
+  else if (route === "decide" && !isExternal(me.role)) body = <Decisions />;
   else if (hubD && depts.some((d: any) => d.key === hubDept)) {
     const secs = SECTIONS.filter((x) => x.dept === hubDept && access.read.has(x.id));
     body = <>
@@ -229,6 +234,7 @@ export default function App({ slug }: { slug: string[] }) {
           <nav ref={navRef}>
             <Link href="/" className={`nav-item top ${!route ? "active" : ""}`} style={{ ["--dc" as any]: "#FF6A2B" }}><Icon n="stardome" /><span>{t("overview", lang)}</span></Link>
             {!isExternal(me.role) && <Link href="/today" className={`nav-item top ${route === "today" ? "active" : ""}`} style={{ ["--dc" as any]: "#F59E0B" }}><Icon n="sun" /><span>{tx({ en: "My day", ru: "Мой день", uk: "Мій день", ar: "يومي" }, lang)}</span></Link>}
+            {!isExternal(me.role) && <Link href="/decide" className={`nav-item top ${route === "decide" ? "active" : ""}`} style={{ ["--dc" as any]: "#D9480F" }}><Icon n="check" /><span>{tx({ en: "Decisions", ru: "Решения", uk: "Рішення", ar: "القرارات" }, lang)}</span></Link>}
             {!isExternal(me.role) && <Link href="/stardome" className={`nav-item top ${route === "stardome" ? "active" : ""}`} style={{ ["--dc" as any]: "#FF6A2B" }}><Icon n="container" /><span>{t("sd_title", lang)}</span></Link>}
             {!isExternal(me.role) && <Link href="/projects" className={`nav-item top ${route === "projects" ? "active" : ""}`} style={{ ["--dc" as any]: "#0E9F6E" }}><Icon n="layers" /><span>{tx({ en: "Projects", ru: "Проекты", uk: "Проєкти", ar: "المشاريع" }, lang)}</span></Link>}
             {!isExternal(me.role) && <Link href="/ask" className={`nav-item top ${route === "ask" ? "active" : ""}`} style={{ ["--dc" as any]: "#7C5CFF" }}><Icon n="spark" /><span>{t("ask_docs", lang)}</span></Link>}
@@ -279,6 +285,7 @@ export default function App({ slug }: { slug: string[] }) {
             <div className="tb-right">
               <button className="searchbtn" onClick={() => setSearch({})} aria-label={t("search_all", lang)}><Icon n="search" /><span>{t("search_short", lang)}</span><kbd>⌘K</kbd></button>
               <button className="iconbtn mic-top" onClick={() => setSearch({ voice: true })} title={t("voice", lang)} aria-label={t("voice", lang)}><Icon n="mic" /></button>
+              {!isExternal(me.role) && <button className="iconbtn photo-btn" onClick={() => setPhoto(true)} title={tx({ en: "Photo → record", ru: "Фото → запись", uk: "Фото → запис", ar: "صورة ← سجل" }, lang)} aria-label={tx({ en: "Photo → record", ru: "Фото → запись", uk: "Фото → запис", ar: "صورة ← سجل" }, lang)}><Icon n="image" /></button>}
               {!isExternal(me.role) && <button className="btn sm intake-btn" onClick={() => setIntake({})} title={t("intake_t", lang)} aria-label={t("intake_t", lang)}><Icon n="upload" /><span>{t("intake_btn", lang)}</span></button>}
               <Bell />
               <button className="btn sm askai" onClick={() => setAi({ title: crumbTitle, section: sectionId })} aria-label={t("ask_ai", lang)}><Icon n="spark" /><span>{t("ask_ai", lang)}</span></button>
@@ -308,6 +315,8 @@ export default function App({ slug }: { slug: string[] }) {
       {mail && <ComposerModal init={mail} onClose={() => setMail(null)} />}
       {search && <Search voice={search.voice} onClose={() => setSearch(null)} />}
       {intake && <Intake initial={intake.files} onClose={() => setIntake(null)} />}
+      {photo && <PhotoCapture onClose={() => setPhoto(false)} />}
+      <OfflineBar />
       <div className="toasts" aria-live="polite">{toasts.map((x) => <div key={x.id} className={`toast ${x.err ? "err" : ""}`}>{x.m}</div>)}</div>
     </AppCtx.Provider>
   );

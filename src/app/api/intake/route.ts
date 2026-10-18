@@ -56,7 +56,15 @@ export async function POST(req: Request) {
     const used = (rows || []).reduce((a: number, r: any) => a + (r.input_tokens || 0) + (r.output_tokens || 0), 0);
     if (!me.super && used >= (me.ai_monthly_tokens || 0)) return new Response("Monthly AI limit reached", { status: 429 });
 
-    const secs = await writable(me);
+    let secs = await writable(me);
+    // Photo modes: a receipt becomes an expense, a business card a lead, a delivery note is read as a purchase to match
+    const MODE: Record<string, { sec: string; hint: string }> = {
+      receipt: { sec: "finance.expenses", hint: "This is a photo of a receipt or a supplier invoice paid by an employee. Section must be finance.expenses. Title: vendor + what was bought. Fill amount (total incl. tax) and currency exactly as printed, category, and put date, vendor and items into notes. Status Submitted." },
+      card: { sec: "marketing.leads", hint: "This is a photo of a business card. Section must be marketing.leads. Title: company name. contact = person name, position and phone; email as printed; country from the address; source Event unless the card says otherwise. Status New." },
+      delivery: { sec: "operations.procurement", hint: "This is a photo of a delivery note / packing list from a supplier. Section must be operations.procurement. Fill vendor (supplier name), item (main item or part number), qty (delivered quantity) and put every line (item, part number, qty) and the delivery note number into notes. Status Received." },
+    };
+    const mode = MODE[String(b.mode || "")];
+    if (mode) { secs = secs.filter((s) => s.id === mode.sec); if (!secs.length && !(mode.sec === "operations.procurement")) return new Response("Your role cannot add records here", { status: 403 }); if (!secs.length) secs = SECS.filter((s) => s.id === mode.sec); }
     if (!secs.length) return new Response("Your role cannot add records", { status: 403 });
     const name = String(b.name || b.path.split("/").pop());
     const type = String(b.type || "");
@@ -74,7 +82,7 @@ export async function POST(req: Request) {
       content.push({ type: "text", text: `File name: ${name}` });
     }
     try {
-      const p = await classify(content, secs, { lang: b.lang, extra: `The user ${me.us_person ? "is" : "is NOT"} a US person.` });
+      const p = await classify(content, secs, { lang: b.lang, extra: `The user ${me.us_person ? "is" : "is NOT"} a US person.${mode ? " " + mode.hint : ""}` });
       await admin.from("ai_usage").insert({ user_id: me.id, model: p.usage.model, input_tokens: p.usage.tin, output_tokens: p.usage.tout });
       return Response.json({ section: p.section, title: p.title, status: p.status, data: p.data, summary: p.summary, reason: p.reason,
         controlled: p.controlled && !!me.us_person, suggestControlled: p.controlled, alternatives: p.alternatives, confidence: p.confidence });

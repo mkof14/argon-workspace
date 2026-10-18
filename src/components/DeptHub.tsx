@@ -4,6 +4,8 @@ import Link from "next/link";
 import Icon from "./Icon";
 import { left as slaLeft, slaFor } from "@/lib/sla";
 import CashForecast from "./CashForecast";
+import dynamic from "next/dynamic";
+const SalesStats = dynamic(() => import("./SalesStats"), { ssr: false });
 import { dso } from "@/lib/dunning";
 import { useApp, findSection, SECTIONS } from "./App";
 import StageBoard from "./StageBoard";
@@ -198,6 +200,7 @@ export default function DeptHub({ dept }: { dept: string }) {
     /* ------------------------------ Sales ------------------------------ */
     if (dept === "sales") {
       const deals = of("sales.pipeline"), openD = deals.filter((r) => !["Won", "Lost"].includes(r.status || ""));
+      if (has("sales.pipeline")) cards.push(<SalesStats key="ss" />);
       kpis.push({ l: L("Tenders with deadlines in 30 days", "Тендеры со сроком за 30 дней"), v: String(of("sales.tenders").filter((r) => OPEN(r) && r.data?.deadline && dayDiff(r.data.deadline) >= 0 && dayDiff(r.data.deadline) <= 30).length), href: "/sales/tenders" });
       kpis.push({ l: L("Proposals awaiting answer", "КП ждут ответа"), v: String(of("sales.proposals").filter((r) => r.status === "Sent").length), s: `${of("sales.proposals").filter((r) => r.status === "Sent" && r.data?.valid_until && dayDiff(r.data.valid_until) <= 7).length} ${T(L("expire in 7 days", "истекают за 7 дней"))}`, href: "/sales/proposals" });
       kpis.push({ l: L("Meetings this week", "Встречи на неделе"), v: String(of("sales.activities").filter((r) => r.data?.date && Math.abs(dayDiff(r.data.date)) <= 7).length), href: "/sales/activities" });

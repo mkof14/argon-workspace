@@ -160,6 +160,9 @@ export function salesFindings(all: R[], today: string, th: Th): Finding[] {
         out.push({ rec: a, level: "info", who: ["owner"], key: `sal-next|${a.id}`, repeat: 365, text: `Next step after “${a.title}”: ${next}. A task is prepared.`, action: { type: "create", section: "company.tasks", title, status: "Open", fields: { assignee: "{owner}", due: addDays(today, 3), priority: "Medium", related: link(a) } }, why: "Next step recorded" });
     }
   }
+  // Lost deals without a reason make the loss analysis blind
+  for (const d of of(all, "sales.pipeline")) if (d.status === "Lost" && !d.data?.lost_reason && age(d, today) <= 30)
+    out.push({ rec: d, level: "info", who: ["owner", "role:sales"], key: `sal-lost|${d.id}`, repeat: 365, text: `Deal “${d.title}” is Lost without a reason — fill “Why lost” so the sales analytics can show where deals go.` });
   return out;
 }
 
