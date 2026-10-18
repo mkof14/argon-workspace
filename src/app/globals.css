@@ -1063,3 +1063,22 @@ tr.neg td{color:var(--bad)}
 .pt-form{display:grid;gap:10px}.pt-form h3{margin:0;font-size:16px}.pt-form label{display:grid;gap:4px;font-size:13.5px;color:var(--ink-2)}
 .pt-msg{margin:0;font-weight:600}
 .pt-foot{font-size:12.5px;color:var(--ink-3);text-align:center;padding:12px 0 24px}
+/* Project timeline */
+.tl{display:grid;gap:4px;margin:6px 0}
+.tl-axis,.tl-row{display:grid;grid-template-columns:minmax(120px,34%) 1fr 40px;align-items:center;gap:8px;min-height:30px}
+.tl-axis .tl-track i{position:absolute;top:2px;font-size:11px;font-style:normal;color:var(--ink-3);transform:translateX(-50%)}
+.tl-track{position:relative;height:26px;border-bottom:1px solid var(--line)}
+.tl-name{font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+.tl-today{position:absolute;top:0;bottom:0;width:0;border-inline-start:2px solid var(--dc,#FF6A2B);opacity:.5}
+.tl-dot{position:absolute;top:8px;width:11px;height:11px;margin-inline-start:-5px;border-radius:50%;background:var(--ink-2);border:2px solid var(--surface)}
+.tl-date{position:absolute;top:-2px;margin-inline-start:9px;font-size:11.5px;color:var(--ink-2);white-space:nowrap}
+.tl-row.done .tl-dot{background:var(--ok,#1F7A4D)}.tl-row.done .tl-name{color:var(--ink-3)}
+.tl-row.late .tl-dot{background:var(--bad)}.tl-row.late .tl-date{color:var(--bad);font-weight:600}
+.tl-edit{display:flex;gap:6px;grid-column:1/-1;justify-content:flex-end}.tl-edit .input{width:auto}
+@media (max-width:640px){.tl-axis,.tl-row{grid-template-columns:110px 1fr 36px}}
+.tl-date.end{margin-inline-start:0;transform:translateX(calc(-100% - 9px))}[dir="rtl"] .tl-date.end{transform:translateX(calc(100% + 9px))}
+.tl-track{overflow:visible}.tl{overflow:hidden}
+.sla-row{display:grid;grid-template-columns:minmax(110px,auto) 1fr auto;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line);font-size:14px}
+@media (max-width:560px){.sla-row{grid-template-columns:1fr auto}.sla-row>.chip{grid-column:1/-1;justify-self:start;white-space:normal}}
+.limit-row{display:grid;grid-template-columns:160px 1fr auto;gap:12px;align-items:end;border-top:1px solid var(--line);padding-top:10px}
+@media (max-width:640px){.limit-row{grid-template-columns:1fr}}

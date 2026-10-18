@@ -1,5 +1,5 @@
 "use client";
-import { l2 } from "@/config/learn";
+import { l2 } from "@/config/l2";
 import { useEffect, useMemo, useState } from "react";
 import Icon from "./Icon";
 import { useApp, findSection } from "./App";

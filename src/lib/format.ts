@@ -69,3 +69,9 @@ export function printHtml(title: string, html: string) {
   w.document.close(); w.focus(); setTimeout(() => w.print(), 300);
 }
 
+
+/** Message when spending above the limit is set to an approved status without an approval. */
+export function spendMsg(roles: string[], lang: string, roleLabel: (r: string) => string) {
+  const who = roles.map(roleLabel).join(", ");
+  return ({ en: `The amount is above the self-approval limit — send the record for approval first (may approve: ${who}).`, ru: `Сумма выше лимита самостоятельного согласования — сначала отправьте запись на согласование (могут одобрить: ${who}).`, uk: `Сума перевищує ліміт самостійного погодження — спершу надішліть запис на погодження (можуть схвалити: ${who}).`, ar: `المبلغ يتجاوز حد الموافقة الذاتية — أرسل السجل للموافقة أولاً (يمكن أن يوافق: ${who}).` } as any)[lang] || "";
+}

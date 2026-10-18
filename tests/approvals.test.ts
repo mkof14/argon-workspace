@@ -19,3 +19,16 @@ test("Only waiting statuses can be sent", () => {
   assert.ok(!canSendForApproval("finance.expenses", "Paid"));
   assert.ok(!canSendForApproval("legal.contracts", "Drafting"));
 });
+
+import { limitRoles, overLimit, withLimits } from "../src/config/approvals.ts";
+test("approval limits: self-approval amount, tiers by amount, currency converted", () => {
+  assert.equal(overLimit("finance.expenses", { amount: 400, currency: "USD" }), false);
+  assert.equal(overLimit("finance.expenses", { amount: 3000, currency: "AED" }), true); // ≈ 817 USD
+  assert.deepEqual(limitRoles("finance.expenses", { amount: 3000, currency: "USD" }), ["finance", "management", "admin", "owner"]);
+  assert.deepEqual(limitRoles("operations.procurement", { amount: 20000, currency: "EUR" }), ["management", "admin", "owner"]);
+  assert.deepEqual(limitRoles("operations.procurement", { amount: 900000, currency: "USD" }), ["owner"]);
+  assert.equal(limitRoles("hr.leave", {}), null);
+  const custom = withLimits({ self_usd: 100, tiers: [{ up_to: 1000, roles: ["finance"] }] });
+  assert.deepEqual(custom.tiers.at(-1), { up_to: null, roles: ["owner"] });
+  assert.deepEqual(limitRoles("finance.expenses", { amount: 5000 }, custom), ["owner"]);
+});

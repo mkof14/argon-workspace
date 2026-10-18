@@ -3,7 +3,7 @@
 import type { Action } from "./automation";
 
 type R = { id: string; section: string; title: string; status: string | null; data: Record<string, any>; controlled?: boolean; created_at?: string; updated_at?: string };
-export type Th = { remind_before: number; escalate_after: number; stalled_deal: number; /** 90-day forecast, computed by the caller (lib/cashforecast) */ cash?: { opening: number | null; gap: { week: number; start: string; balance: number } | null; lines: { id: string; title: string; usd: number; date: string; kind: string }[] } };
+export type Th = { remind_before: number; escalate_after: number; stalled_deal: number; /** 90-day forecast, computed by the caller (lib/cashforecast) */ /** SLA of a support request, computed by the caller (lib/sla) */ sla?: (t: any, fleet: any[]) => { respond: string; resolve: string; respondBy: string; resolveBy: string; tier: string; severity: string } | null; /** Parts shortages for builds, computed by the caller (lib/parts) */ parts?: (all: any[], today: string) => { b: any; lines: { line: any; short: number; free: number }[] }[]; cash?: { opening: number | null; gap: { week: number; start: string; balance: number } | null; lines: { id: string; title: string; usd: number; date: string; kind: string }[] } };
 /**
  * One thing an agent noticed.
  * who: "owner" (the person named in the record), "role:<role>" or "leads"; key: raised once, then again every `repeat` days while still true.
@@ -148,6 +148,24 @@ export function salesFindings(all: R[], today: string, th: Th): Finding[] {
 /* ---------------- Operations ---------------- */
 export function operationsFindings(all: R[], today: string, _th: Th): Finding[] {
   const out: Finding[] = [];
+  // Parts: builds that will need parts that are neither reserved, in stock nor ordered
+  for (const x of _th.parts ? _th.parts(all, today) : []) {
+    const list = x.lines.map((l) => `${l.line.data?.item || l.line.title} × ${l.short - l.free}`).join(", ");
+    out.push({ rec: { ...x.b, data: { ...x.b.data, parts_short: list } }, level: "warn", who: ["role:operations"], key: `ops-parts|${x.b.id}|${list}`, repeat: 7,
+      text: `Build “${x.b.title}” is short of parts: ${list}. Open the build → Parts for this build → Draft orders for the shortage.` });
+  }
+  // Service levels: a response or a resolution past its deadline
+  if (_th.sla) {
+    const fleet = of(all, "operations.fleet");
+    for (const t of of(all, "operations.support")) {
+      const v = _th.sla(t, fleet); if (!v) continue;
+      const rec: any = { ...t, data: { ...t.data, sla_tier: v.tier, respond_by: v.respondBy.slice(0, 16).replace("T", " ") + " UTC", resolve_by: v.resolveBy.slice(0, 16).replace("T", " ") + " UTC" } };
+      if (v.respond === "late") out.push({ rec, level: v.severity === "Critical" || v.severity === "High" ? "bad" : "warn", who: ["role:operations", ...(v.severity === "Critical" ? ["leads"] : [])], key: `sla-resp|${t.id}`, repeat: 1,
+        text: `No response yet to “${t.title}” (${v.severity}, ${v.tier}): the SLA response time ended ${rec.data.respond_by}. Contact the client now.` });
+      else if (v.resolve === "late") out.push({ rec, level: "bad", who: ["role:operations", "leads"], key: `sla-res|${t.id}`, repeat: 2,
+        text: `“${t.title}” (${v.severity}, ${v.tier}) is not resolved within the SLA (by ${rec.data.resolve_by}). Escalate or agree a new date with the client.` });
+    }
+  }
   const builds = of(all, "operations.builds"); const byId = new Map(all.map((r) => [r.id, r]));
   const linked = (sec: string, key: string, id: string) => all.filter((r) => r.section === sec && r.data?.[key] === id);
   // Export control before anything ships

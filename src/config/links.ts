@@ -10,9 +10,11 @@ export const REFS: Record<string, Record<string, string>> = {
   "operations.installation": { build_ref: "operations.builds" },
   "operations.fleet": { build_ref: "operations.builds" },
   "operations.support": { unit_ref: "operations.fleet" },
+  "operations.inventory": { build_ref: "operations.builds" },
+  "operations.procurement": { build_ref: "operations.builds" },
 };
 /** Chain order shown in a record: from the first contact to service after installation. */
-export const CHAIN = ["marketing.leads", "sales.clients", "sales.pipeline", "security.screening", "sales.proposals", "legal.contracts", "finance.invoices", "operations.builds", "operations.logistics", "operations.installation", "operations.fleet", "operations.support"];
+export const CHAIN = ["marketing.leads", "sales.clients", "sales.pipeline", "security.screening", "sales.proposals", "legal.contracts", "finance.invoices", "operations.builds", "operations.procurement", "operations.inventory", "operations.logistics", "operations.installation", "operations.fleet", "operations.support"];
 export const REF_KEYS = [...new Set(Object.values(REFS).flatMap((m) => Object.keys(m)))];
 
 type Node = { id: string; section: string; title: string; status: string | null; data?: any };

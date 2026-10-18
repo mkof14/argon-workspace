@@ -5,7 +5,7 @@ import Icon from "./Icon";
 import { useApp, SECTIONS } from "./App";
 import { tx, type Lang } from "@/lib/i18n";
 import { store, type Rec } from "@/lib/store";
-import { PROJECT_TEMPLATES, projectPlan } from "@/lib/projects";
+import { PROJECT_TEMPLATES, projectPlan, shiftPlan, stepDate, stepDone } from "@/lib/projects";
 
 type T4 = { en: string; ru: string; uk: string; ar: string };
 const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk, ar });
@@ -53,13 +53,17 @@ export default function ProjectPlanner({ deal, onDone }: { deal: Rec; onDone: ()
   };
 
   const sec = (id: string) => SECTIONS.find((s) => s.id === id);
+  // Moving a step moves the later unfinished steps with it
+  const shift = async (id: string, to: string) => {
+    const ch = shiftPlan(done, id, to); if (!ch.length) return;
+    try { for (const c of ch) { const r = done.find((x) => x.id === c.id)!; const o = store.original(r); await store.save({ ...o, data: { ...o.data, [c.key]: c.to } }); }
+      toast(`${T(L("Moved", "Перенесено", "Перенесено", "تم النقل"))}: ${ch.length}`); await load(); } catch (e: any) { toast(e.message || "Error", true); }
+  };
   const head = <div className="appr-h"><Icon n="layers" /><b>{T(L("Project plan", "План проекта", "План проєкту", "خطة المشروع"))}</b>
     {done.length > 0 && <span className="chip c-ok" style={{ marginInlineStart: 8 }}>{done.length}</span>}
     {open && <button className="btn ghost sm" style={{ marginInlineStart: "auto" }} onClick={() => setOpen(false)}>{T(L("Close", "Закрыть", "Закрити", "إغلاق"))}</button>}</div>;
   if (!open) return <section className="appr">{head}
-    {done.length > 0 && <div className="feed">{done.sort((a, b) => String(a.data?.due || a.data?.date || a.data?.eta || "").localeCompare(String(b.data?.due || b.data?.date || b.data?.eta || ""))).map((r) => <Link key={r.id} className="feed-row" href={`/${r.section.replace(".", "/")}?r=${r.id}`}>
-      <span className="flag"><Icon n={sec(r.section)?.icon || "file"} /></span><span style={{ flex: 1, minWidth: 0 }}><b>{r.title}</b><small className="faint" style={{ display: "block" }}>{tx(sec(r.section)?.label, lang as Lang)} · {r.status}</small></span>
-      <span className="mono faint" style={{ fontSize: 12.5 }}>{String(r.data?.due || r.data?.date || r.data?.eta || "").slice(0, 10)}</span></Link>)}</div>}
+    {done.length > 0 && <Timeline recs={done} onShift={shift} lang={lang as Lang} />}
     <div className="toolbar"><button className="btn primary sm" onClick={() => setOpen(true)}><Icon n="layers" />{done.length ? T(L("Add missing steps", "Добавить недостающие шаги", "Додати відсутні кроки", "إضافة الخطوات الناقصة")) : T(L("Unfold the project", "Развернуть проект", "Розгорнути проєкт", "إنشاء المشروع"))}</button>
       {!done.length && <small className="faint">{T(L("Build, purchases, screening, shipping, installation, acceptance, training and service — with dates and owners", "Сборка, закупки, проверка, отгрузка, монтаж, приёмка, обучение и сервис — с датами и ответственными", "Збирання, закупівлі, перевірка, відвантаження, монтаж, приймання, навчання й сервіс — з датами та відповідальними", "التجميع والمشتريات والفحص والشحن والتركيب والقبول والتدريب والصيانة — بالتواريخ والمسؤولين"))}</small>}</div></section>;
 
@@ -75,4 +79,29 @@ export default function ProjectPlanner({ deal, onDone }: { deal: Rec; onDone: ()
     {cannot.length > 0 && <div className="hint">{T(L("Some steps are in sections you cannot change; they will be skipped:", "Некоторые шаги в разделах, которые вы не можете менять; они будут пропущены:", "Деякі кроки в розділах, які ви не можете змінювати; їх буде пропущено:", "بعض الخطوات في أقسام لا يمكنك تعديلها وستُتخطى:"))} {cannot.map((c) => tx(sec(c.section)?.label, lang as Lang)).join(", ")}</div>}
     <div className="toolbar"><button className="btn primary" disabled={busy} onClick={create}><Icon n="check" />{busy ? "…" : T(L("Create the plan", "Создать план", "Створити план", "إنشاء الخطة"))}</button></div>
   </section>;
+}
+
+/** Project timeline: every step on one time axis, today marked; a step can be moved and the later ones follow. */
+function Timeline({ recs, onShift, lang }: { recs: Rec[]; onShift: (id: string, to: string) => void; lang: Lang }) {
+  const T = (x: T4) => tx(x, lang);
+  const [edit, setEdit] = useState<{ id: string; to: string } | null>(null);
+  const rows = recs.map((r) => ({ r, d: stepDate(r) })).filter((x) => x.d).sort((a, b) => a.d.localeCompare(b.d));
+  if (!rows.length) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const t0 = Math.min(Date.parse(rows[0].d), Date.parse(today)), t1 = Math.max(Date.parse(rows[rows.length - 1].d), Date.parse(today)) + 7 * 864e5;
+  const pos = (d: string) => ((Date.parse(d) - t0) / (t1 - t0)) * 100;
+  const months: string[] = []; for (let m = new Date(t0); m.getTime() <= t1; m = new Date(Date.UTC(m.getUTCFullYear(), m.getUTCMonth() + 1, 1))) months.push(new Date(Date.UTC(m.getUTCFullYear(), m.getUTCMonth(), 1)).toISOString().slice(0, 10));
+  const fmt = (d: string) => new Date(d + "T00:00:00Z").toLocaleDateString(lang === "en" ? "en-US" : lang, { day: "numeric", month: "short", timeZone: "UTC" });
+  const mStep = months.length > 9 ? 3 : months.length > 5 ? 2 : 1;
+  return <div className="tl">
+    <div className="tl-axis"><span />{<div className="tl-track">{months.map((m, i) => Date.parse(m) >= t0 && i % mStep === 0 && <i key={m} style={{ insetInlineStart: `${pos(m)}%` }}>{new Date(m + "T00:00:00Z").toLocaleDateString(lang === "en" ? "en-US" : lang, { month: "short", timeZone: "UTC" })}</i>)}<b className="tl-today" style={{ insetInlineStart: `${pos(today)}%` }} title={T(L("Today", "Сегодня", "Сьогодні", "اليوم"))} /></div>}</div>
+    {rows.map(({ r, d }) => { const done = stepDone(r.status); const late = !done && d < today; return <div key={r.id} className={`tl-row ${done ? "done" : late ? "late" : ""}`}>
+      <Link className="tl-name" href={`/${r.section.replace(".", "/")}?r=${r.id}`} title={r.title}>{r.title}</Link>
+      <div className="tl-track"><b className="tl-today" style={{ insetInlineStart: `${pos(today)}%` }} /><span className="tl-dot" style={{ insetInlineStart: `${pos(d)}%` }} /><small className={`tl-date ${pos(d) > 70 ? "end" : ""}`} style={{ insetInlineStart: `${pos(d)}%` }}>{done ? "✓ " : late ? "! " : ""}{fmt(d)}</small></div>
+      {!done && (edit?.id === r.id
+        ? <form className="tl-edit" onSubmit={(e) => { e.preventDefault(); onShift(r.id, edit.to); setEdit(null); }}><input className="input" type="date" value={edit.to} onChange={(e) => setEdit({ id: r.id, to: e.target.value })} /><button className="btn primary sm">{T(L("Move", "Перенести", "Перенести", "نقل"))}</button></form>
+        : <button className="btn ghost sm" onClick={() => setEdit({ id: r.id, to: d })} title={T(L("Move this step; the later ones follow", "Перенести шаг; следующие сдвинутся вместе с ним", "Перенести крок; наступні зсунуться разом із ним", "انقل الخطوة؛ وتتبعها الخطوات التالية"))}><Icon n="calendar" /></button>)}
+    </div>; })}
+    <small className="faint">{T(L("✓ done · ! late · the line is today. Moving a step shifts every later unfinished step by the same number of days.", "✓ выполнено · ! просрочено · линия — сегодня. Перенос шага сдвигает все следующие незавершённые шаги на столько же дней.", "✓ виконано · ! прострочено · лінія — сьогодні. Перенесення кроку зсуває всі наступні незавершені кроки на стільки ж днів.", "✓ منجز · ! متأخر · الخط هو اليوم. نقل خطوة يزيح كل الخطوات التالية غير المنجزة بالأيام نفسها."))}</small>
+  </div>;
 }

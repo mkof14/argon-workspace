@@ -6,6 +6,7 @@ import { tx, type Lang } from "@/lib/i18n";
 import { ROLES } from "@/config/workspace.config.mjs";
 import { L, type useAuto } from "./Automation";
 import type { Settings } from "@/lib/automation";
+import { withLimits, type Limits } from "@/config/approvals";
 
 type T4 = { en: string; ru: string; uk: string; ar: string };
 const INTERNAL_ROLES = Object.entries(ROLES as any).filter(([, r]: any) => r.internal).map(([k]) => k);
@@ -79,6 +80,7 @@ export default function SysSettings({ a }: { a: ReturnType<typeof useAuto> }) {
           <label className="check"><input type="checkbox" disabled={ro} checked={f.translate.auto} onChange={(e) => set("translate.auto", e.target.checked)} />{T(L("Translate everything people write into English, Russian, Ukrainian and Arabic", "Переводить всё, что пишут люди, на английский, русский, украинский и арабский", "Перекладати все, що пишуть люди, англійською, російською, українською та арабською", "ترجمة كل ما يكتبه الناس إلى الإنجليزية والروسية والأوكرانية والعربية"))}</label>
           <label className="check"><input type="checkbox" disabled={ro} checked={f.translate.emails} onChange={(e) => set("translate.emails", e.target.checked)} />{T(L("Send system e-mails in each person's language", "Отправлять системные письма на языке каждого человека", "Надсилати системні листи мовою кожної людини", "إرسال رسائل النظام بلغة كل شخص"))}</label>
           <span className="hint">{T(L("Originals are never changed; translations are stored next to them. Translation uses the AI budget below.", "Оригиналы не меняются; переводы хранятся рядом с ними. Перевод расходует бюджет ИИ ниже.", "Оригінали не змінюються; переклади зберігаються поруч із ними. Переклад витрачає бюджет ШІ нижче.", "لا تتغير النصوص الأصلية؛ تُحفظ الترجمات بجانبها. تستهلك الترجمة ميزانية الذكاء الاصطناعي أدناه."))}</span></div>
+        <LimitsEditor f={f} set={set} ro={ro} T={T} lang={lang} />
         <div><div className="eyebrow" style={{ marginBottom: 8 }}>{T(L("AI budget", "Бюджет ИИ", "Бюджет ШІ", "ميزانية الذكاء الاصطناعي"))}</div>
           <div className="fgrid">
             <Num {...cx} p="ai.monthly_usd" v={f.ai.monthly_usd} t={L("Monthly limit for agents, USD (0 = no limit)", "Месячный лимит для агентов, USD (0 = без лимита)", "Місячний ліміт для агентів, USD (0 = без ліміту)", "الحد الشهري للوكلاء بالدولار (0 = بلا حد)")} hint={L("Over the limit agents keep working without AI conclusions.", "При превышении агенты работают дальше, но без выводов ИИ.", "Після перевищення агенти працюють далі, але без висновків ШІ.", "عند التجاوز يواصل الوكلاء العمل دون استنتاجات الذكاء الاصطناعي.")} />
@@ -130,4 +132,22 @@ function TranslateNow({ T }: { T: (x: T4) => string }) {
       <button className="btn primary sm" style={{ marginInlineStart: "auto" }} disabled={run || left === 0} onClick={go}><Icon n="play" />{run ? `${done}…` : T(L("Translate now", "Перевести сейчас", "Перекласти зараз", "ترجم الآن"))}</button></div>
     <p className="faint" style={{ margin: "0 20px 16px", fontSize: 14 }}>{left === null ? "…" : left === 0 ? T(L("All records are available in all four languages.", "Все записи доступны на всех четырёх языках.", "Усі записи доступні всіма чотирма мовами.", "كل السجلات متاحة باللغات الأربع.")) : `${T(L("Records waiting for translation", "Записей ждут перевода", "Записів чекають перекладу", "سجلات بانتظار الترجمة"))}: ${left}. ${T(L("New and changed texts are translated automatically within seconds; this button translates older ones now.", "Новые и изменённые тексты переводятся автоматически за секунды; эта кнопка переводит старые сейчас.", "Нові та змінені тексти перекладаються автоматично за секунди; ця кнопка перекладає старі зараз.", "تُترجم النصوص الجديدة والمعدلة تلقائياً خلال ثوانٍ؛ وهذا الزر يترجم القديمة الآن."))}`}</p>
   </section>;
+}
+
+/** Who may approve spending (expenses, purchase orders), by amount in USD. */
+function LimitsEditor({ f, set, ro, T, lang }: { f: Settings; set: (p: string, v: any) => void; ro: boolean; T: (x: T4) => string; lang: string }) {
+  const lim = withLimits(f.limits);
+  const put = (n: Limits) => set("limits", n);
+  return <div style={{ display: "grid", gap: 10 }}><div className="eyebrow">{T(L("Approval limits for spending", "Лимиты согласования расходов", "Ліміти погодження витрат", "حدود الموافقة على الإنفاق"))}</div>
+    <span className="hint">{T(L("Expenses and purchase orders above the self-approval amount must be approved before they become Approved / Ordered / Paid, and only by the roles of the tier that covers the amount (USD, other currencies converted).", "Расходы и заказы поставщикам выше суммы самостоятельного согласования должны быть согласованы до статусов Approved / Ordered / Paid, и только ролями того уровня, который покрывает сумму (USD, другие валюты пересчитываются).", "Витрати й замовлення постачальникам понад суму самостійного погодження мають бути погоджені до статусів Approved / Ordered / Paid, і лише ролями того рівня, що покриває суму (USD, інші валюти перераховуються).", "يجب اعتماد المصروفات وأوامر الشراء التي تتجاوز مبلغ الموافقة الذاتية قبل حالات Approved / Ordered / Paid، ومن أدوار المستوى الذي يغطي المبلغ فقط (بالدولار، وتُحوّل العملات الأخرى)."))}</span>
+    <div className="field" style={{ maxWidth: 280 }}><label>{T(L("Without approval up to, USD", "Без согласования до, USD", "Без погодження до, USD", "دون موافقة حتى (دولار)"))}</label>
+      <input className="input mono" type="number" min={0} disabled={ro} value={lim.self_usd} onChange={(e) => put({ ...lim, self_usd: Number(e.target.value) })} /></div>
+    {lim.tiers.map((t, i) => <div key={i} className="limit-row">
+      <div className="field"><label>{t.up_to == null ? T(L("Above that", "Выше этого", "Понад це", "فوق ذلك")) : T(L("Up to, USD", "До, USD", "До, USD", "حتى (دولار)"))}</label>
+        {t.up_to == null ? <input className="input" disabled value="∞" /> : <input className="input mono" type="number" min={0} disabled={ro} value={t.up_to} onChange={(e) => put({ ...lim, tiers: lim.tiers.map((x, j) => (j === i ? { ...x, up_to: Number(e.target.value) } : x)) })} />}</div>
+      <div className="toolbar" style={{ gap: 10 }}>{INTERNAL_ROLES.filter((r) => r !== "pending").map((r) => <label key={r} className="check" style={{ fontSize: 13.5 }}><input type="checkbox" disabled={ro} checked={t.roles.includes(r)} onChange={(e) => put({ ...lim, tiers: lim.tiers.map((x, j) => (j === i ? { ...x, roles: e.target.checked ? [...x.roles, r] : x.roles.filter((y) => y !== r) } : x)) })} />{tx((ROLES as any)[r].label, lang as Lang)}</label>)}</div>
+      {!ro && t.up_to != null && lim.tiers.length > 2 && <button className="btn ghost sm" onClick={() => put({ ...lim, tiers: lim.tiers.filter((_, j) => j !== i) })}><Icon n="x" /></button>}
+    </div>)}
+    {!ro && <div><button className="btn ghost sm" onClick={() => { const last = lim.tiers[lim.tiers.length - 2]; const n = { up_to: (last?.up_to || lim.self_usd) * 10, roles: ["owner"] }; put({ ...lim, tiers: [...lim.tiers.slice(0, -1), n, lim.tiers[lim.tiers.length - 1]] }); }}><Icon n="plus" />{T(L("Add a level", "Добавить уровень", "Додати рівень", "إضافة مستوى"))}</button></div>}
+  </div>;
 }

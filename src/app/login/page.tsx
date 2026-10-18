@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DEMO, sb } from "@/lib/sb";
 import { LANGS, Lang, t } from "@/lib/i18n";
+import { loadUiLang } from "@/lib/i18n";
 import Icon from "@/components/Icon";
 import RadarScene from "@/components/RadarScene";
 import PasswordInput from "@/components/PasswordInput";
@@ -36,7 +37,7 @@ export default function Login() {
     // Show only the sign-in providers that are switched on in Supabase
     fetch(`${SUPA_URL}/auth/v1/settings`, { headers: { apikey: SUPA_KEY } }).then((r) => r.json())
       .then((j) => setEnabled(PROVIDERS.map((p) => p.id).filter((id) => j?.external?.[id]))).catch(() => {});
-    try { const l = localStorage.getItem("agronws.lang") as Lang; if (l) setLang(l); } catch {}
+    try { const l = localStorage.getItem("agronws.lang") as Lang; if (l) loadUiLang(l).then(() => setLang(l), () => setLang(l)); } catch {}
     const e = new URLSearchParams(location.search).get("error_description"); if (e) setErr(e);
   }, [router]);
   const origin = typeof window !== "undefined" ? window.location.origin : "";
@@ -69,7 +70,7 @@ export default function Login() {
     const { error } = await sb().auth.signInWithOAuth({ provider, options: { redirectTo: `${origin}/auth/callback`, scopes: provider === "azure" ? "email openid profile" : undefined } });
     if (error) setErr(error.message);
   };
-  const pickLang = (l: Lang) => { setLang(l); try { localStorage.setItem("agronws.lang", l); } catch {} };
+  const pickLang = (l: Lang) => { loadUiLang(l).then(() => setLang(l), () => setLang(l)); try { localStorage.setItem("agronws.lang", l); } catch {} };
 
   return (
     <div className="auth" dir={lang === "ar" ? "rtl" : "ltr"} lang={lang}>

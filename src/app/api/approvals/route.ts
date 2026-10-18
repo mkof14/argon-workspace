@@ -4,7 +4,8 @@ import { sendMail } from "@/lib/server/mailer";
 import { localizeMail } from "@/lib/server/translate";
 import { PUSH, pushTo } from "@/lib/server/push";
 import { renderEmail, plainText, COMPANY, SITE } from "@/lib/mail";
-import { APPROVALS, approvalNeeds } from "@/config/approvals";
+import { APPROVALS, approvalNeeds, limitRoles, withLimits } from "@/config/approvals";
+import { getSettings } from "@/lib/server/automation";
 import { allSections } from "@/config/workspace.config.mjs";
 
 export const runtime = "nodejs";
@@ -30,7 +31,9 @@ function details(r: any) {
 
 async function approversFor(db: any, r: any, exclude: string) {
   const rule = APPROVALS[r.section]; if (!rule) return [];
-  const { data } = await db.from("profiles").select("id,full_name,email,role,us_person,lang").in("role", rule.approvers).neq("id", exclude);
+  // Spending: only the roles whose limit covers this amount (Administration → System → Settings → Approval limits)
+  const lim = limitRoles(r.section, r.data || {}, withLimits((await getSettings(db)).limits));
+  const { data } = await db.from("profiles").select("id,full_name,email,role,us_person,lang").in("role", lim || rule.approvers).neq("id", exclude);
   return (data || []).filter((p: any) => !r.controlled || p.us_person);
 }
 
@@ -98,8 +101,9 @@ export async function POST(req: Request) {
   if (!me || me.role === "pending") return new Response("Not signed in", { status: 401 });
   const sb = await userClient();
 
+  if (b.action === "limits") return Response.json(withLimits((await getSettings(db)).limits));
   if (b.action === "approvers") {
-    const { data: r } = await sb.from("records").select("id,section,controlled").eq("id", b.record_id).maybeSingle();
+    const { data: r } = await sb.from("records").select("id,section,controlled,data").eq("id", b.record_id).maybeSingle();
     if (!r || !APPROVALS[r.section]) return Response.json([]);
     return Response.json((await approversFor(db, r, me.id)).map((p: any) => ({ id: p.id, name: p.full_name || p.email, role: p.role })));
   }

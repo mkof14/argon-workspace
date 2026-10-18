@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { sb } from "@/lib/sb";
 import { Lang, t } from "@/lib/i18n";
+import { loadUiLang } from "@/lib/i18n";
 import RadarScene from "@/components/RadarScene";
 import PasswordInput from "@/components/PasswordInput";
 
@@ -11,7 +12,7 @@ export default function ResetPassword() {
   const [lang, setLang] = useState<Lang>("en");
   const [pw, setPw] = useState(""); const [pw2, setPw2] = useState("");
   const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
-  useEffect(() => { try { const l = localStorage.getItem("agronws.lang") as Lang; if (l) setLang(l); } catch {} }, []);
+  useEffect(() => { try { const l = localStorage.getItem("agronws.lang") as Lang; if (l) loadUiLang(l).then(() => setLang(l), () => setLang(l)); } catch {} }, []);
   const save = async (e: React.FormEvent) => {
     e.preventDefault(); setErr("");
     if (pw.length < 8) { setErr(t("pw_short", lang)); return; }

@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Icon from "./Icon";
+import { left as slaLeft, slaFor } from "@/lib/sla";
 import CashForecast from "./CashForecast";
 import { useApp, findSection, SECTIONS } from "./App";
 import StageBoard from "./StageBoard";
@@ -16,7 +17,7 @@ import { DEPARTMENTS, DEPT_COLORS } from "@/config/workspace.config.mjs";
 import { TEMPLATES } from "@/config/templates";
 import { CHECKLISTS } from "./RecordDrawer";
 import { workingDays } from "@/config/hr";
-import { l2 } from "@/config/learn";
+import { l2 } from "@/config/l2";
 import { t, tx } from "@/lib/i18n";
 import { Rec, store } from "@/lib/store";
 import { OPEN, dayDiff, dueItems } from "@/lib/insights";
@@ -154,6 +155,13 @@ export default function DeptHub({ dept }: { dept: string }) {
       kpis.push({ l: L("Open purchase orders", "Открытые заказы"), v: String(po.filter((r) => ["Approved", "Ordered"].includes(r.status || "")).length), s: usd(po.filter((r) => ["Approved", "Ordered"].includes(r.status || "") && (r.data?.currency || "USD") === "USD").reduce((a, r) => a + n(r.data?.amount), 0)), href: "/operations/procurement" });
       kpis.push({ l: L("Shipments in transit / customs", "Грузы в пути / на таможне"), v: String(lg.filter((r) => ["In transit", "Customs"].includes(r.status || "")).length), href: "/operations/logistics" });
       kpis.push({ l: L("Open support tickets", "Открытые заявки сервиса"), v: String(sup.filter(OPEN).length), s: `${sup.filter((r) => OPEN(r) && ["High", "Critical"].includes(r.data?.severity)).length} ${T(L("high or critical", "высокий или критический"))}`, href: "/operations/support" });
+      // Service levels: requests that are late or close to their SLA deadline
+      const slaRows = sup.map((r) => ({ r, v: slaFor(store.original(r) as any, fleet as any) })).filter((x) => x.v && (["late", "soon"].includes(x.v.respond) || ["late", "soon"].includes(x.v.resolve)))
+        .sort((a, b) => Math.min(a.v!.respondLeft, a.v!.resolveLeft) - Math.min(b.v!.respondLeft, b.v!.resolveLeft));
+      cards.push(<List key="sla" title={L("Service levels: requests at risk", "SLA: заявки под риском", "SLA: заявки під ризиком", "SLA: طلبات معرضة للخطر")} icon="clock" more="/operations/support"
+        items={slaRows.map(({ r, v }) => { const resp = ["late", "soon"].includes(v!.respond); const st = resp ? v!.respond : v!.resolve; const min = resp ? v!.respondLeft : v!.resolveLeft;
+          return { title: r.title, sub: `${v!.severity} · ${v!.tier} · ${T(resp ? L("response", "ответ", "відповідь", "الرد") : L("resolution", "решение", "рішення", "الحل"))}`, right: `${st === "late" ? "−" : ""}${slaLeft(min, lang as any)}`, tone: st === "late" ? "bad" as const : "warn" as const, href: `/operations/support?r=${r.id}` }; })}
+        empty={L("All requests are within their service levels.", "Все заявки укладываются в SLA.", "Усі заявки вкладаються в SLA.", "كل الطلبات ضمن مستويات الخدمة.")} />);
       cards.push(<div key="sb" className="wide"><StageBoard sec="operations.builds" rows={builds} sub={(r) => [r.data?.client, r.data?.config && `StarDome ${r.data.config}`, r.data?.site, r.data?.owner].filter(Boolean).join(" · ")} /></div>);
       cards.push(<List key="gate" title={L("Export check before shipping", "Экспортная проверка перед отгрузкой")} icon="flag" more="/operations/builds" items={builds.filter((r) => ["Testing", ...late].includes(r.status || "") && r.data?.export_check !== "Cleared").map((r) => ({ title: r.title, sub: `${r.status} · ${r.data?.client || ""}`, right: r.data?.export_check || T(L("not started", "не начата")), tone: "bad" as const, href: href(r) }))} empty={L("All builds near shipping are export-cleared.", "Все сборки перед отгрузкой прошли экспортную проверку.")} />);
       cards.push(<List key="eta" title={L("Deliveries due in 14 days or late", "Поставки за 14 дней и просроченные")} icon="truck" more="/operations/procurement" items={po.filter((r) => r.status === "Ordered" && r.data?.eta && dayDiff(r.data.eta) <= 14).sort((a, b) => a.data.eta.localeCompare(b.data.eta)).map((r) => ({ title: r.title, sub: `${r.data?.vendor || ""} · ${r.data?.item || ""}${r.data?.build ? " · " + r.data.build : ""}`, right: rel(dayDiff(r.data.eta), lang), tone: (dayDiff(r.data.eta) < 0 ? "bad" : "info") as any, href: href(r) }))} empty={L("No deliveries due in the next 14 days.", "Поставок в ближайшие 14 дней нет.")} />);

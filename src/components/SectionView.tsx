@@ -13,12 +13,12 @@ import { CsvImport } from "./DataTools";
 import BrandLogos from "./BrandLogos";
 import ChannelsBoard from "./ChannelsBoard";
 import SystemsBoard from "./SystemsBoard";
-import { DEPARTMENTS, gateBlocks } from "@/config/workspace.config.mjs";
-import { HELP, l2 } from "@/config/learn";
+import { DEPARTMENTS, ROLES, gateBlocks } from "@/config/workspace.config.mjs";
+import { l2, type T2 } from "@/config/l2";
 import Link from "next/link";
 import { t, tx } from "@/lib/i18n";
 import { Rec, store } from "@/lib/store";
-import { fmt, saveBlob, toCsv, tone } from "@/lib/format";
+import { fmt, saveBlob, spendMsg, toCsv, tone } from "@/lib/format";
 
 export const DUE_KEYS = ["due", "deadline", "expires", "renewal", "next_service", "valid_until", "eta", "warranty_end", "publish", "session", "starts", "book_by"];
 export const KIND: Record<string, { icon: string; c: string }> = {
@@ -38,6 +38,9 @@ export default function SectionView({ section }: { section: any }) {
   const [dragOver, setDragOver] = useState("");
   const [sort, setSort] = useState<{ k: string; dir: 1 | -1 } | null>(null);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  // The one-line purpose of the section comes from the Learning Center texts, loaded after the table
+  const [help, setHelp] = useState<T2 | null>(null);
+  useEffect(() => { let on = true; import("@/config/learn").then((m) => on && setHelp(m.HELP[section.id] || null)).catch(() => {}); return () => { on = false; }; }, [section.id]);
   // Selected rows for actions on many records at once
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [bulk, setBulk] = useState<{ status?: string; who?: string; date?: string; del?: boolean }>({});
@@ -79,6 +82,7 @@ export default function SectionView({ section }: { section: any }) {
     if (!canWrite || r.status === status) return;
     const g = section.gate;
     if (gateBlocks(g, status, r.data)) { toast(tx(g.msg, lang), true); return; }
+    const sp = await store.spendCheck(section.id, r.id, status, r.data); if (sp) { toast(spendMsg(sp.roles, lang, (x) => tx((ROLES as any)[x]?.label, lang)), true); return; }
     try { await store.save({ ...r, status }); toast(t("saved", lang)); load(); } catch (e: any) { toast(e.message || "Error", true); }
   };
 
@@ -107,7 +111,7 @@ export default function SectionView({ section }: { section: any }) {
         const status = bulk.status || r.status; const data = { ...r.data };
         if (bulk.who !== undefined && bulk.who !== "" && ownerKey) data[ownerKey] = bulk.who;
         if (bulk.date && dateKey) data[dateKey] = bulk.date;
-        if (status !== r.status && gateBlocks(section.gate, status, data)) { blocked++; continue; }
+        if (status !== r.status && (gateBlocks(section.gate, status, data) || (await store.spendCheck(section.id, r.id, status, data)))) { blocked++; continue; }
         await store.save({ ...r, status, data }); ok++;
       }
       toast(`${tx({ en: "Done", ru: "Готово", uk: "Готово", ar: "تم" }, lang)}: ${ok}${blocked ? ` · ${tx({ en: "not changed (a check is missing)", ru: "не изменено (не пройдена проверка)", uk: "не змінено (не пройдено перевірку)", ar: "لم يتغير (فحص ناقص)" }, lang)}: ${blocked}` : ""}`, !!blocked && !ok);
@@ -131,7 +135,7 @@ export default function SectionView({ section }: { section: any }) {
           <div className="eyebrow" style={{ color: section.color }}>{tx(dept?.label, lang)}</div>
           <h2>{tx(section.label, lang)}</h2>
           <div className="sub">{rows ? <><b className="mono">{rows.length}</b> {t("records", lang)}{moneyKey && sum ? <> · {t("total", lang)} <b className="mono">{fmt({ type: "money" }, sum, lang)}</b></> : null}</> : "…"}{section.controlled && <> · <Icon n="lock" className="lockico" /> {t("controlled_short", lang)}</>}</div>
-          {HELP[section.id] && <div className="sec-desc">{l2(HELP[section.id], lang).split("\n")[0]} <Link href={`/learn?s=${section.id}`} style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{t("how_to", lang)}</Link></div>}
+          {help && <div className="sec-desc">{l2(help, lang).split("\n")[0]} <Link href={`/learn?s=${section.id}`} style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{t("how_to", lang)}</Link></div>}
         </div>
         <div className="stats">
           {counts.filter((c: any) => c.n || section.statuses.length <= 5).slice(0, 6).map((c: any) => (

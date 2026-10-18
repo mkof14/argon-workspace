@@ -7,7 +7,7 @@ import Icon from "./Icon";
 import { useApp, findSection } from "./App";
 import { DEPARTMENTS, DEPT_COLORS } from "@/config/workspace.config.mjs";
 import { TEMPLATES, TPL_DEPTS, Tpl, fillTpl } from "@/config/templates";
-import { l2 } from "@/config/learn";
+import { l2 } from "@/config/l2";
 import { t, tx } from "@/lib/i18n";
 import { store } from "@/lib/store";
 import { printHtml, saveBlob, slug } from "@/lib/format";

@@ -14,3 +14,18 @@ test("a won deal becomes a dated plan linked to the deal, with owners per role",
   assert.ok(plan.every((p) => p.data.project === "d1"));
   assert.equal(plan.find((p) => p.key === "screen")!.data.party, "Skyline Marina");
 });
+
+import { shiftPlan, stepDate } from "../src/lib/projects.ts";
+test("moving a step moves the later unfinished steps by the same days", () => {
+  const recs: any[] = [
+    { id: "a", section: "security.screening", status: "Cleared", data: { project_step: "screen", date: "2026-11-01" } },
+    { id: "b", section: "operations.builds", status: "Assembly", data: { project_step: "build", due: "2026-12-01" } },
+    { id: "c", section: "operations.logistics", status: "Planned", data: { project_step: "ship", due: "2027-01-10" } },
+    { id: "d", section: "operations.quality", status: "Passed", data: { project_step: "sat", date: "2027-02-01" } },
+    { id: "e", section: "company.tasks", status: "Open", data: { project_step: "training", due: "2027-02-05" } },
+  ];
+  assert.equal(stepDate(recs[2]), "2027-01-10");
+  const ch = shiftPlan(recs, "b", "2026-12-15");
+  assert.deepEqual(ch.map((c) => [c.id, c.key, c.to]), [["b", "due", "2026-12-15"], ["c", "due", "2027-01-24"], ["e", "due", "2027-02-19"]]);
+  assert.equal(shiftPlan(recs, "b", "2026-12-01").length, 0);
+});

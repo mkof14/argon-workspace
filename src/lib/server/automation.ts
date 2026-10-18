@@ -10,6 +10,8 @@ import { allSections } from "@/config/workspace.config.mjs";
 import { REFS } from "@/config/links";
 import { nextOccurrence } from "@/lib/recur";
 import { cashForecast } from "@/lib/cashforecast";
+import { slaFor } from "@/lib/sla";
+import { shortages } from "@/lib/parts";
 import { dueItems, isMine, money, PEOPLE_KEYS } from "@/lib/insights";
 import { dealEmail, financeFindings, hrFindings, legalFindings, marketingFindings, securityFindings, technicalFindings, operationsFindings, salesFindings, type Finding } from "@/lib/deptAgents";
 import { AGENTS, DEPT_AGENTS, DEFAULT_RULES, aiCost, dateDue, isWorkday, matchEvent, qualityIssues, render, withDefaults, type Action, type AgentId, type Ev, type Rule, type Settings } from "@/lib/automation";
@@ -177,7 +179,18 @@ async function repeatNext(db: any, rec: any) {
   return data?.id || null;
 }
 
+/** Support requests: remember when AGRON first responded and when the request was resolved (for the SLA). */
+async function slaStamps(db: any, rec: any, ev: Ev) {
+  if (rec.section !== "operations.support" || ev.kind !== "status") return;
+  const now = new Date().toISOString(); const d = { ...(rec.data || {}) }; let ch = false;
+  if (!d.responded_at && ev.from === "New" && ev.to !== "New") { d.responded_at = now; ch = true; }
+  if (!d.resolved_at && /^(resolved|closed)$/i.test(ev.to || "")) { d.resolved_at = now; if (!d.responded_at) d.responded_at = now; ch = true; }
+  if (/^(new|in progress|waiting client)$/i.test(ev.to || "") && d.resolved_at) { delete d.resolved_at; ch = true; } // reopened
+  if (ch) await db.from("records").update({ data: d }).eq("id", rec.id);
+}
+
 export async function onRecordEvent(db: any, rec: any, ev: Ev) {
+  await slaStamps(db, rec, ev).catch(() => {});
   const next = ev.kind === "status" ? await repeatNext(db, rec).catch(() => null) : null;
   const c = await context(db);
   if (next) c.log.push({ at: new Date().toISOString(), agent: "rules", kind: "action", text: `Repeating: next “${rec.title}” prepared`, record: next, section: rec.section } as any);
@@ -340,7 +353,7 @@ async function briefAgent(c: Ctx, recsAll: any[], force: boolean) {
 
 /* ---------------- Department agents ---------------- */
 type Finder = (all: any[], today: string, th: Settings["thresholds"]) => Finding[];
-const FINDERS: Partial<Record<AgentId, Finder>> = { finance: (all, t, th) => financeFindings(all, t, { ...th, cash: cashForecast(all, t) }), sales: salesFindings, operations: operationsFindings, hr: hrFindings, legal: legalFindings, marketing: marketingFindings, technical: technicalFindings, security: securityFindings };
+const FINDERS: Partial<Record<AgentId, Finder>> = { finance: (all, t, th) => financeFindings(all, t, { ...th, cash: cashForecast(all, t) }), sales: salesFindings, operations: (all, t, th) => operationsFindings(all, t, { ...th, sla: (x, f) => slaFor(x, f), parts: shortages }), hr: hrFindings, legal: legalFindings, marketing: marketingFindings, technical: technicalFindings, security: securityFindings };
 const DEPT_OF: Partial<Record<AgentId, string>> = { finance: "finance", sales: "sales", operations: "operations", hr: "hr", legal: "legal", marketing: "marketing", technical: "technical", security: "security" };
 const COLOR = { bad: "#B4232F", warn: "#A15C00", info: "#2A3440" };
 

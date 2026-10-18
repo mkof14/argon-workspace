@@ -4,9 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Icon from "./Icon";
 import { DEPARTMENTS, DEPT_COLORS, ROLES, allSections } from "@/config/workspace.config.mjs";
-import { LANGS, Lang, t, tx } from "@/lib/i18n";
+import { LANGS, Lang, loadUiLang, t, tx } from "@/lib/i18n";
 import { installErrorReporting } from "@/lib/errors";
-import { loadLearnLang } from "@/config/learn";
+import { loadLearnLang } from "@/config/l2";
 import { DEMO, Profile, Rule, accessFor, isExternal, store, Access } from "@/lib/store";
 import dynamic from "next/dynamic";
 import Dashboard from "./Dashboard";
@@ -32,7 +32,7 @@ const Bell = dynamic(() => import("./Inbox").then((m) => m.Bell), { ssr: false }
 const Intake = dynamic(() => import("./Intake"), { ssr: false });
 const DocsAsk = dynamic(() => import("./DocsAsk"), { ssr: false });
 const StarDome = dynamic(() => import("./StarDome"), { ssr: false });
-export const VERSION = "2.25";
+export const VERSION = "2.26";
 
 type Ctx = {
   lang: Lang; me: Profile; access: Access; toast: (m: string, err?: boolean) => void;
@@ -104,7 +104,8 @@ export default function App({ slug }: { slug: string[] }) {
     const mq = matchMedia("(prefers-color-scheme: dark)"); const fn = () => setDark(isDark()); mq.addEventListener("change", fn);
     return () => mq.removeEventListener("change", fn);
   }, []);
-  const setLang = (l: Lang) => {
+  const setLang = async (l: Lang) => {
+    await loadUiLang(l).catch(() => {});
     setLangState(l); setLangOpen(false); store.setLang(l); setTick((x) => x + 1); // records are shown again in the new language
     if (me && me.lang !== l && !DEMO) store.updateProfile(me.id, { lang: l }).then(() => setMe({ ...me, lang: l })).catch(() => {}); // e-mails follow the same language
     try { localStorage.setItem("agronws.lang", l); } catch {} document.documentElement.lang = l; document.documentElement.dir = l === "ar" ? "rtl" : "ltr"; };
@@ -114,7 +115,7 @@ export default function App({ slug }: { slug: string[] }) {
     const p = await store.me();
     if (p && p.role !== "pending") { try { setRules(await store.rules()); } catch {} }
     // A new device: take the language from the profile
-    try { if (p?.lang && !localStorage.getItem("agronws.lang") && ["en", "ru", "uk", "ar"].includes(p.lang)) { setLangState(p.lang as Lang); store.setLang(p.lang); localStorage.setItem("agronws.lang", p.lang); document.documentElement.lang = p.lang; document.documentElement.dir = p.lang === "ar" ? "rtl" : "ltr"; } } catch {}
+    try { if (p?.lang && !localStorage.getItem("agronws.lang") && ["en", "ru", "uk", "ar"].includes(p.lang)) { await loadUiLang(p.lang).catch(() => {}); setLangState(p.lang as Lang); store.setLang(p.lang); localStorage.setItem("agronws.lang", p.lang); document.documentElement.lang = p.lang; document.documentElement.dir = p.lang === "ar" ? "rtl" : "ltr"; } } catch {}
     try { const l = localStorage.getItem("agronws.lang"); if (p && l && p.lang !== l && !DEMO) { store.updateProfile(p.id, { lang: l }).catch(() => {}); p.lang = l; } } catch {}
     // First visit: remember the person's time zone (digest at 8:00 local, local time for colleagues)
     try { if (p && !p.timezone && !DEMO) { const z = Intl.DateTimeFormat().resolvedOptions().timeZone; if (z) { store.updateProfile(p.id, { timezone: z }).catch(() => {}); p.timezone = z; } } } catch {}

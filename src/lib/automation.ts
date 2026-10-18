@@ -15,6 +15,8 @@ export type Settings = {
   ai: { monthly_usd: number; price_in: number; price_out: number };
   /** Everything people write is translated into EN, RU, UK and AR; system e-mails go out in each person's language. */
   translate: { auto: boolean; emails: boolean };
+  /** Who may approve spending, by amount — read through withLimits() in config/approvals. */
+  limits: any;
 };
 
 /** Every agent starts in "suggest": it prepares the change and a person approves it with one click. */
@@ -25,6 +27,7 @@ export const DEFAULT_SETTINGS: Settings = {
   agents: { rules: "suggest", deadlines: "auto", compliance: "suggest", quality: "suggest", brief: "auto", finance: "suggest", sales: "suggest", operations: "suggest", hr: "suggest", legal: "suggest", marketing: "suggest", technical: "suggest", security: "suggest", intake: "suggest" },
   ai: { monthly_usd: 50, price_in: 3, price_out: 15 },
   translate: { auto: true, emails: true },
+  limits: null,
 };
 
 /** Merges saved settings over the defaults, so new options get sensible values. */
@@ -43,6 +46,7 @@ export function withDefaults(s: any): Settings {
       brief_roles: arr(s.notify?.brief_roles, d.notify.brief_roles), escalate_roles: arr(s.notify?.escalate_roles, d.notify.escalate_roles) },
     agents: Object.fromEntries(AGENTS.map((a) => [a, mode(s.agents?.[a], d.agents[a])])) as Record<AgentId, Mode>,
     translate: { auto: s.translate?.auto !== false, emails: s.translate?.emails !== false },
+    limits: s.limits ?? null,
     ai: { monthly_usd: num(s.ai?.monthly_usd, d.ai.monthly_usd, 0, 100000), price_in: num(s.ai?.price_in, d.ai.price_in, 0, 1000), price_out: num(s.ai?.price_out, d.ai.price_out, 0, 1000) },
   };
 }

@@ -4,7 +4,7 @@ import Link from "next/link";
 import Icon from "./Icon";
 import { useApp, findSection } from "./App";
 import { DESKS } from "@/config/legal";
-import { l2 } from "@/config/learn";
+import { l2 } from "@/config/l2";
 import { t, tx } from "@/lib/i18n";
 import { Rec, store } from "@/lib/store";
 import catalog from "@/config/legal-catalog.json";

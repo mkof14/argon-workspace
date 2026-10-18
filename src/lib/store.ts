@@ -1,9 +1,16 @@
 "use client";
 import { allSections, defaultRules, ROLES } from "@/config/workspace.config.mjs";
 import type * as DemoMod from "./demo";
-import { SEED_FAQ, l2, loadLearnLang } from "@/config/learn";
+import { l2, loadLearnLang } from "@/config/l2";
+// The starter FAQ (part of the Learning Center texts) is loaded only when the FAQ is opened
+let SEED: any[] | null = null;
+const seedFaq = async () => (SEED ||= (await import("@/config/learn")).SEED_FAQ);
 import { localizeRec, unlocalize, type Shown } from "./tr";
 import { nextOccurrence } from "./recur";
+import { DEFAULT_LIMITS, LIMITED, limitRoles, overLimit, withLimits, type Limits } from "@/config/approvals";
+let LIM: Promise<Limits> | null = null;
+/** Spending above the self-approval limit needs an approved request first (any way of saving: form, board, bulk, AI command). */
+const SPEND_ERR = "The amount is above the self-approval limit — send the record for approval first.";
 
 export type Rec = {
   id: string; section: string; title: string; status: string | null; data: Record<string, any>;
@@ -63,7 +70,7 @@ function demoVisible(db: DemoDB, r: Rec) {
 }
 
 function demoFaq(db: DemoDB): Faq[] {
-  if (!db.faq) { db.faq = SEED_FAQ.flatMap((f, i) => (["en", "ru", "uk", "ar"] as const).map((l) => ({ id: `faq-${i}-${l}`, question: l2(f.q, l), answer: l2(f.a, l), lang: l, section: f.section || null, verified: true, hits: 0, source: "seed" }))); demoSave(db); }
+  if (!db.faq) { db.faq = (SEED || []).flatMap((f, i) => (["en", "ru", "uk", "ar"] as const).map((l) => ({ id: `faq-${i}-${l}`, question: l2(f.q, l), answer: l2(f.a, l), lang: l, section: f.section || null, verified: true, hits: 0, source: "seed" }))); demoSave(db); }
   return db.faq;
 }
 const words = (s: string) => new Set(s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((w) => w.length > 2));
@@ -129,6 +136,8 @@ export const store = {
         const i = db.records.findIndex((x) => x.id === r.id); const old = db.records[i];
         db.records[i] = { ...old, ...r, updated_at: now } as Rec;
         db.activity.unshift({ id: Date.now(), record_id: r.id, section: r.section, actor: me.id, action: old.status !== r.status ? "status" : "updated", detail: { title: r.title, from: old.status, to: r.status }, created_at: now });
+        // Support SLA stamps (on the live site the server does this)
+        if (r.section === "operations.support" && old.status !== r.status) { const d = db.records[i].data = { ...db.records[i].data }; if (!d.responded_at && old.status === "New") d.responded_at = now; if (!d.resolved_at && /^(resolved|closed)$/i.test(r.status || "")) d.resolved_at = now; }
         // Repeating record completed → the next one (on the live site the server does this)
         const sec: any = (allSections() as any[]).find((x) => x.id === r.section);
         if (old.status !== r.status && sec && !db.records.some((x) => x.data?._prev === r.id)) { const n = nextOccurrence(db.records[i], sec.fields, sec.statuses[0]); if (n) db.records.push({ id: uid(), company: old.company, controlled: old.controlled, ...n, section: r.section, created_by: me.id, created_at: now, updated_at: now } as Rec); }
@@ -141,12 +150,14 @@ export const store = {
     const body: any = { section: r.section, title: r.title, status: r.status ?? null, data: r.data || {}, company: r.company || null, controlled: !!r.controlled };
     if (r.id) {
       const { data: before } = await sb().from("records").select("status").eq("id", r.id).maybeSingle();
+      if ((before?.status || "") !== (body.status || "") && (await this.spendCheck(r.section, r.id, body.status, body.data))) throw new Error(SPEND_ERR);
       const { data, error } = await sb().from("records").update(body).eq("id", r.id).select().single();
       if (error) throw error;
       if ((before?.status || "") !== (data.status || "")) automate({ id: data.id, kind: "status", from: before?.status ?? null });
       SHOWN.delete(data.id); translateLater({ id: data.id });
       return loc(data as Rec);
     }
+    if (await this.spendCheck(r.section, undefined, body.status, body.data)) throw new Error(SPEND_ERR);
     const { data: u } = await sb().auth.getUser();
     const { data, error } = await sb().from("records").insert({ ...body, created_by: u?.user?.id }).select().single();
     if (error) throw error; automate({ id: data.id, kind: "created" }); translateLater({ id: data.id }); return data as Rec;
@@ -155,6 +166,19 @@ export const store = {
     if (DEMO) { const db = demoLoad(); const r = db.records.find((x) => x.id === id); db.records = db.records.filter((x) => x.id !== id);
       if (r) { const cmts = db.comments.filter((c) => c.record_id === id); db.comments = db.comments.filter((c) => c.record_id !== id); db.trash = [{ id, section: r.section, title: r.title, controlled: r.controlled, deleted_by: demoMe(db).id, deleted_at: new Date().toISOString(), comments: cmts.length, record: r, cmts }, ...(db.trash || [])]; } if (r) db.activity.unshift({ id: Date.now(), record_id: id, section: r.section, actor: demoMe(db).id, action: "deleted", detail: { title: r.title }, created_at: new Date().toISOString() }); demoSave(db); return; }
     const { error } = await sb().from("records").delete().eq("id", id); if (error) throw error;
+  },
+  /* ----- Spending limits: above the self-approval amount a record needs an approved request ----- */
+  async limits(): Promise<Limits> {
+    if (DEMO) return DEFAULT_LIMITS;
+    if (!LIM) LIM = fetch("/api/approvals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "limits" }) }).then((r) => (r.ok ? r.json() : DEFAULT_LIMITS)).then(withLimits).catch(() => DEFAULT_LIMITS);
+    return LIM;
+  },
+  /** null when the change is allowed; otherwise the reason (English key for the caller to show). */
+  async spendCheck(section: string, id: string | undefined, status: string | null | undefined, data: Record<string, any>): Promise<null | { roles: string[] }> {
+    const l = LIMITED[section]; if (!l || !status || !l.guard.includes(status)) return null;
+    const lim = await this.limits(); if (!overLimit(section, data, lim)) return null;
+    if (id && !DEMO) { const { data: a } = await sb().from("approvals").select("status").eq("record_id", id).eq("status", "approved").limit(1); if (a?.length) return null; }
+    return { roles: limitRoles(section, data, lim) || [] };
   },
   /* ----- Recycle bin: deleted records stay 30 days ----- */
   async trashList(): Promise<TrashItem[]> {
@@ -281,26 +305,26 @@ export const store = {
   },
   /* ----- FAQ knowledge base ----- */
   async faqSearch(q: string, lang?: string, n = 5): Promise<Faq[]> {
-    if (DEMO) await loadLearnLang("uk");
+    if (DEMO) { await loadLearnLang("uk"); await seedFaq(); }
     if (!q.trim()) return [];
     if (DEMO) return demoFaq(demoLoad()).filter((f) => !lang || f.lang === lang).map((f) => ({ ...f, sim: textSim(q, f.question) })).filter((f) => f.sim! > 0.3).sort((a, b) => b.sim! - a.sim!).slice(0, n);
     const { data, error } = await sb().rpc("faq_search", { q, lng: lang || null, n });
     if (error) return []; return (data || []) as Faq[];
   },
   async faqList(): Promise<Faq[]> {
-    await loadLearnLang("uk"); // the starter answers are written in all four languages
+    await loadLearnLang("uk"); await seedFaq(); // the starter answers are written in all four languages
     if (DEMO) return demoFaq(demoLoad());
     const get = async () => (await sb().from("faq").select("*").order("verified", { ascending: false }).order("hits", { ascending: false }).limit(500)).data || [];
     let rows = await get();
     // Starter answers: loaded on first run and topped up when new ones ship (insert is allowed for owner, admin, management, legal)
     const have = new Set(rows.map((r: any) => `${r.lang}|${r.question}`));
-    const seed = SEED_FAQ.flatMap((f) => (["en", "ru", "uk", "ar"] as const).map((l) => ({ question: l2(f.q, l), answer: l2(f.a, l), lang: l, section: f.section || null, verified: true, source: "seed" })))
+    const seed = (await seedFaq()).flatMap((f) => (["en", "ru", "uk", "ar"] as const).map((l) => ({ question: l2(f.q, l), answer: l2(f.a, l), lang: l, section: f.section || null, verified: true, source: "seed" })))
       .filter((x) => !have.has(`${x.lang}|${x.question}`));
     if (seed.length) { const { error } = await sb().from("faq").insert(seed); if (!error) rows = await get(); }
     return rows as Faq[];
   },
   async faqSave(f: Partial<Faq> & { question: string; answer: string; lang: string }, opts: { translate?: boolean } = {}) {
-    if (DEMO) await loadLearnLang("uk");
+    if (DEMO) { await loadLearnLang("uk"); await seedFaq(); }
     if (DEMO) { const db = demoLoad(); const list = demoFaq(db); if (f.id) db.faq = list.map((x) => (x.id === f.id ? { ...x, ...f } as Faq : x)); else db.faq = [{ id: uid(), section: null, verified: false, hits: 0, source: "manual", ...f } as Faq, ...list]; demoSave(db); return; }
     const body: any = { question: f.question, answer: f.answer, lang: f.lang, section: f.section ?? null, source: f.source || "manual" };
     if (f.verified !== undefined) body.verified = f.verified;
@@ -310,12 +334,12 @@ export const store = {
     if (data?.id && opts.translate !== false && f.source !== "seed") translateLater({ faq: data.id });
   },
   async faqDelete(id: string) {
-    if (DEMO) await loadLearnLang("uk");
+    if (DEMO) { await loadLearnLang("uk"); await seedFaq(); }
     if (DEMO) { const db = demoLoad(); db.faq = demoFaq(db).filter((x) => x.id !== id); demoSave(db); return; }
     const { error } = await sb().from("faq").delete().eq("id", id); if (error) throw error;
   },
   async faqHit(id: string) {
-    if (DEMO) await loadLearnLang("uk");
+    if (DEMO) { await loadLearnLang("uk"); await seedFaq(); }
     if (DEMO) { const db = demoLoad(); db.faq = demoFaq(db).map((x) => (x.id === id ? { ...x, hits: x.hits + 1 } : x)); demoSave(db); return; }
     await sb().rpc("faq_hit", { fid: id });
   },

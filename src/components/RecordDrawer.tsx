@@ -4,18 +4,20 @@ import dynamic from "next/dynamic";
 const ProposalBuilder = dynamic(() => import("./ProposalBuilder"), { ssr: false });
 const ProjectPlanner = dynamic(() => import("./ProjectPlanner"), { ssr: false });
 const PortalLinks = dynamic(() => import("./PortalLinks"), { ssr: false });
+const SlaPanel = dynamic(() => import("./SlaPanel"), { ssr: false });
+const BuildParts = dynamic(() => import("./BuildParts"), { ssr: false });
 import MarketingStudio from "./MarketingStudio";
 import { RecordTools } from "./DeptTools";
 import { RefField, ChainPanel } from "./Links";
 import { APPROVALS } from "@/config/approvals";
-import { gateBlocks } from "@/config/workspace.config.mjs";
+import { ROLES, gateBlocks } from "@/config/workspace.config.mjs";
 import { useEffect, useRef, useState } from "react";
 import Icon from "./Icon";
 import { useApp } from "./App";
 import { t, tx } from "@/lib/i18n";
 import { trFields, trPending, trText } from "@/lib/tr";
 import { Activity, Comment, DEMO, Rec, isExternal, store, textSim } from "@/lib/store";
-import { fmt, printHtml, recordMarkdown, saveBlob, slug, tone } from "@/lib/format";
+import { fmt, printHtml, recordMarkdown, saveBlob, slug, spendMsg, tone } from "@/lib/format";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import Attachments from "./Attachments";
@@ -98,6 +100,7 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
   const save = async () => {
     if (!title.trim()) return;
     if (gateBlocked) { toast(tx(gate.msg, lang), true); return; }
+    const sp = await store.spendCheck(section.id, rec?.id, status, data); if (sp) { toast(spendMsg(sp.roles, lang, (r) => tx((ROLES as any)[r]?.label, lang)), true); return; }
     setBusy(true);
     try { await store.save({ id: rec?.id, section: section.id, title: title.trim(), status, data, company: company.trim() || null, controlled }); toast(t("saved", lang)); onSaved(); }
     catch (e: any) { toast(e.message || "Error", true); } finally { setBusy(false); }
@@ -190,6 +193,8 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
           <RecordTools section={section} data={data} setData={setData} canWrite={canWrite} />
           {rec && section.id === "sales.pipeline" && !isExternal(me.role) && <ProposalBuilder deal={rec} onDone={onReload || onSaved} />}
           {rec && section.id === "sales.clients" && !isExternal(me.role) && <PortalLinks client={rec} />}
+          {rec && section.id === "operations.support" && <SlaPanel rec={rec} />}
+          {rec && section.id === "operations.builds" && !isExternal(me.role) && <BuildParts build={rec} />}
           {rec && section.id === "sales.pipeline" && ["Won", "Negotiation"].includes(rec.status || "") && !isExternal(me.role) && <ProjectPlanner deal={rec} onDone={onReload || onSaved} />}
           {section.dept === "marketing" && <MarketingStudio section={section} title={title} data={data} setData={setData} canWrite={canWrite} saved={!!rec} />}
           <datalist id="people-list">{people.map((p) => <option key={p.id} value={p.full_name || p.email} />)}</datalist>
