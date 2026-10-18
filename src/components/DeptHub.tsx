@@ -4,6 +4,7 @@ import Link from "next/link";
 import Icon from "./Icon";
 import { left as slaLeft, slaFor } from "@/lib/sla";
 import CashForecast from "./CashForecast";
+import { dso } from "@/lib/dunning";
 import { useApp, findSection, SECTIONS } from "./App";
 import StageBoard from "./StageBoard";
 import MktCalendar from "./MktCalendar";
@@ -177,12 +178,15 @@ export default function DeptHub({ dept }: { dept: string }) {
       const bucket = (dir: string) => { const b = [0, 0, 0, 0, 0]; for (const r of inv.filter((x) => x.data?.direction === dir)) { const d = r.data?.due ? -dayDiff(r.data.due) : 0; const i = d <= 0 ? 0 : d <= 30 ? 1 : d <= 60 ? 2 : d <= 90 ? 3 : 4; b[i] += n(r.data?.amount); } return b; };
       const ar = bucket("Receivable"), ap = bucket("Payable"); const labels = [T(L("Not due", "Не наступил")), "1–30", "31–60", "61–90", "90+"];
       kpis.push({ l: L("Receivable", "Дебиторка"), v: usd(ar.reduce((a, b) => a + b, 0)), s: `${usd(ar.slice(1).reduce((a, b) => a + b, 0))} ${T(L("overdue", "просрочено"))}`, href: "/finance/invoices" });
+      { const ds = dso(of("finance.invoices") as any, new Date().toISOString().slice(0, 10), (v: any) => n(v)); if (ds !== null) kpis.push({ l: L("Days to get paid (DSO)", "Дней до оплаты (DSO)"), v: String(ds), s: T(L("open receivables ÷ 90-day billing × 90", "открытая дебиторка ÷ выставлено за 90 дней × 90")), href: "/finance/invoices", tone: ds > 60 ? "bad" : "" }); }
       kpis.push({ l: L("Payable", "Кредиторка"), v: usd(ap.reduce((a, b) => a + b, 0)), s: `${usd(ap.slice(1).reduce((a, b) => a + b, 0))} ${T(L("overdue", "просрочено"))}`, href: "/finance/invoices" });
       kpis.push({ l: L("Expenses awaiting approval", "Расходы на согласовании"), v: String(of("finance.expenses").filter((r) => r.status === "Submitted").length), s: usd(of("finance.expenses").filter((r) => r.status === "Submitted").reduce((a, r) => a + n(r.data?.amount), 0)), href: "/finance/expenses" });
       const cf = of("finance.cashflow").sort((a, b) => String(a.data?.month || a.title).localeCompare(String(b.data?.month || b.title)));
       let run = 0; const cfRows = cf.map((r) => { const net = n(r.data?.inflow) - n(r.data?.outflow); run += net; return { l: `${r.data?.month || r.title} · ${r.status}`, v: n(r.data?.inflow), v2: n(r.data?.outflow), sub: `${T(L("net", "сальдо"))} ${usd(net)} · ${T(L("cumulative", "нарастающим"))} ${usd(run)}` }; });
       if (cf.length) kpis.push({ l: L("Cumulative cash flow", "Накопленный денежный поток"), v: usd(run), s: `${cf.length} ${T(L("months", "мес."))}`, href: "/finance/cashflow", tone: run < 0 ? "bad" : "" });
       cards.push(<Bars key="ar" title={L("Receivables aging (days overdue)", "Дебиторка по срокам просрочки (дни)")} icon="coins" fmt={usd} more="/finance/invoices" rows={ar.map((v, i) => ({ l: labels[i], v }))} />);
+      { const debt = new Map<string, number>(); for (const r of inv.filter((x) => x.data?.direction !== "Payable" && x.data?.due && dayDiff(x.data.due) < 0)) debt.set(r.data?.counterparty || r.title, (debt.get(r.data?.counterparty || r.title) || 0) + n(r.data?.amount));
+        const top = [...debt.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6); if (top.length) cards.push(<Bars key="debt" title={L("Top overdue clients", "Крупнейшие должники")} icon="users" fmt={usd} more="/finance/invoices" rows={top.map(([l, v]) => ({ l, v }))} />); }
       cards.push(<Bars key="ap" title={L("Payables aging (days overdue)", "Кредиторка по срокам просрочки (дни)")} icon="receipt" fmt={usd} more="/finance/invoices" rows={ap.map((v, i) => ({ l: labels[i], v }))} />);
       cards.push(<Bars key="bud" title={L("Budget: actual / planned", "Бюджет: факт / план")} icon="pie" fmt={usd} more="/finance/budget" rows={of("finance.budget").filter((r) => r.status !== "Closed").map((r) => ({ l: r.data?.department || r.title, v: n(r.data?.actual), v2: n(r.data?.planned), sub: n(r.data?.planned) ? `${Math.round((n(r.data?.actual) / n(r.data?.planned)) * 100)}%` : "" }))} />);
       cards.push(<Bars key="cf" title={L("Cash flow by month: in / out", "Движение денег по месяцам: приход / расход")} icon="trend" fmt={usd} more="/finance/cashflow" rows={cfRows} />);

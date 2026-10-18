@@ -10,6 +10,7 @@ import { nextOccurrence } from "./recur";
 import { milestoneReady } from "./milestones";
 import { serviceDone } from "./service";
 import { poStamps } from "./vendors";
+import { changeOrderEffects } from "./margin";
 import { SHIP_GUARD, shipMissing, shipMsg, type Missing } from "./shipgate";
 import { DEFAULT_LIMITS, LIMITED, limitRoles, overLimit, withLimits, type Limits } from "@/config/approvals";
 let LIM: Promise<Limits> | null = null;
@@ -144,6 +145,8 @@ export const store = {
         // Support SLA stamps (on the live site the server does this)
         if (r.section === "operations.support" && old.status !== r.status) { const d = db.records[i].data = { ...db.records[i].data }; if (!d.responded_at && old.status === "New") d.responded_at = now; if (!d.resolved_at && /^(resolved|closed)$/i.test(r.status || "")) d.resolved_at = now; }
         { const d = poStamps(old.status, db.records[i], now.slice(0, 10)); if (d) db.records[i].data = d; }
+        // Change order signed → payments (on the live site the server does this)
+        if (old.status !== r.status) { const e = changeOrderEffects(db.records[i], db.records, now.slice(0, 10)); if (e) { db.records[i].data = e.co; if (e.create) db.records.push({ id: uid(), company: null, controlled: old.controlled, created_by: me.id, created_at: now, updated_at: now, ...e.create } as Rec); if (e.update) { const k = db.records.findIndex((x) => x.id === e.update!.id); if (k >= 0) db.records[k] = { ...db.records[k], data: e.update.data, updated_at: now }; } } }
         // Planned service done → the unit's next service moves forward
         if (old.status !== r.status) { const u = db.records.find((x) => x.id === db.records[i].data?.unit_ref); const ch = serviceDone(db.records[i], u, now.slice(0, 10)); if (ch && u) Object.assign(u, { status: ch.status, data: ch.data, updated_at: now }); }
         // Acceptance closed → milestone invoices ready (on the live site the server does this)

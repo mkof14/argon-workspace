@@ -17,7 +17,8 @@ test("Approval rules match the workspace configuration", () => {
 test("Only waiting statuses can be sent", () => {
   assert.ok(canSendForApproval("finance.expenses", "Submitted"));
   assert.ok(!canSendForApproval("finance.expenses", "Paid"));
-  assert.ok(!canSendForApproval("legal.contracts", "Drafting"));
+  assert.ok(!canSendForApproval("legal.claims", "Open"));
+  assert.ok(canSendForApproval("legal.contracts", "Drafting")); assert.ok(!canSendForApproval("legal.contracts", "Signed"));
 });
 
 import { limitRoles, overLimit, withLimits } from "../src/config/approvals.ts";

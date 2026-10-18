@@ -1,4 +1,5 @@
 import { weakVendors } from "@/lib/vendors";
+import { clientLang, dunningLetter, stepFor } from "@/lib/dunning";
 import Anthropic from "@anthropic-ai/sdk";
 import { readState, saveState } from "./backup";
 import { sendMail } from "./mailer";
@@ -14,6 +15,7 @@ import { cashForecast } from "@/lib/cashforecast";
 import { milestoneReady } from "@/lib/milestones";
 import { serviceDone } from "@/lib/service";
 import { poStamps } from "@/lib/vendors";
+import { changeOrderEffects, projectMoney } from "@/lib/margin";
 import { slaFor } from "@/lib/sla";
 import { shortages } from "@/lib/parts";
 import { dueItems, isMine, money, PEOPLE_KEYS } from "@/lib/insights";
@@ -152,6 +154,10 @@ async function execute(c: Ctx, agent: AgentId, a: Action, rec: any): Promise<str
     const err = await sendMail({ to, subject, html: renderEmail({ subject, body, lang: "en", sender: { name: "AGRON Inc.", email: "info@agron1.com" } }), text: body, replyTo: "info@agron1.com" });
     if (err) throw new Error(err);
     await audit(c, agent, rec, `Emailed ${to}: ${subject}`);
+    if (rec.section === "finance.invoices") { // the invoice remembers which reminders went out
+      const { data: cur } = await db.from("records").select("data").eq("id", rec.id).maybeSingle();
+      const d = cur?.data || rec.data || {}; await db.from("records").update({ data: { ...d, reminders: [...(Array.isArray(d.reminders) ? d.reminders : []), { at: new Date().toISOString().slice(0, 10), subject, to }].slice(-10) } }).eq("id", rec.id);
+    }
     return `emailed ${to}`;
   }
   return "nothing";
@@ -214,7 +220,20 @@ async function serviceStamps(db: any, rec: any, ev: Ev) {
   if (ch) await db.from("records").update({ status: ch.status, data: ch.data }).eq("id", ch.id);
 }
 
+/** A change order is signed: its amount goes into the project payments (once). */
+async function changeOrderStamps(db: any, rec: any, ev: Ev) {
+  if (ev.kind !== "status" || rec.section !== "legal.contracts" || rec.status !== "Signed" || rec.data?.type !== "Change order") return;
+  const { data: inv } = await db.from("records").select("id,section,title,status,data").eq("section", "finance.invoices").eq("data->>deal_ref", rec.data?.deal_ref || "-");
+  const e = changeOrderEffects(rec, inv || [], new Date().toISOString().slice(0, 10)); if (!e) return;
+  if (e.create) await db.from("records").insert({ ...e.create, controlled: !!rec.controlled, company: null, created_by: rec.created_by ?? null });
+  if (e.update) await db.from("records").update({ data: e.update.data }).eq("id", e.update.id);
+  await db.from("records").update({ data: e.co }).eq("id", rec.id);
+  const { data: fin } = await db.from("profiles").select("id").in("role", ["finance", "owner"]);
+  await pushTo(db, (fin || []).map((p: any) => p.id), (l) => ({ title: PUSH.co_t[l], body: `${rec.title}`, url: `/legal/contracts?r=${rec.id}`, tag: `co-${rec.id}` })).catch(() => 0);
+}
+
 export async function onRecordEvent(db: any, rec: any, ev: Ev) {
+  await changeOrderStamps(db, rec, ev).catch(() => {});
   await serviceStamps(db, rec, ev).catch(() => {});
   if (ev.kind === "status") { const d = poStamps(ev.from, rec, new Date().toISOString().slice(0, 10)); if (d) await db.from("records").update({ data: d }).eq("id", rec.id).then(() => 0, () => 0); }
   await slaStamps(db, rec, ev).catch(() => {});
@@ -381,7 +400,7 @@ async function briefAgent(c: Ctx, recsAll: any[], force: boolean) {
 
 /* ---------------- Department agents ---------------- */
 type Finder = (all: any[], today: string, th: Settings["thresholds"]) => Finding[];
-const FINDERS: Partial<Record<AgentId, Finder>> = { finance: (all, t, th) => financeFindings(all, t, { ...th, cash: cashForecast(all, t) }), sales: salesFindings, operations: (all, t, th) => operationsFindings(all, t, { ...th, sla: (x, f) => slaFor(x, f), parts: shortages, vendors: weakVendors }), hr: hrFindings, legal: legalFindings, marketing: marketingFindings, technical: technicalFindings, security: securityFindings };
+const FINDERS: Partial<Record<AgentId, Finder>> = { finance: (all, t, th) => financeFindings(all, t, { ...th, cash: cashForecast(all, t), margin: projectMoney, dun: { stepFor, langOf: clientLang, letter: dunningLetter } }), sales: salesFindings, operations: (all, t, th) => operationsFindings(all, t, { ...th, sla: (x, f) => slaFor(x, f), parts: shortages, vendors: weakVendors }), hr: hrFindings, legal: legalFindings, marketing: marketingFindings, technical: technicalFindings, security: securityFindings };
 const DEPT_OF: Partial<Record<AgentId, string>> = { finance: "finance", sales: "sales", operations: "operations", hr: "hr", legal: "legal", marketing: "marketing", technical: "technical", security: "security" };
 const COLOR = { bad: "#B4232F", warn: "#A15C00", info: "#2A3440" };
 

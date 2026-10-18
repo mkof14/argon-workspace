@@ -3,7 +3,7 @@
 import type { Action } from "./automation";
 
 type R = { id: string; section: string; title: string; status: string | null; data: Record<string, any>; controlled?: boolean; created_at?: string; updated_at?: string };
-export type Th = { remind_before: number; escalate_after: number; stalled_deal: number; /** 90-day forecast, computed by the caller (lib/cashforecast) */ /** SLA of a support request, computed by the caller (lib/sla) */ sla?: (t: any, fleet: any[]) => { respond: string; resolve: string; respondBy: string; resolveBy: string; tier: string; severity: string } | null; /** Vendors delivering late too often, computed by the caller (lib/vendors) */ vendors?: (all: any[]) => { vendor: string; onTime: number | null; avgDelay: number | null; received: number; defectPct: number | null }[]; /** Parts shortages for builds, computed by the caller (lib/parts) */ parts?: (all: any[], today: string) => { b: any; lines: { line: any; short: number; free: number }[] }[]; cash?: { opening: number | null; gap: { week: number; start: string; balance: number } | null; lines: { id: string; title: string; usd: number; date: string; kind: string }[] } };
+export type Th = { remind_before: number; escalate_after: number; stalled_deal: number; /** 90-day forecast, computed by the caller (lib/cashforecast) */ /** SLA of a support request, computed by the caller (lib/sla) */ sla?: (t: any, fleet: any[]) => { respond: string; resolve: string; respondBy: string; resolveBy: string; tier: string; severity: string } | null; /** Collection letters, computed by the caller (lib/dunning) */ dun?: { stepFor: (late: number) => number; langOf: (inv: any, all: any[]) => any; letter: (step: number, lang: any, v: { title: string; sum: string; due: string; late: number; client: string }) => { subject: string; body: string } }; /** Project money of a won deal, computed by the caller (lib/margin) */ margin?: (deal: any, all: any[]) => { forecastPct: number | null; targetPct: number | null; low: boolean; over: boolean; committed: number; planned: number | null }; /** Vendors delivering late too often, computed by the caller (lib/vendors) */ vendors?: (all: any[]) => { vendor: string; onTime: number | null; avgDelay: number | null; received: number; defectPct: number | null }[]; /** Parts shortages for builds, computed by the caller (lib/parts) */ parts?: (all: any[], today: string) => { b: any; lines: { line: any; short: number; free: number }[] }[]; cash?: { opening: number | null; gap: { week: number; start: string; balance: number } | null; lines: { id: string; title: string; usd: number; date: string; kind: string }[] } };
 /**
  * One thing an agent noticed.
  * who: "owner" (the person named in the record), "role:<role>" or "leads"; key: raised once, then again every `repeat` days while still true.
@@ -42,11 +42,16 @@ export function financeFindings(all: R[], today: string, th: Th): Finding[] {
     const due = r.data?.due; if (!isDate(due) || ["Paid", "Draft"].includes(r.status || "")) continue;
     const late = days(due, today); const sum = money(r.data?.amount, r.data?.currency); const recv = r.data?.direction !== "Payable";
     if (late > 0 && r.status !== "Overdue") out.push({ rec: r, level: "warn", who: ["role:finance"], key: `fin-over|${r.id}`, text: `Invoice “${r.title}” (${sum}) is overdue since ${due}.`, action: { type: "set", field: "status", value: "Overdue" }, why: "Due date passed" });
-    if (recv && late >= 7) {
-      const to = clientEmail(r, all);
-      out.push({ rec: r, level: late >= 30 ? "bad" : "warn", who: late >= 30 ? ["role:finance", "leads"] : ["role:finance"], key: `fin-remind|${r.id}`, repeat: 14,
-        text: `Client has not paid “${r.title}” (${sum}) for ${late} days.${to ? " A polite reminder email is prepared for approval." : " No client email found — add it to the client card."}`,
-        action: to ? { type: "email", to_field: "", to, subject: `Payment reminder — ${r.title}`, body: `Dear client,\n\nOur records show that invoice **${r.title}** for **${sum}**, due on ${due}, is still open.\n\nIf the payment has already been sent, please ignore this message and share the payment reference. Otherwise, we would be grateful for payment at your earliest convenience.\n\nThank you.` } : undefined, why: `Receivable ${late} days overdue` });
+    if (recv && th.dun) {
+      // Collection ladder: 7, 21 and 45 days late; each letter in the client's language and only after approval
+      const step = th.dun.stepFor(late);
+      if (step) {
+        const to = clientEmail(r, all); const lang = th.dun.langOf(r, all);
+        const L = th.dun.letter(step, lang, { title: r.title, sum, due, late, client: r.data?.counterparty || "client" });
+        out.push({ rec: { ...r, data: { ...r.data, late_days: String(late), dun_step: String(step) } }, level: step >= 3 ? "bad" : "warn", who: step >= 2 ? ["role:finance", "leads"] : ["role:finance"], key: `fin-remind|${r.id}|${step}`, repeat: 14,
+          text: `Client has not paid “${r.title}” (${sum}) for ${late} days — reminder ${step} of 3.${to ? " The letter is prepared for approval." : " No client email found — add it to the client card."}`,
+          action: to ? { type: "email", to_field: "", to, subject: L.subject, body: L.body } : undefined, why: `Receivable ${late} days overdue` });
+      }
     }
     if (!recv && late <= 0 && late >= -th.remind_before) out.push({ rec: r, level: "info", who: ["role:finance"], key: `fin-pay|${r.id}`, repeat: 30, text: `We must pay “${r.title}” (${sum}) by ${due}.` });
   }
@@ -71,6 +76,12 @@ export function financeFindings(all: R[], today: string, th: Th): Finding[] {
     const d = days(today, r.data.renewal); const st = stepFor(d, [60, 30, 7]); if (!st) continue;
     out.push({ rec: r, level: d <= 7 ? "bad" : "warn", who: d <= 7 ? ["role:finance", "leads"] : ["role:finance"], key: `fin-ins|${r.id}|${st}`, repeat: 365, text: d < 0 ? `Insurance “${r.title}” renewal date ${r.data.renewal} has passed — check cover.` : `Insurance “${r.title}” (${r.data?.type || ""}) renews on ${r.data.renewal}.`,
       action: r.status === "Active" && d <= 60 ? { type: "set", field: "status", value: "Renewal due" } : undefined, why: "Renewal within 60 days" });
+  }
+  // Project margin: costs above the approved costing or expected margin under the target
+  if (th.margin) for (const dl of of(all, "sales.pipeline").filter((x) => x.status === "Won")) {
+    const m = th.margin(dl, all); if (!m.low && !m.over) continue;
+    out.push({ rec: { ...dl, data: { ...dl.data, margin_now: m.forecastPct === null ? "—" : `${m.forecastPct}%`, margin_target: m.targetPct === null ? "—" : `${m.targetPct}%`, cost_now: money(m.committed), cost_plan: m.planned === null ? "—" : money(m.planned) } }, level: m.low ? "bad" : "warn", who: ["role:finance", "leads"], key: `fin-margin|${dl.id}|${m.low ? "low" : "over"}`, repeat: 14,
+      text: `Project “${dl.title}”: expected margin ${m.forecastPct ?? "—"}% against the target ${m.targetPct ?? "—"}%; costs so far ${money(m.committed)}${m.planned !== null ? ` (plan ${money(m.planned)})` : ""}. Check purchases and change orders.` });
   }
   // Payments by project milestones: acceptance is done, the draft invoice waits to be checked and sent
   for (const r of of(all, "finance.invoices")) {

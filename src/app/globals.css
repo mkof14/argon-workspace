@@ -1084,3 +1084,14 @@ tr.neg td{color:var(--bad)}
 @media (max-width:640px){.limit-row{grid-template-columns:1fr}}
 .svc-dates{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px}
 .vs-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin:4px 0 8px}.vs-t{display:grid;gap:2px;padding:8px 10px;border:1px solid var(--line);border-radius:10px}.vs-t b{font-size:16px}.vs-t b.neg{color:var(--bad,#C2412D)}
+small.neg,.neg{color:var(--bad)}
+.dun{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:4px 0 8px}.dun-s{display:grid;gap:2px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;font-size:13.5px}.dun-s.now{border-color:var(--warn)}.dun-s.done{border-color:var(--ok)}@media (max-width:560px){.dun{grid-template-columns:1fr}}
+.pf{display:grid;gap:12px}.pf-row{padding:14px 16px;display:grid;gap:10px;border-inline-start:4px solid var(--line)}.pf-row.h-red{border-inline-start-color:var(--bad)}.pf-row.h-amber{border-inline-start-color:var(--warn)}.pf-row.h-green{border-inline-start-color:var(--ok)}
+.pf-h{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.pf-t{font-weight:700;font-size:16px}
+.pf-bar{height:6px;border-radius:6px;background:var(--line);overflow:hidden}.pf-bar i{display:block;height:100%;background:var(--ok)}
+.pf-g{display:grid;grid-template-columns:2fr 1.2fr 1fr 1fr;gap:10px}.pf-g>div{display:grid;gap:2px;min-width:0}.pf-g a,.pf-g span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:720px){.pf-g{grid-template-columns:1fr 1fr}.pf-g>div:first-child{grid-column:1/-1}}
+.wl td,.wl th{text-align:center}.wl td:first-child,.wl th:first-child{text-align:start;white-space:nowrap}
+.wl-c{width:38px;height:30px;border-radius:8px;border:1px solid var(--line);background:transparent;font-weight:700;color:var(--ink);cursor:pointer}.wl-c:disabled{cursor:default;opacity:.5}
+.wl-c.wl1{background:var(--ok-bg)}.wl-c.wl2{background:var(--warn-bg)}.wl-c.wl3,.wl-c.wllate{background:var(--bad-bg);color:var(--bad)}.wl-c.on{outline:2px solid var(--ink)}
+.co-list{display:grid;gap:6px;margin:4px 0}.co-row{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)}.co-row>span:first-child{flex:1 1 180px;min-width:0}

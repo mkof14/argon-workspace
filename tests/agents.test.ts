@@ -1,3 +1,4 @@
+import { clientLang, dunningLetter, stepFor as dunStep } from "../src/lib/dunning.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { clientEmail, days, financeFindings, hrFindings, legalFindings, marketingFindings, securityFindings, technicalFindings, quarter, addMonths, operationsFindings, salesFindings, stepFor } from "../src/lib/deptAgents.ts";
@@ -24,9 +25,9 @@ test("finance: overdue invoices, client reminder with the email from the client 
     r("I3", "finance.invoices", "Due", { direction: "Payable", amount: 5000, due: "2026-10-17" }),
   ];
   assert.equal(clientEmail(all[2] as any, all as any), "jane@aurora.ae");
-  const f = financeFindings(all as any, T, th);
+  const f = financeFindings(all as any, T, { ...th, dun: { stepFor: dunStep, langOf: clientLang, letter: dunningLetter } } as any);
   const over = f.find((x) => x.key === "fin-over|I1")!; assert.deepEqual(over.action, { type: "set", field: "status", value: "Overdue" });
-  const rem = f.find((x) => x.key === "fin-remind|I1")!; assert.equal(rem.action?.type, "email"); assert.equal((rem.action as any).to, "jane@aurora.ae");
+  const rem = f.find((x) => x.key.startsWith("fin-remind|I1|"))!; assert.match((rem.action as any).subject, /^Payment reminder|^Second reminder/); assert.equal(rem.action?.type, "email"); assert.equal((rem.action as any).to, "jane@aurora.ae");
   assert.ok(f.some((x) => x.key === "fin-pay|I3"));
   assert.ok(!f.some((x) => x.rec.id === "I2"));
 });

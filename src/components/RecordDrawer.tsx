@@ -3,10 +3,12 @@ import Approval from "./Approval";
 import dynamic from "next/dynamic";
 const ProposalBuilder = dynamic(() => import("./ProposalBuilder"), { ssr: false });
 const ProjectPlanner = dynamic(() => import("./ProjectPlanner"), { ssr: false });
+const ProjectMoney = dynamic(() => import("./ProjectMoney"), { ssr: false });
 const PortalLinks = dynamic(() => import("./PortalLinks"), { ssr: false });
 const SlaPanel = dynamic(() => import("./SlaPanel"), { ssr: false });
 const BuildParts = dynamic(() => import("./BuildParts"), { ssr: false });
 const MilestoneNote = dynamic(() => import("./MilestoneNote"), { ssr: false });
+const Collection = dynamic(() => import("./Collection"), { ssr: false });
 const ServicePanel = dynamic(() => import("./ServicePanel"), { ssr: false });
 const VendorScore = dynamic(() => import("./VendorScore"), { ssr: false });
 import MarketingStudio from "./MarketingStudio";
@@ -201,10 +203,12 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
           {rec && section.id === "operations.support" && <SlaPanel rec={rec} />}
           {rec && section.id === "operations.builds" && !isExternal(me.role) && <BuildParts build={rec} />}
           {rec && section.id === "finance.invoices" && <MilestoneNote rec={rec} />}
+          {rec && section.id === "finance.invoices" && !isExternal(me.role) && <Collection rec={rec} />}
           {rec && section.id === "operations.fleet" && !isExternal(me.role) && <ServicePanel unit={rec} />}
           {rec && section.id === "operations.vendors" && !isExternal(me.role) && <VendorScore vendor={store.original(rec).title} />}
           {rec && section.id === "operations.procurement" && !isExternal(me.role) && <VendorScore vendor={String(store.original(rec).data?.vendor || "")} />}
           {rec && section.id === "sales.pipeline" && ["Won", "Negotiation"].includes(rec.status || "") && !isExternal(me.role) && <ProjectPlanner deal={rec} onDone={onReload || onSaved} />}
+          {rec && section.id === "sales.pipeline" && rec.status === "Won" && !isExternal(me.role) && <ProjectMoney deal={rec} />}
           {section.dept === "marketing" && <MarketingStudio section={section} title={title} data={data} setData={setData} canWrite={canWrite} saved={!!rec} />}
           <datalist id="people-list">{people.map((p) => <option key={p.id} value={p.full_name || p.email} />)}</datalist>
           {rec && APPROVALS[section.id] && <Approval rec={rec} canWrite={canWrite} onChanged={onSaved} />}

@@ -47,7 +47,7 @@ export default function Search({ onClose, initial = "", voice = false }: { onClo
 
   const hits = useMemo<Hit[]>(() => {
     const s = q.trim(); const out: Hit[] = [];
-    const pages: [string, string, string, string][] = [["/", "stardome", t("overview", lang), ""], ["/reports", "pie", t("reports", lang), t("reports_sub", lang)], ["/templates", "file", t("templates", lang), t("tpl_sub", lang)], ["/learn", "lifebuoy", t("learn", lang), ""], ["/me", "user", t("my_profile", lang), ""]];
+    const pages: [string, string, string, string][] = [["/", "stardome", t("overview", lang), ""], ["/reports", "pie", t("reports", lang), t("reports_sub", lang)], ["/templates", "file", t("templates", lang), t("tpl_sub", lang)], ["/projects", "layers", tx({ en: "Projects", ru: "Проекты", uk: "Проєкти", ar: "المشاريع" }, lang), ""], ["/learn", "lifebuoy", t("learn", lang), ""], ["/me", "user", t("my_profile", lang), ""]];
     if (["owner", "admin"].includes(me.role)) pages.push(["/admin/users", "users", t("users", lang), ""], ["/admin/roles", "key", t("roles", lang), ""]);
     const acts: Hit[] = [];
     if (access.write.has("company.tasks")) acts.push({ id: "a-task", group: "act", icon: "bell", title: t("new_reminder", lang), sub: s || undefined, go: () => go(`/company/tasks?new=1`) });
