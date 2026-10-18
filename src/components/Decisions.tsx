@@ -14,6 +14,8 @@ import { projectMoney } from "@/lib/margin";
 import { shortages } from "@/lib/parts";
 import { shipMissing } from "@/lib/shipgate";
 import { useTr } from "@/lib/useTr";
+import { precheck } from "@/lib/precheck";
+import { PreCheckList, usePrecheckData } from "./PreCheck";
 import { AGENT_INFO } from "./Automation";
 
 type T4 = { en: string; ru: string; uk: string; ar: string };
@@ -31,6 +33,8 @@ const money = (v: number, cur = "USD") => `${cur} ${Math.round(v).toLocaleString
 /** Decision centre: approvals, agent proposals, invoices ready to send and projects at risk — each with its context and a one-tap answer. */
 export default function Decisions() {
   const { lang, me, access, people, toast } = useApp(); const T = (x: T4) => tx(x, lang as Lang);
+  const pc = usePrecheckData();
+  const warnsOf = (d: Decision) => d.kind === "approval" && pc.all ? precheck({ id: d.recordId!, section: d.section!, title: d.title, status: d.data?._status ?? null, data: d.data || {} } as any, pc.all as any, today, pc.deptOf) : [];
   const [items, setItems] = useState<Decision[] | null>(null); const [busy, setBusy] = useState(""); const [note, setNote] = useState<Record<string, string>>({}); const [only, setOnly] = useState<Kind | "">("");
   const today = new Date().toISOString().slice(0, 10);
   const person = (id?: string) => { const p = people.find((x) => x.id === id); return p ? p.full_name || p.email : ""; };
@@ -113,6 +117,7 @@ export default function Decisions() {
           <small className="faint" style={{ marginInlineStart: "auto" }}>{d.age ? T(L(`waiting ${d.age} d`, `ждёт ${d.age} дн.`, `чекає ${d.age} дн.`, `ينتظر ${d.age} يوم`)) : T(L("today", "сегодня", "сьогодні", "اليوم"))}</small></div>
         <div className="dc-t"><Link href={href(d.section, d.recordId)}>{tmap[d.id] || d.title}</Link>{d.amount ? <b className="mono">{money(d.amount, d.currency)}</b> : null}</div>
         {d.kind === "approval" && <>
+          <PreCheckList warns={warnsOf(d)} />
           {facts(d).length > 0 && <div className="dc-f">{facts(d).map(([l, v]) => <span key={l}><small className="faint">{l}</small>{v}</span>)}</div>}
           {(d.data?._note || d.data?._by) && <small>{person(d.data?._by)}{d.data?._note ? `: «${d.data._note}»` : ""}</small>}
           {rule && <small className="faint">{T(L("Approve →", "Одобрить →", "Схвалити →", "موافقة ←"))} {rule.ok}{rule.no ? ` · ${T(L("Return →", "Вернуть →", "Повернути →", "إعادة ←"))} ${rule.no}` : ""}</small>}
@@ -124,7 +129,7 @@ export default function Decisions() {
         {d.kind === "project" && <><div className="toolbar" style={{ gap: 6 }}>{(d.data?._reasons || []).map((r: any) => <span key={r.k} className="chip">{T(reason(r))}</span>)}</div>
           {d.data?._next && <small className="faint">{T(L("Next step", "Следующий шаг", "Наступний крок", "الخطوة التالية"))}: {d.data._nextDate} · {d.data._next}</small>}</>}
         <div className="toolbar">
-          {d.kind === "approval" && <><button className="btn primary sm" disabled={busy === d.id} onClick={() => act(d, true)}><Icon n="check" />{T(L("Approve", "Одобрить", "Схвалити", "موافقة"))}</button><button className="btn sm" disabled={busy === d.id} onClick={() => act(d, false)}>{T(L("Return", "Вернуть", "Повернути", "إعادة"))}</button></>}
+          {d.kind === "approval" && <><button className={`btn sm ${warnsOf(d).some((w) => w.level === "bad") ? "" : "primary"}`} disabled={busy === d.id} onClick={() => act(d, true)}><Icon n="check" />{warnsOf(d).some((w) => w.level === "bad") ? T(L("Approve anyway", "Одобрить всё равно", "Схвалити все одно", "وافق رغم ذلك")) : T(L("Approve", "Одобрить", "Схвалити", "موافقة"))}</button><button className="btn sm" disabled={busy === d.id} onClick={() => act(d, false)}>{T(L("Return", "Вернуть", "Повернути", "إعادة"))}</button></>}
           {d.kind === "agent" && !d.data?._hidden && <><button className="btn primary sm" disabled={busy === d.id} onClick={() => act(d, true)}><Icon n="check" />{a?.type === "email" ? T(L("Send", "Отправить", "Надіслати", "إرسال")) : T(L("Do it", "Выполнить", "Виконати", "نفّذ"))}</button><button className="btn sm" disabled={busy === d.id} onClick={() => act(d, false)}>{T(L("Decline", "Отклонить", "Відхилити", "رفض"))}</button>
             {a?.type === "email" && <Link className="btn ghost sm" href="/admin/system?tab=auto">{T(L("Edit first", "Сначала поправить", "Спершу виправити", "عدّل أولاً"))}</Link>}</>}
           {d.kind === "invoice" && <><Link className="btn sm" href={href(d.section, d.recordId)}><Icon n="file" />{T(L("Open invoice", "Открыть счёт", "Відкрити рахунок", "افتح الفاتورة"))}</Link><button className="btn primary sm" disabled={busy === d.id} onClick={() => act(d, true)}><Icon n="send" />{T(L("Mark as sent", "Отметить отправленным", "Позначити надісланим", "علّمها كمرسلة"))}</button></>}

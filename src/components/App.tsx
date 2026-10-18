@@ -36,7 +36,7 @@ const Projects = dynamic(() => import("./Projects"), { ssr: false });
 const Decisions = dynamic(() => import("./Decisions"), { ssr: false });
 const PhotoCapture = dynamic(() => import("./PhotoCapture"), { ssr: false });
 const OfflineBar = dynamic(() => import("./OfflineBar"), { ssr: false });
-export const VERSION = "2.30";
+export const VERSION = "2.31";
 
 type Ctx = {
   lang: Lang; me: Profile; access: Access; toast: (m: string, err?: boolean) => void;

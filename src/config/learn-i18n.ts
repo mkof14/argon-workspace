@@ -1,6 +1,8 @@
 // Ukrainian and Arabic for the Learning Center and document templates, keyed by the English text.
 // Generated from learn.ts / templates.ts; when an English string changes, its translation falls back to English until updated.
 export const UK: Record<string, string> = {
+"What do the coloured warnings above an approval mean?": "Що означають кольорові попередження над погодженням?",
+"Checks run before anyone decides: possible duplicate (same party and amount within 30 days), above the department budget, vendor not screened or blocked, unusually large amount (3× the usual), discount above 15% or price below the approved costing. Red means stop and look — the button changes to “Approve anyway”. They appear in Decisions and in the record while it waits for approval.": "Перевірки до рішення: можливий дубль (та сама сторона й сума за 30 днів), перевищення бюджету відділу, постачальника не перевірено або заблоковано, незвично велика сума (у 3 рази більша за звичайну), знижка понад 15% або ціна нижча за затверджену собівартість. Червоне — зупиніться й перевірте: кнопка змінюється на «Схвалити все одно». Видно в «Рішеннях» і в самому записі, поки він чекає погодження.",
 "Where do I see everything waiting for my decision?": "Де побачити все, що чекає мого рішення?",
 "Decisions in the menu: approvals, agent proposals, invoices ready to send and projects at risk, most urgent first, with the context and one-tap answers.": "«Рішення» в меню: погодження, пропозиції агентів, готові рахунки й проєкти під загрозою — спочатку найтерміновіше, з контекстом і відповіддю одним натисканням.",
 "How do I check what a delay does to cash?": "Як перевірити, що затримка зробить із грошима?",
@@ -1033,6 +1035,8 @@ export const UK: Record<string, string> = {
 "Needed by": "Потрібно до"
 };
 export const AR: Record<string, string> = {
+"What do the coloured warnings above an approval mean?": "ماذا تعني التحذيرات الملونة فوق الموافقة؟",
+"Checks run before anyone decides: possible duplicate (same party and amount within 30 days), above the department budget, vendor not screened or blocked, unusually large amount (3× the usual), discount above 15% or price below the approved costing. Red means stop and look — the button changes to “Approve anyway”. They appear in Decisions and in the record while it waits for approval.": "فحوص قبل القرار: تكرار محتمل (الطرف والمبلغ نفسهما خلال 30 يوماً)، تجاوز ميزانية القسم، مورّد غير مفحوص أو محظور، مبلغ كبير على غير العادة (3 أضعاف المعتاد)، خصم أعلى من 15% أو سعر أقل من التكلفة المعتمدة. الأحمر يعني توقف وتحقق — يتغير الزر إلى «وافق رغم ذلك». تظهر في القرارات وفي السجل أثناء انتظار الموافقة.",
 "Where do I see everything waiting for my decision?": "أين أرى كل ما ينتظر قراري؟",
 "Decisions in the menu: approvals, agent proposals, invoices ready to send and projects at risk, most urgent first, with the context and one-tap answers.": "«القرارات» في القائمة: الموافقات واقتراحات الوكلاء والفواتير الجاهزة والمشاريع المعرضة للخطر، الأكثر إلحاحاً أولاً، مع السياق والرد بنقرة.",
 "How do I check what a delay does to cash?": "كيف أتحقق من أثر التأخير على النقد؟",

@@ -11,6 +11,7 @@ const MilestoneNote = dynamic(() => import("./MilestoneNote"), { ssr: false });
 const Collection = dynamic(() => import("./Collection"), { ssr: false });
 const ServicePanel = dynamic(() => import("./ServicePanel"), { ssr: false });
 const VendorScore = dynamic(() => import("./VendorScore"), { ssr: false });
+const PreCheck = dynamic(() => import("./PreCheck"), { ssr: false });
 import MarketingStudio from "./MarketingStudio";
 import { RecordTools } from "./DeptTools";
 import { RefField, ChainPanel } from "./Links";
@@ -211,6 +212,7 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
           {rec && section.id === "sales.pipeline" && rec.status === "Won" && !isExternal(me.role) && <ProjectMoney deal={rec} />}
           {section.dept === "marketing" && <MarketingStudio section={section} title={title} data={data} setData={setData} canWrite={canWrite} saved={!!rec} />}
           <datalist id="people-list">{people.map((p) => <option key={p.id} value={p.full_name || p.email} />)}</datalist>
+          {rec && APPROVALS[section.id]?.wait.includes(rec.status || "") && !isExternal(me.role) && <PreCheck rec={rec} />}
           {rec && APPROVALS[section.id] && <Approval rec={rec} canWrite={canWrite} onChanged={onSaved} />}
           {section.id !== "mail.outbox" && <Attachments section={section} rec={rec} canWrite={canWrite} title={title} />}
           {rec && <div className="thread">
