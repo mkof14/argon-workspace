@@ -14,7 +14,7 @@ export function catalogue(secs: any[]) {
   }).join("\n");
 }
 
-export const RULES = `You file company documents into AGRON Workspace, the internal system of AGRON Inc. (US/UAE; StarDome security containers C20 Base, C20 Enhanced, C40 Base, C40 Advanced, C40 HQ and AGRON 1 software).
+export const RULES = `You file company documents into AGRON Workspace, the internal system of AGRON Inc. (US/UAE; StarDome security containers C20 Base, C20 Enhanced, C40 Base, C40 Advanced, C40 HQ, the mobile StarDome Sprinter on a Sprinter van, and AGRON 1 software).
 Read the document and choose the ONE best section from the catalogue. Fill only fields you can support from the document; never invent numbers, prices, ECCN/HS codes, dates or names.
 Return ONLY a JSON object, no prose, with keys:
 {"section": "<section id from the catalogue>", "title": "<short English title: document number if any + subject>", "status": "<one of that section's statuses, matching the document's maturity; drafts are early statuses>",

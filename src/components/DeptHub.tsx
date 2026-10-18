@@ -14,7 +14,7 @@ import DeptReport from "./DeptReport";
 import AgentCard, { DEPT_FINDERS } from "./AgentCard";
 import { PortalsCard, MetricsCard, FxCard, DomainScan, AccessReview, AccessLog } from "./DeptTools";
 import { MktIdeas } from "./MarketingStudio";
-import { DEPARTMENTS, DEPT_COLORS } from "@/config/workspace.config.mjs";
+import { DEPARTMENTS, DEPT_COLORS, PRODUCT_CONFIGS } from "@/config/workspace.config.mjs";
 import { TEMPLATES } from "@/config/templates";
 import { CHECKLISTS } from "./RecordDrawer";
 import { workingDays } from "@/config/hr";
@@ -136,7 +136,7 @@ export default function DeptHub({ dept }: { dept: string }) {
       kpis.push({ l: L("Test pass rate", "Доля успешных тестов"), v: passed + failed ? `${Math.round((passed / (passed + failed)) * 100)}%` : "—", s: `${tests.filter((r) => ["Planned", "Running"].includes(r.status || "")).length} ${T(L("planned or running", "запланировано или идёт"))}`, href: "/technical/testing" });
       kpis.push({ l: L("Open engineering changes", "Открытые инженерные изменения"), v: String(ecr.filter((r) => ["Requested", "Assessing", "Approved"].includes(r.status || "")).length), s: `${ecr.filter((r) => r.data?.impact === "Compliance" && OPEN(r)).length} ${T(L("with compliance impact", "влияют на комплаенс"))}`, href: "/technical/changes" });
       if (has("technical.it")) kpis.push({ l: L("IT cost per month", "ИТ в месяц"), v: usd(it.filter((r) => r.status !== "Retired").reduce((a, r) => a + n(r.data?.monthly_cost), 0)), href: "/technical/it" });
-      const cfgs = ["C20 Base", "C20 Enhanced", "C40 Base", "C40 Advanced", "C40 HQ"];
+      const cfgs = PRODUCT_CONFIGS;
       cards.push(<Bars key="bom" title={L("Bill of materials cost per configuration", "Стоимость BOM по конфигурациям")} icon="layers" more="/technical/bom" fmt={usd} rows={cfgs.map((cf) => ({ l: `StarDome ${cf}`, v: bom.filter((r) => r.data?.config === cf && r.status !== "Superseded").reduce((a, r) => a + n(r.data?.qty || 1) * n(r.data?.unit_cost), 0), sub: `${bom.filter((r) => r.data?.config === cf).length} ${T(L("lines", "строк"))}` })).filter((x) => x.v > 0)} />);
       cards.push(<List key="unl" title={L("Equipment without compliance link", "Оборудование без проверки комплаенса")} icon="grid" more="/technical/equipment" items={eq.filter((r) => !r.data?.matrix_id && r.status !== "Rejected").map((r) => ({ title: r.title, sub: [r.data?.manufacturer, r.data?.model].filter(Boolean).join(" "), right: T(L("add matrix ID", "нужен ID матрицы")), tone: "warn" as const, href: href(r) }))} empty={L("Every candidate is linked to the compliance matrix.", "Всё оборудование связано с матрицей комплаенса.")} />);
       cards.push(<List key="cert" title={L("Certifications and failed tests", "Сертификация и проваленные тесты")} icon="badge" items={[...of("technical.certification").filter(OPEN).map((r) => ({ title: r.title, sub: [r.data?.scheme, r.data?.body].filter(Boolean).join(" · "), right: r.data?.due ? rel(dayDiff(r.data.due), lang) : r.status || "", tone: (r.data?.due && dayDiff(r.data.due) < 0 ? "bad" : "info") as any, href: href(r) })), ...tests.filter((r) => r.status === "Failed" || r.status === "Blocked").map((r) => ({ title: r.title, sub: r.data?.equipment, right: r.status || "", tone: "bad" as const, href: href(r) }))]} empty={L("No open certifications or failed tests.", "Нет открытой сертификации и проваленных тестов.")} />);

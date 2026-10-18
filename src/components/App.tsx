@@ -33,7 +33,7 @@ const Intake = dynamic(() => import("./Intake"), { ssr: false });
 const DocsAsk = dynamic(() => import("./DocsAsk"), { ssr: false });
 const StarDome = dynamic(() => import("./StarDome"), { ssr: false });
 const Projects = dynamic(() => import("./Projects"), { ssr: false });
-export const VERSION = "2.28";
+export const VERSION = "2.29";
 
 type Ctx = {
   lang: Lang; me: Profile; access: Access; toast: (m: string, err?: boolean) => void;

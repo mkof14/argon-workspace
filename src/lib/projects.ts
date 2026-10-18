@@ -23,11 +23,17 @@ const base = (assembly: "United States" | "UAE", ship: number, k: number): Step[
   { key: "service", section: "company.tasks", title: L("First service visit: {client}", "Первый сервисный визит: {client}", "Перший сервісний візит: {client}", "أول زيارة صيانة: {client}"), status: "Open", day: ship + k + 90, role: "operations", dateKey: "due", link: "deal", fields: { priority: "Medium" } },
 ];
 
+/** Mobile StarDome on a Sprinter van: no container freight; the van is driven or trucked to the client and handed over. */
+const sprinter = (): Step[] => base("United States", 70, 3).map((s) => s.key === "ship" ? { ...s, title: L("Delivery of the van to {client}", "Доставка вэна для {client}", "Доставка вена для {client}", "تسليم الشاحنة إلى {client}"), fields: { ...s.fields, from: "AGRON workshop, USA" } }
+  : s.key === "install" ? { ...s, title: L("Handover and on-site deployment at {site}", "Передача и развёртывание на объекте {site}", "Передача й розгортання на об'єкті {site}", "التسليم والنشر في {site}") } : s);
+
 export const PROJECT_TEMPLATES: ProjectTemplate[] = [
   { id: "stardome-us", name: L("StarDome — assembly in the USA", "StarDome — сборка в США", "StarDome — збирання в США", "StarDome — التجميع في الولايات المتحدة"),
     about: L("About 16 weeks to shipping, sea freight, 2 weeks on site.", "Около 16 недель до отгрузки, морем, 2 недели на объекте.", "Близько 16 тижнів до відвантаження, морем, 2 тижні на об'єкті.", "نحو 16 أسبوعاً حتى الشحن، بحراً، وأسبوعان في الموقع."), steps: base("United States", 112, 35) },
   { id: "stardome-uae", name: L("StarDome — assembly in the UAE", "StarDome — сборка в ОАЭ", "StarDome — збирання в ОАЕ", "StarDome — التجميع في الإمارات"),
-    about: L("About 12 weeks to shipping, local delivery, 1 week on site.", "Около 12 недель до отгрузки, местная доставка, 1 неделя на объекте.", "Близько 12 тижнів до відвантаження, місцева доставка, 1 тиждень на об'єкті.", "نحو 12 أسبوعاً حتى الشحن، توصيل محلي، وأسبوع في الموقع."), steps: base("UAE", 84, 10) },
+    about: L("About 12 weeks to shipping, local delivery, 1 week on site.", "Около 12 недель до отгрузки, местная доставка, 1 неделя на объекте.", "Близько 12 тижнів до відвантаження, місцева доставка, 1 тиждень на об'єкті.", "نحو 12 أسبوعاً حتى الشحن، توصيل محلي، وأسبوع في الموقع."), steps: base("UAE", 84, 10) },,
+  { id: "stardome-sprinter", name: L("StarDome Sprinter — mobile, on a van", "StarDome Sprinter — мобильный, на вэне", "StarDome Sprinter — мобільний, на вені", "StarDome Sprinter — متنقل على شاحنة"),
+    about: L("About 10 weeks to delivery, the van is driven or trucked to the client, 3 days of handover on site.", "Около 10 недель до доставки, вэн перегоняют или везут автовозом, 3 дня передачи на объекте.", "Близько 10 тижнів до доставки, вен переганяють або везуть автовозом, 3 дні передачі на об'єкті.", "نحو 10 أسابيع حتى التسليم، تُقاد الشاحنة أو تُنقل إلى العميل، و3 أيام تسليم في الموقع."), steps: sprinter() }
 ];
 
 const addDays = (iso: string, n: number) => new Date(Date.parse(iso.slice(0, 10) + "T00:00:00Z") + n * 864e5).toISOString().slice(0, 10);

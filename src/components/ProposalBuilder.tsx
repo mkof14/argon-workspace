@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
+import { PRODUCT_CONFIGS } from "@/config/workspace.config.mjs";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import Icon from "./Icon";
@@ -11,7 +12,7 @@ import { TERMS, nextNumber, proposalMarkdown, termsText, type PLang } from "@/li
 
 type T4 = { en: string; ru: string; uk: string; ar: string };
 const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk, ar });
-const CONFIGS = ["C20 Base", "C20 Enhanced", "C40 Base", "C40 Advanced", "C40 HQ", "Custom"];
+const CONFIGS = [...PRODUCT_CONFIGS, "Custom"];
 
 /** Inside a deal: a commercial proposal with prices from the price list, saved as a record with its PDF. */
 export default function ProposalBuilder({ deal, onDone }: { deal: Rec; onDone: () => void }) {

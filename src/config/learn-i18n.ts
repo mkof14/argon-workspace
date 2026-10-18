@@ -1,6 +1,8 @@
 // Ukrainian and Arabic for the Learning Center and document templates, keyed by the English text.
 // Generated from learn.ts / templates.ts; when an English string changes, its translation falls back to English until updated.
 export const UK: Record<string, string> = {
+"What is StarDome Sprinter?": "Що таке StarDome Sprinter?",
+"The mobile version of StarDome, built on a Mercedes-Benz Sprinter van: operator workstation, compute, power and a telescopic sensor mast. It is the sixth configuration next to the five containers — choose Sprinter in the configuration field of deals, proposals, builds, the bill of materials and costing. The proposal describes the van version, the project template StarDome Sprinter has van delivery and a 3-day handover, and builds and installed units have a Van VIN field.": "Мобільна версія StarDome на базі вена Mercedes-Benz Sprinter: робоче місце оператора, обчислення, живлення й телескопічна щогла з сенсорами. Це шоста конфігурація поруч із п'ятьма контейнерами — вибирайте Sprinter у полі конфігурації угод, КП, збирань, специфікації та собівартості. КП описує версію на вені, шаблон проєкту StarDome Sprinter містить доставку вена й 3 дні передачі, а в збираннях і встановлених системах є поле VIN вена.",
 "Where do I see all projects and which ones are at risk?": "Де побачити всі проєкти та які під загрозою?",
 "Projects → Portfolio. Each won deal with a project has a traffic light with the reasons: late steps, overdue client invoices, low margin, missing compliance before shipping, parts short.": "«Проєкти» → «Портфель». Кожна виграна угода з проєктом має світлофор із причинами: прострочені кроки, прострочені рахунки клієнта, низька маржа, немає комплаєнсу перед відвантаженням, бракує комплектуючих.",
 "How is the project margin calculated?": "Як рахується маржа проєкту?",
@@ -1021,6 +1023,8 @@ export const UK: Record<string, string> = {
 "Needed by": "Потрібно до"
 };
 export const AR: Record<string, string> = {
+"What is StarDome Sprinter?": "ما هو StarDome Sprinter؟",
+"The mobile version of StarDome, built on a Mercedes-Benz Sprinter van: operator workstation, compute, power and a telescopic sensor mast. It is the sixth configuration next to the five containers — choose Sprinter in the configuration field of deals, proposals, builds, the bill of materials and costing. The proposal describes the van version, the project template StarDome Sprinter has van delivery and a 3-day handover, and builds and installed units have a Van VIN field.": "النسخة المتنقلة من StarDome على شاحنة Mercedes-Benz Sprinter: محطة مشغّل وحوسبة وطاقة وسارية مستشعرات تلسكوبية. وهي التهيئة السادسة إلى جانب الحاويات الخمس — اختر Sprinter في حقل التهيئة في الصفقات والعروض والتجميعات وقائمة المواد والتكلفة. يصف العرض نسخة الشاحنة، ويتضمن قالب مشروع StarDome Sprinter تسليم الشاحنة و3 أيام تسليم، وفي التجميعات والأنظمة المركّبة حقل رقم VIN للشاحنة.",
 "Where do I see all projects and which ones are at risk?": "أين أرى كل المشاريع وأيها معرض للخطر؟",
 "Projects → Portfolio. Each won deal with a project has a traffic light with the reasons: late steps, overdue client invoices, low margin, missing compliance before shipping, parts short.": "المشاريع ← المحفظة. لكل صفقة رابحة ذات مشروع إشارة ضوئية مع الأسباب: خطوات متأخرة، فواتير عميل متأخرة، هامش منخفض، امتثال ناقص قبل الشحن، قطع ناقصة.",
 "How is the project margin calculated?": "كيف يُحسب هامش المشروع؟",

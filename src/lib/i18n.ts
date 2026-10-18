@@ -59,7 +59,7 @@ const S: Record<string, { en: string; ru: string }> = {
   app_share: { en: "Nothing from Workspace is stored on the phone: the app always loads fresh data and asks you to sign in as usual.", ru: "На телефоне не хранится ничего из Workspace: приложение всегда загружает свежие данные и входит как обычно." },
   intake_photo: { en: "Take a photo of a document", ru: "Сфотографировать документ" },
   sd_title: { en: "StarDome configurations", ru: "Конфигурации StarDome" },
-  sd_intro: { en: "Everything about one container model on one screen: how ready it is, what blocks it, and its documents. Records are linked by their Configuration field; records marked Custom or without a configuration count for every model.", ru: "Всё по одной модели контейнера на одном экране: готовность, что тормозит и документы. Записи привязываются по полю «Конфигурация»; записи с Custom или без конфигурации считаются общими для всех моделей." },
+  sd_intro: { en: "Everything about one StarDome model — five containers and the mobile Sprinter van — on one screen: how ready it is, what blocks it, and its documents. Records are linked by their Configuration field; records marked Custom or without a configuration count for every model.", ru: "Всё по одной модели StarDome — пять контейнеров и мобильный вэн Sprinter — на одном экране: готовность, что тормозит и документы. Записи привязываются по полю «Конфигурация»; записи с Custom или без конфигурации считаются общими для всех моделей." },
   sd_ready: { en: "ready", ru: "готовность" },
   sd_areas: { en: "Readiness by area", ru: "Готовность по направлениям" },
   sd_empty_area: { en: "Nothing yet — add a record or upload a document.", ru: "Пока пусто — добавьте запись или загрузите документ." },

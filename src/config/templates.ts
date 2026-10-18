@@ -17,7 +17,7 @@ const DATE = F("date", "Date", "Дата", "date", { req: true });
 const SIGNER = F("signer", "Signs for AGRON (name)", "Подписывает от AGRON (имя)", "text", { def: "Michael Kofman" });
 const SIGNER_T = F("signer_title", "Title", "Должность", "text", { def: "Chief Executive Officer" });
 const LAW = F("law", "Governing law", "Применимое право", "select", { options: ["the State of Delaware", "the State of New York", "the State of North Carolina", "the Dubai International Financial Centre (DIFC)", "the Abu Dhabi Global Market (ADGM)"], def: "the State of Delaware" });
-const CONFIG = (def = "C20 Enhanced") => F("config", "StarDome configuration", "Конфигурация StarDome", "select", { options: ["C20 Base", "C20 Enhanced", "C40 Base", "C40 Advanced", "C40 HQ", "Custom"], def });
+const CONFIG = (def = "C20 Enhanced") => F("config", "StarDome configuration", "Конфигурация StarDome", "select", { options: ["C20 Base", "C20 Enhanced", "C40 Base", "C40 Advanced", "C40 HQ", "Sprinter", "Custom"], def });
 const CUR = F("currency", "Currency", "Валюта", "select", { options: ["USD", "AED", "EUR"], def: "USD" });
 const COUNSEL_NOTE = "\n\n---\n*Prepared in AGRON Workspace on {{today}}. Draft for review by licensed counsel before signature; not legal advice.*";
 const SIG2 = (left: string, right: string) => `\n\n| ${left} | ${right} |\n|---|---|\n| By: ______________________ | By: ______________________ |\n| Name: | Name: |\n| Title: | Title: |\n| Date: | Date: |`;

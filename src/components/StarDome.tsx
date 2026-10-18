@@ -8,13 +8,14 @@ import { Rec, store } from "@/lib/store";
 import { DONE, dayDiff, DUE_KEYS } from "@/lib/insights";
 
 /** StarDome configurations: everything about one container model on one screen — readiness by area, what blocks it, shared documents. */
-const CONFIGS = ["C20 Base", "C20 Enhanced", "C40 Base", "C40 Advanced", "C40 HQ"] as const;
+const CONFIGS = ["C20 Base", "C20 Enhanced", "C40 Base", "C40 Advanced", "C40 HQ", "Sprinter"] as const;
 type Cfg = (typeof CONFIGS)[number];
 const ABOUT: Record<Cfg, { en: string; ru: string; uk: string; ar: string; size: string }> = {
   "C20 Base": { size: "20′", en: "Two operators, compute, power and external sensors; reserve bay.", ru: "Два оператора, вычисления, питание, внешние сенсоры; резервный отсек.", uk: "Два оператори, обчислення, живлення, зовнішні сенсори; резервний відсік.", ar: "مشغّلان، حوسبة، طاقة ومستشعرات خارجية؛ حجرة احتياطية." },
   "C20 Enhanced": { size: "20′", en: "Base plus a scout UAV module (up to 6, design) and extended communications.", ru: "Base плюс модуль разведывательных UAV (до 6, проектно) и расширенная связь.", uk: "Base плюс модуль розвідувальних UAV (до 6, проєктно) і розширений зв'язок.", ar: "النسخة الأساسية مع وحدة طائرات استطلاع (حتى 6، تصميمًا) واتصالات موسّعة." },
   "C40 Base": { size: "40′ HC", en: "Separate server and operator zones, service corridor, reserve for modules.", ru: "Отдельные серверная и операторская, сервисный проход, резерв под модули.", uk: "Окремі серверна й операторська, сервісний прохід, резерв під модулі.", ar: "منطقتا خوادم وتشغيل منفصلتان، ممر خدمة، واحتياطي للوحدات." },
   "C40 Advanced": { size: "40′ HC", en: "Up to 12 UAV (design), extended sensors and engineering reserve.", ru: "До 12 UAV (проектно), расширенные сенсоры и инженерный резерв.", uk: "До 12 UAV (проєктно), розширені сенсори й інженерний резерв.", ar: "حتى 12 طائرة (تصميمًا)، مستشعرات موسّعة واحتياطي هندسي." },
+  "Sprinter": { size: "Sprinter van", en: "Mobile StarDome on a Mercedes-Benz Sprinter van: operator workstation, compute, power and a telescopic sensor mast; deploys on site in minutes and moves between sites.", ru: "Мобильный StarDome на базе вэна Mercedes-Benz Sprinter: рабочее место оператора, вычисления, питание и телескопическая мачта с сенсорами; разворачивается на объекте за минуты и переезжает между объектами.", uk: "Мобільний StarDome на базі вена Mercedes-Benz Sprinter: робоче місце оператора, обчислення, живлення й телескопічна щогла з сенсорами; розгортається на об'єкті за хвилини й переїжджає між об'єктами.", ar: "StarDome متنقل على شاحنة Mercedes-Benz Sprinter: محطة مشغّل وحوسبة وطاقة وسارية مستشعرات تلسكوبية؛ يُنشر في الموقع خلال دقائق وينتقل بين المواقع." },
   "C40 HQ": { size: "40′ HC", en: "Command centre with reinforced redundancy and a larger service area.", ru: "Командный центр, усиленное резервирование, увеличенная зона обслуживания.", uk: "Командний центр, посилене резервування, збільшена зона обслуговування.", ar: "مركز قيادة بتكرار معزّز ومنطقة خدمة أكبر." },
 };
 // Area → section, which statuses count as done, and whether the section has a config field
