@@ -1,5 +1,9 @@
 "use client";
 import Approval from "./Approval";
+import dynamic from "next/dynamic";
+const ProposalBuilder = dynamic(() => import("./ProposalBuilder"), { ssr: false });
+const ProjectPlanner = dynamic(() => import("./ProjectPlanner"), { ssr: false });
+const PortalLinks = dynamic(() => import("./PortalLinks"), { ssr: false });
 import MarketingStudio from "./MarketingStudio";
 import { RecordTools } from "./DeptTools";
 import { RefField, ChainPanel } from "./Links";
@@ -184,6 +188,9 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
           </details>}
           {rec && <ChainPanel rec={current} />}
           <RecordTools section={section} data={data} setData={setData} canWrite={canWrite} />
+          {rec && section.id === "sales.pipeline" && !isExternal(me.role) && <ProposalBuilder deal={rec} onDone={onReload || onSaved} />}
+          {rec && section.id === "sales.clients" && !isExternal(me.role) && <PortalLinks client={rec} />}
+          {rec && section.id === "sales.pipeline" && ["Won", "Negotiation"].includes(rec.status || "") && !isExternal(me.role) && <ProjectPlanner deal={rec} onDone={onReload || onSaved} />}
           {section.dept === "marketing" && <MarketingStudio section={section} title={title} data={data} setData={setData} canWrite={canWrite} saved={!!rec} />}
           <datalist id="people-list">{people.map((p) => <option key={p.id} value={p.full_name || p.email} />)}</datalist>
           {rec && APPROVALS[section.id] && <Approval rec={rec} canWrite={canWrite} onChanged={onSaved} />}

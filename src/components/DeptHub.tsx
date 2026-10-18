@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Icon from "./Icon";
+import CashForecast from "./CashForecast";
 import { useApp, findSection, SECTIONS } from "./App";
 import StageBoard from "./StageBoard";
 import MktCalendar from "./MktCalendar";
@@ -163,6 +164,7 @@ export default function DeptHub({ dept }: { dept: string }) {
 
     /* ------------------------------ Finance ------------------------------ */
     if (dept === "finance") {
+      cards.push(<CashForecast key="cash90" />);
       const inv = of("finance.invoices").filter((r) => r.status !== "Paid" && r.status !== "Draft");
       const bucket = (dir: string) => { const b = [0, 0, 0, 0, 0]; for (const r of inv.filter((x) => x.data?.direction === dir)) { const d = r.data?.due ? -dayDiff(r.data.due) : 0; const i = d <= 0 ? 0 : d <= 30 ? 1 : d <= 60 ? 2 : d <= 90 ? 3 : 4; b[i] += n(r.data?.amount); } return b; };
       const ar = bucket("Receivable"), ap = bucket("Payable"); const labels = [T(L("Not due", "Не наступил")), "1–30", "31–60", "61–90", "90+"];

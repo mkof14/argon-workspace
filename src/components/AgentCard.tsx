@@ -5,6 +5,7 @@ import Icon from "./Icon";
 import { useApp } from "./App";
 import { tx, type Lang } from "@/lib/i18n";
 import { store, type Rec } from "@/lib/store";
+import { cashForecast } from "@/lib/cashforecast";
 import { financeFindings, hrFindings, legalFindings, marketingFindings, securityFindings, technicalFindings, operationsFindings, salesFindings, type Finding } from "@/lib/deptAgents";
 import { DEFAULT_SETTINGS } from "@/lib/automation";
 import { agentText } from "@/lib/agentText";
@@ -13,7 +14,7 @@ import { AGENT_INFO, L } from "./Automation";
 type T4 = { en: string; ru: string; uk: string; ar: string };
 /** Department → its agent's checks (the same functions the daily agent runs on the server). */
 export const DEPT_FINDERS: Record<string, { agent: keyof typeof AGENT_INFO; run: (all: any[], today: string, th: any) => Finding[]; extra: string[] }> = {
-  finance: { agent: "finance", run: financeFindings, extra: ["sales.pipeline", "sales.clients", "marketing.leads"] },
+  finance: { agent: "finance", run: (all, t, th) => financeFindings(all, t, { ...th, cash: cashForecast(all, t) }), extra: ["sales.pipeline", "sales.clients", "marketing.leads", "operations.procurement"] },
   sales: { agent: "sales", run: salesFindings, extra: ["marketing.leads", "company.tasks"] },
   operations: { agent: "operations", run: operationsFindings, extra: [] },
   hr: { agent: "hr", run: hrFindings, extra: ["company.tasks", "security.access"] },

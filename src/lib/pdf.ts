@@ -37,7 +37,7 @@ function inline(tokens: any[] | undefined, raw = "", b = false, i = false): Run[
 const decode = (s: string) => s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
 const plain = (runs: Run[]) => runs.map((r) => r.t).join("");
 
-export async function markdownToPdf(md: string, opts: { title: string; filename: string; subtitle?: string; confidential?: boolean }) {
+export async function markdownToPdf(md: string, opts: { title: string; filename: string; subtitle?: string; confidential?: boolean; blob?: boolean }): Promise<Blob | void> {
   const [{ jsPDF }, { marked }, { autoTable }] = await Promise.all([import("jspdf"), import("marked"), import("jspdf-autotable")]);
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   await loadFonts(doc);
@@ -148,5 +148,6 @@ export async function markdownToPdf(md: string, opts: { title: string; filename:
     doc.text(opts.confidential === false ? "AGRON Inc." : "AGRON Inc. · Confidential", PAGE.ml, PAGE.h - 32);
     doc.text(`Page ${p} of ${n}`, PAGE.w - PAGE.mr, PAGE.h - 32, { align: "right" });
   }
+  if (opts.blob) return doc.output("blob");
   doc.save(opts.filename.endsWith(".pdf") ? opts.filename : `${opts.filename}.pdf`);
 }

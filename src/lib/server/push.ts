@@ -64,6 +64,7 @@ export const PUSH: Record<string, Record<Lg, string>> = {
   agents_b: { en: "{n} new notices for you — details in your e-mail and My day", ru: "Новых уведомлений: {n} — подробности в письме и в «Моём дне»", uk: "Нових сповіщень: {n} — подробиці в листі та в «Моєму дні»", ar: "إشعارات جديدة: {n} — التفاصيل في بريدك وفي «يومي»" },
   queue_t: { en: "Waiting for your approval", ru: "Ждут вашего одобрения", uk: "Чекають вашого схвалення", ar: "بانتظار موافقتك" },
   queue_b: { en: "Agents prepared {n} changes", ru: "Агенты подготовили изменений: {n}", uk: "Агенти підготували змін: {n}", ar: "جهّز الوكلاء {n} تغييرات" },
+  portal_t: { en: "Service request from a client", ru: "Заявка в сервис от клиента", uk: "Заявка в сервіс від клієнта", ar: "طلب صيانة من عميل" },
   test_t: { en: "Notifications are on", ru: "Уведомления включены", uk: "Сповіщення увімкнено", ar: "تم تفعيل الإشعارات" },
   test_b: { en: "This device will get approvals, mentions and agent news.", ru: "Это устройство будет получать согласования, упоминания и новости агентов.", uk: "Цей пристрій отримуватиме погодження, згадки та новини агентів.", ar: "سيتلقى هذا الجهاز الموافقات والإشارات وأخبار الوكلاء." },
 };

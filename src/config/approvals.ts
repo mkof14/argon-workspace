@@ -21,6 +21,7 @@ export const APPROVALS: Record<string, ApprovalRule> = {
   "marketing.video": { wait: ["Editing", "Review"], ok: "Approved", no: "Editing", approvers: LEAD, key: ["type", "product", "length", "platform", "post_url", "check"], need: CHECKED },
   "marketing.campaigns": { wait: ["Draft"], ok: "Approved", approvers: LEAD, key: ["channel", "goal", "audience", "start_date", "budget", "currency", "check"], need: CHECKED },
   "marketing.plan": { wait: ["Planned"], ok: "Approved", approvers: LEAD, key: ["kind", "period", "area", "planned", "currency", "kpi"] },
+  "sales.proposals": { wait: ["Draft"], ok: "Approved", no: "Draft", approvers: LEAD, key: ["number", "client", "config", "qty", "unit_price", "discount", "value", "currency", "payment_terms", "valid_until"] },
   "marketing.brand": { wait: ["Draft"], ok: "Approved", approvers: LEAD, key: ["kind", "language", "text"] },
 };
 export const canSendForApproval = (section: string, status: string | null) => !!APPROVALS[section]?.wait.includes(status || "");

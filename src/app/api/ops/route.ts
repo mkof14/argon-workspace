@@ -1,5 +1,6 @@
 import { sweep } from "@/lib/server/translate";
 import { purgeOld } from "@/lib/server/trash";
+import { syncAll } from "@/lib/server/gcal";
 import { adminClient, currentProfile } from "@/lib/server/supabase";
 import { BUCKET, collectData, listFiles, pack } from "@/lib/server/backup";
 import { backupJob, monitorJob, opsStatus, reportsJob } from "@/lib/server/ops";
@@ -11,7 +12,7 @@ export const maxDuration = 60;
 
 /**
  * Company operations.
- * GET  ?job=backup|monitor|reports|agents|intake|translate|trash  — scheduled run (Authorization: Bearer CRON_SECRET)
+ * GET  ?job=backup|monitor|reports|agents|intake|translate|trash|calendar  — scheduled run (Authorization: Bearer CRON_SECRET)
  * POST status | backup | monitor | reports  — run now from Administration → System (owner; status also admin)
  * POST data   → gzip JSON of all data for a local copy (owner; export-controlled records only for a US-person owner)
  * POST files  → list of stored files with short-lived download links, for the local copy (owner)
@@ -30,6 +31,7 @@ export async function GET(req: Request) {
     if (job === "intake") return Response.json(await runAgents(db, { only: "intake", manual: true }));
     if (job === "translate") return Response.json(await sweep(db, 50000));
     if (job === "trash") return Response.json(await purgeOld(db));
+    if (job === "calendar") return Response.json(await syncAll(db, 50000));
   } catch (e: any) { return new Response(e?.message || "Failed", { status: 500 }); }
   return new Response("Unknown job", { status: 400 });
 }

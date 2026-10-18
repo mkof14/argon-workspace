@@ -18,6 +18,7 @@ const KEY_INFO: Record<string, T4> = {
   BACKUP_PASSPHRASE: L("Encrypted weekly backup by email", "Зашифрованный бэкап по почте каждую неделю", "Зашифрований бекап поштою щотижня", "نسخة احتياطية مشفرة أسبوعياً بالبريد"),
   CSL_API_KEY: L("Automatic sanctions screening (Compliance agent)", "Автоматическая санкционная проверка (агент Комплаенс)", "Автоматична санкційна перевірка (агент Комплаєнс)", "فحص العقوبات التلقائي (وكيل الامتثال)"),
   YOUTUBE_API_KEY: L("YouTube statistics in Marketing", "Статистика YouTube в Маркетинге", "Статистика YouTube у Маркетингу", "إحصاءات يوتيوب في التسويق"),
+  GOOGLE_CLIENT_ID: L("Google Calendar two-way sync (with GOOGLE_CLIENT_SECRET)", "Двусторонняя синхронизация с Google Calendar (вместе с GOOGLE_CLIENT_SECRET)", "Двостороння синхронізація з Google Calendar (разом із GOOGLE_CLIENT_SECRET)", "مزامنة ثنائية مع تقويم Google (مع GOOGLE_CLIENT_SECRET)"),
   GITHUB_TOKEN: L("Private repository facts in Technical", "Данные приватных репозиториев в Технике", "Дані приватних репозиторіїв у Техніці", "بيانات المستودعات الخاصة في التقني"),
 };
 

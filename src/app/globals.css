@@ -1028,3 +1028,38 @@ tr.picked td{background:color-mix(in srgb,var(--dc) 8%,transparent)}
 .view-chip{display:inline-flex;align-items:center;gap:2px;padding:0 4px 0 10px}.view-chip button{background:none;border:0;padding:4px;color:inherit;cursor:pointer;display:inline-grid;place-items:center}
 .view-chip button svg{width:14px;height:14px}.view-chip.on{border-color:var(--dc);color:var(--dc)}
 .team-clock{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:13.5px;color:var(--ink-3)}.team-clock>svg{width:16px;height:16px}.team-clock .chip.me{border-color:var(--dc)}
+.prop-b .fgrid{margin:8px 0}.prop-prev{border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin:8px 0}.prop-prev summary{cursor:pointer;font-size:14px}.prop-prev .tpl-paper{max-height:420px;overflow:auto;margin-top:8px}
+/* 90-day cash forecast (palette validated for light and dark surfaces) */
+:root{--cf-a:#12A06B;--cf-b:#2F7DF6}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--cf-a:#14A06B;--cf-b:#3D85F2}}
+:root[data-theme="dark"]{--cf-a:#14A06B;--cf-b:#3D85F2}
+.cashf-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
+.cashf-tiles>div{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:grid;gap:2px}
+.cashf-tiles small{color:var(--ink-3);font-size:12.5px}.cashf-tiles b{font-size:19px;font-variant-numeric:tabular-nums}
+.cashf-tiles .bad{border-color:var(--bad);}.cashf-tiles .bad b{color:var(--bad)}
+.cashf-chart{position:relative}.cashf-chart svg{width:100%;height:auto;display:block}
+.cashf-chart .grid{stroke:var(--line);stroke-width:1}.cashf-chart .zero{stroke:var(--ink-3);stroke-width:1;stroke-dasharray:2 3}
+.cashf-chart .ax{fill:var(--ink-3);font-size:11px;font-variant-numeric:tabular-nums}
+.cashf-chart .la{fill:none;stroke:var(--cf-a);stroke-width:2;stroke-linejoin:round}.cashf-chart .lp{fill:none;stroke:var(--cf-b);stroke-width:2;stroke-dasharray:6 4}
+.cashf-chart .dl{font-size:12px;fill:var(--ink-2);font-weight:600}
+.cashf-chart .cross{stroke:var(--ink-3);stroke-width:1}.cashf-chart .pa{fill:var(--cf-a);stroke:var(--surface);stroke-width:2}.cashf-chart .pb{fill:var(--cf-b);stroke:var(--surface);stroke-width:2}
+.cashf-chart .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--ink-2);margin-bottom:6px}.cashf-chart .legend i{display:inline-block;width:18px;height:3px;border-radius:2px;vertical-align:middle;margin-inline-end:6px}
+.cashf-chart .legend i.dash{background:none;border-top:2px dashed}
+.cashf-chart .tip{position:absolute;top:30px;transform:translateX(-50%);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12.5px;display:grid;gap:2px;pointer-events:none;box-shadow:0 4px 16px rgba(0,0,0,.12);white-space:nowrap;z-index:2}
+[dir="rtl"] .cashf-chart .tip{transform:translateX(50%)}
+tr.neg td{color:var(--bad)}
+/* Client portal (public page for a client's link) */
+.pt{max-width:860px;margin:0 auto;padding:16px;display:grid;gap:16px;min-height:100dvh;align-content:start}
+.pt-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.pt-logo{background:var(--rail,#141A21);border-radius:12px;padding:10px 14px}.pt-logo img{width:180px;height:auto;display:block}
+.pt-lang{width:auto}
+.pt-hero small{color:var(--ink-3)}.pt-hero h1{font-family:Unbounded,sans-serif;font-size:26px;margin:4px 0}.pt-hero p{margin:0;color:var(--ink-2)}
+.pt-list{display:grid;gap:18px}.pt-order{display:grid;gap:8px}.pt-order>b{font-size:16px}
+.pt-steps{list-style:none;display:grid;grid-template-columns:repeat(7,1fr);gap:4px;padding:0;margin:4px 0}
+.pt-steps li{border-top:4px solid var(--line);padding-top:6px;font-size:12px;color:var(--ink-3)}
+.pt-steps li.done{border-color:var(--ok,#1F7A4D);color:var(--ink-2)}.pt-steps li.now{border-color:#FF6A2B;color:var(--ink);font-weight:600}
+@media (max-width:560px){.pt-steps{grid-template-columns:repeat(4,1fr)}}
+.pt-row{font-size:14px;color:var(--ink-2)}
+.pt-form{display:grid;gap:10px}.pt-form h3{margin:0;font-size:16px}.pt-form label{display:grid;gap:4px;font-size:13.5px;color:var(--ink-2)}
+.pt-msg{margin:0;font-weight:600}
+.pt-foot{font-size:12.5px;color:var(--ink-3);text-align:center;padding:12px 0 24px}

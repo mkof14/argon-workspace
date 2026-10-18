@@ -3,7 +3,7 @@
 import type { Action } from "./automation";
 
 type R = { id: string; section: string; title: string; status: string | null; data: Record<string, any>; controlled?: boolean; created_at?: string; updated_at?: string };
-export type Th = { remind_before: number; escalate_after: number; stalled_deal: number };
+export type Th = { remind_before: number; escalate_after: number; stalled_deal: number; /** 90-day forecast, computed by the caller (lib/cashforecast) */ cash?: { opening: number | null; gap: { week: number; start: string; balance: number } | null; lines: { id: string; title: string; usd: number; date: string; kind: string }[] } };
 /**
  * One thing an agent noticed.
  * who: "owner" (the person named in the record), "role:<role>" or "leads"; key: raised once, then again every `repeat` days while still true.
@@ -77,6 +77,14 @@ export function financeFindings(all: R[], today: string, th: Th): Finding[] {
   if (kpi) {
     const months = Number(kpi.data.cash) / Number(kpi.data.burn);
     if (months < 6) out.push({ rec: kpi, level: months < 3 ? "bad" : "warn", who: ["leads", "role:finance"], key: `fin-runway|${kpi.id}`, repeat: 30, text: `Cash runway is about ${months.toFixed(1)} months (cash ${money(kpi.data.cash)}, net burn ${money(kpi.data.burn)} a month, ${kpi.title}).` });
+  // 90-day cash forecast: a gap ahead (certain money only — probable deals do not count)
+  const cf = th.cash;
+  if (cf?.gap && cf.opening != null) {
+    const big = cf.lines.filter((l) => l.kind === "out" && l.date >= cf.gap!.start).sort((a, b) => b.usd - a.usd)[0];
+    const base: any = of(all, "finance.metrics").find((r) => Number(r.data?.cash)) || all.find((r) => r.id === big?.id);
+    if (base) out.push({ rec: { ...base, data: { ...base.data, gap_from: cf.gap.start, gap_balance: money(cf.gap.balance), gap_payment: big ? `${big.title} (${money(big.usd)})` : "" } }, level: cf.gap.week <= 4 ? "bad" : "warn", who: ["leads", "role:finance"], key: `fin-gap|${cf.gap.start}`, repeat: 7,
+      text: `Cash gap ahead: from the week of ${cf.gap.start} the balance falls to ${money(cf.gap.balance)}${big ? `; the largest payment is ${big.title} (${money(big.usd)})` : ""}. Collect receivables or move payments now.` });
+  }
   }
   return out;
 }

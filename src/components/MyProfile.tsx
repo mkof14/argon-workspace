@@ -1,4 +1,5 @@
 "use client";
+import GcalCard from "./GcalCard";
 import { TIMEZONES, city, localTime } from "@/lib/tz";
 import { NotifyCard } from "./Notify";
 import { useState } from "react";
@@ -60,6 +61,7 @@ export default function MyProfile() {
       <InstallApp />
       <NotifyCard />
       {!["partner", "vendor", "investor"].includes(me.role) && <CalendarLink />}
+      {!["partner", "vendor", "investor"].includes(me.role) && <GcalCard />}
     </div>
   );
 }
