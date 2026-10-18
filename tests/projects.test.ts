@@ -29,3 +29,9 @@ test("moving a step moves the later unfinished steps by the same days", () => {
   assert.deepEqual(ch.map((c) => [c.id, c.key, c.to]), [["b", "due", "2026-12-15"], ["c", "due", "2027-01-24"], ["e", "due", "2027-02-19"]]);
   assert.equal(shiftPlan(recs, "b", "2026-12-01").length, 0);
 });
+
+test("every project template is defined (no holes in the list)", async () => {
+  const { PROJECT_TEMPLATES, stepDateKey } = await import("../src/lib/projects.ts");
+  assert.equal(PROJECT_TEMPLATES.length, 3); assert.ok(PROJECT_TEMPLATES.every((t) => t && t.steps.length >= 10));
+  assert.equal(stepDateKey({ section: "operations.quality", data: { project_step: "fat" } }), "date");
+});
