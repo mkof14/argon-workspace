@@ -7,6 +7,7 @@ import { useInbox } from "./Inbox";
 import InstallApp from "./InstallApp";
 import { ROLES } from "@/config/workspace.config.mjs";
 import { LANGS, Lang, t, tx } from "@/lib/i18n";
+import { isExternal } from "@/lib/store";
 
 export const RECENT = "agronws.recent";
 type Recent = { href: string; title: string; group: string };
@@ -69,7 +70,8 @@ export default function Footer({ depts, isAdmin, dark, onTheme, onLang, onSearch
           {access.read.has("company.decisions") && <Link href="/company/decisions">{tx(findSection("company.decisions")?.label, lang)}</Link>}
           <Link href="/reports">{t("reports", lang)}</Link>
           {isAdmin && <><Link href="/admin/users">{t("users", lang)}</Link><Link href="/admin/roles">{t("roles", lang)}</Link></>}
-          <Link href="/learn">{t("learn", lang)}</Link></nav>
+          <Link href="/learn">{t("learn", lang)}</Link>
+          {!isExternal(me.role) && <Link href="/guide">{tx({ en: "User guide (PDF, 4 languages)", ru: "Руководство (PDF, 4 языка)", uk: "Посібник (PDF, 4 мови)", ar: "دليل المستخدم (PDF، 4 لغات)" }, lang)}</Link>}</nav>
         <nav aria-label="AGRON Inc."><h3>AGRON Inc.</h3>
           <a href="https://www.agron1.com" target="_blank" rel="noopener">agron1.com</a>
           <a href="https://stardome.life" target="_blank" rel="noopener">stardome.life</a>

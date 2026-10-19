@@ -29,6 +29,8 @@ const security = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // The user guide PDFs are read by /api/guide (signed-in staff only), so they ship with that function
+  outputFileTracingIncludes: { "/api/guide": ["./guide/*.pdf", "./guide/manifest.json"] },
   poweredByHeader: false,
   // Title, description and preview tags go into <head> for every visitor (not streamed later), so link previews and audits see them
   htmlLimitedBots: /.*/,
