@@ -1,10 +1,12 @@
 import { adminClient, currentProfile } from "@/lib/server/supabase";
+import { limit } from "@/lib/server/authz";
 import { ROLES } from "@/config/workspace.config.mjs";
 
 export const runtime = "nodejs";
 export async function POST(req: Request) {
   const me = await currentProfile();
   if (!me || !["owner", "admin"].includes(me.role)) return new Response("Only administrators can invite users", { status: 403 });
+  { const lim = await limit(`invite:${me.id}`, 20, 60); if (lim) return lim; }
   const { email, role, company } = await req.json();
   if (!email || !(role in ROLES) || role === "owner") return new Response("Invalid email or role", { status: 400 });
   const admin = adminClient();

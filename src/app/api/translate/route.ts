@@ -1,4 +1,5 @@
 import { adminClient, currentProfile, userClient } from "@/lib/server/supabase";
+import { limit } from "@/lib/server/authz";
 import { localizeTexts, pendingRecords, sweep, translateFaq, translateRecord, trConfigured } from "@/lib/server/translate";
 
 export const runtime = "nodejs";
@@ -15,6 +16,7 @@ export const maxDuration = 60;
 export async function POST(req: Request) {
   const me = await currentProfile();
   if (!me || me.role === "pending") return new Response("Not allowed", { status: 403 });
+  { const lim = await limit(`translate:${me.id}`, 60, 60); if (lim) return lim; }
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return new Response("Service key missing", { status: 501 });
   const b = await req.json().catch(() => ({}));
   const db = adminClient();

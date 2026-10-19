@@ -32,6 +32,8 @@ export function dueItems(recs: Rec[], within = 30): DueItem[] {
 /** Does a record name this person (owner, assignee, holder …)? */
 export function isMine(r: Rec, me: Pick<Profile, "id" | "email" | "full_name">) {
   if (r.section === "company.tasks" && !r.data?.assignee && r.created_by === me.id) return true;
+  // a person picked from the people list is linked to their account (<field>_id): the strongest match
+  if (me.id && PEOPLE_KEYS.some((k) => r.data?.[`${k}_id`] === me.id)) return true;
   const keys = [me.email?.toLowerCase(), (me.full_name || "").toLowerCase()].filter((x) => x && x.length > 2) as string[];
   if (!keys.length) return false;
   return PEOPLE_KEYS.some((k) => { const v = String(r.data?.[k] || "").toLowerCase(); return v && keys.some((x) => v.includes(x)); });

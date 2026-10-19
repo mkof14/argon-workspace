@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { adminClient, currentProfile, userClient } from "@/lib/server/supabase";
+import { limit } from "@/lib/server/authz";
 import { indexFile, tsQuery } from "@/lib/server/docs";
 
 export const runtime = "nodejs";
@@ -27,6 +28,7 @@ export async function POST(req: Request) {
   const t0 = Date.now();
   const me = await currentProfile();
   if (!me || me.role === "pending") return new Response("Not signed in", { status: 401 });
+  { const lim = await limit(`docs:${me.id}`, 30, 60); if (lim) return lim; }
   const b = await req.json().catch(() => ({}));
   const sb = await userClient();
   const admin = adminClient();

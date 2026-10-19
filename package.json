@@ -7,8 +7,9 @@
     "build": "next build",
     "start": "next start",
     "gen:access": "node scripts/gen-access.mjs",
-    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test 'tests/*.test.ts'",
-    "typecheck": "tsc --noEmit"
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --import ./scripts/guide/reg.mjs --test 'tests/*.test.ts'",
+    "typecheck": "tsc --noEmit",
+    "test:int": "node scripts/stack/integration.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.1",

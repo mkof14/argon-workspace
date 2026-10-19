@@ -10,6 +10,7 @@ import { loadLearnLang } from "@/config/l2";
 import { DEMO, Profile, Rule, accessFor, isExternal, store, Access } from "@/lib/store";
 import dynamic from "next/dynamic";
 import Dashboard from "./Dashboard";
+import { MfaGate } from "./MfaSetup";
 import SectionView from "./SectionView";
 import type { AiContext } from "./AiPanel";
 import type { MailInit } from "./Mail";
@@ -37,7 +38,7 @@ const Decisions = dynamic(() => import("./Decisions"), { ssr: false });
 const PhotoCapture = dynamic(() => import("./PhotoCapture"), { ssr: false });
 const OfflineBar = dynamic(() => import("./OfflineBar"), { ssr: false });
 const Guide = dynamic(() => import("./Guide"), { ssr: false });
-export const VERSION = "2.33";
+export const VERSION = "2.34";
 
 type Ctx = {
   lang: Lang; me: Profile; access: Access; toast: (m: string, err?: boolean) => void;
@@ -82,6 +83,7 @@ export default function App({ slug }: { slug: string[] }) {
   const [mail, setMail] = useState<MailInit | null>(null);
   const [people, setPeople] = useState<Profile[]>([]);
   const [rules, setRules] = useState<Rule[] | null>(null);
+  const [sec, setSec] = useState<Awaited<ReturnType<typeof store.security>> | null>(null);
   const navStack = useRef<string[]>([]);
   const [search, setSearch] = useState<null | { voice?: boolean }>(null);
   const [intake, setIntake] = useState<null | { files?: File[] }>(null);
@@ -125,6 +127,9 @@ export default function App({ slug }: { slug: string[] }) {
     try { const l = localStorage.getItem("agronws.lang"); if (p && l && p.lang !== l && !DEMO) { store.updateProfile(p.id, { lang: l }).catch(() => {}); p.lang = l; } } catch {}
     // First visit: remember the person's time zone (digest at 8:00 local, local time for colleagues)
     try { if (p && !p.timezone && !DEMO) { const z = Intl.DateTimeFormat().resolvedOptions().timeZone; if (z) { store.updateProfile(p.id, { timezone: z }).catch(() => {}); p.timezone = z; } } } catch {}
+    // Session facts: second factor, ended sessions (owners/administrators need the code once it is required)
+    if (p && !DEMO) { const s0 = await store.security().catch(() => null); setSec(s0);
+      if (s0 && (p as any).sessions_revoked_at && s0.iat && s0.iat <= Math.floor(Date.parse((p as any).sessions_revoked_at) / 1000)) { await store.signOut(); router.replace("/login?ended=1"); return; } }
     setMe(p); setLoaded(true); setTick((x) => x + 1);
     if (!p && !DEMO) router.replace("/login");
     if (p && !isExternal(p.role)) store.profiles().then(setPeople).catch(() => {});
@@ -158,6 +163,13 @@ export default function App({ slug }: { slug: string[] }) {
   const access = useMemo(() => accessFor(me?.role || "pending", rules), [me?.role, rules]);
 
   if (!loaded || !me) return <div className="login"><div className="faint">…</div></div>;
+
+  if ((me as any).disabled) return (
+    <div className="login"><div className="box"><div className="brand"><img src="/logo-full.webp" alt="AGRON™ — Aerial-Ground Robotics Operations Network" width={1000} height={280} /></div>
+      <h2 style={{ margin: 0 }}>{tx({ en: "This account is switched off", ru: "Эта учётная запись отключена", uk: "Цей обліковий запис вимкнено", ar: "هذا الحساب متوقف" }, lang)}</h2><p className="muted" style={{ margin: 0 }}>{tx({ en: "Ask an owner or administrator of AGRON Workspace.", ru: "Обратитесь к владельцу или администратору AGRON Workspace.", uk: "Зверніться до власника або адміністратора AGRON Workspace.", ar: "تواصل مع مالك أو مسؤول AGRON Workspace." }, lang)}</p>
+      <button className="btn" onClick={async () => { await store.signOut(); router.replace("/login"); }}><Icon n="logout" />{t("sign_out", lang)}</button></div></div>
+  );
+  if (sec && ["owner", "admin"].includes(me.role) && sec.mfaRequired && sec.aal !== "aal2") return <MfaGate sec={sec} lang={lang} onDone={() => { setSec(null); reload(); }} onSignOut={async () => { await store.signOut(); router.replace("/login"); }} />;
 
   if (me.role === "pending") return (
     <div className="login"><div className="box"><div className="brand"><img src="/logo-full.webp" alt="AGRON™ — Aerial-Ground Robotics Operations Network" width={1000} height={280} /></div>

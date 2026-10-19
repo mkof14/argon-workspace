@@ -11,7 +11,9 @@ import { milestoneReady } from "./milestones";
 import { serviceDone } from "./service";
 import { poStamps } from "./vendors";
 import { changeOrderEffects } from "./margin";
-import { enqueueSave, isNetworkError, isTemp, remap, type OutItem } from "./outboxlogic";
+import { ConflictError, enqueueSave, isConflict, isNetworkError, isTemp, remap, type OutItem } from "./outboxlogic";
+import { merge3 } from "./merge";
+export { ConflictError, isConflict };
 import { offline, readQ, writeQ } from "./outbox";
 /** Lists loaded in this session (memory only, never stored on the device) — shown when the connection drops. */
 const MEM = new Map<string, Rec[]>();
@@ -21,10 +23,11 @@ import { DEFAULT_LIMITS, LIMITED, limitRoles, overLimit, withLimits, type Limits
 let LIM: Promise<Limits> | null = null;
 /** Spending above the self-approval limit needs an approved request first (any way of saving: form, board, bulk, AI command). */
 const SPEND_ERR = "The amount is above the self-approval limit — send the record for approval first.";
+const CONFLICT_MSG = { en: "Someone changed this record after you opened it", ru: "Запись изменили после того, как вы её открыли", uk: "Запис змінили після того, як ви його відкрили", ar: "غيّر شخص هذا السجل بعد أن فتحته" };
 
 export type Rec = {
   id: string; section: string; title: string; status: string | null; data: Record<string, any>;
-  company: string | null; controlled: boolean; created_by?: string | null; created_at?: string; updated_at?: string;
+  company: string | null; controlled: boolean; created_by?: string | null; created_at?: string; updated_at?: string; version?: number;
 };
 export type Profile = { id: string; email: string; full_name: string; role: string; company: string | null; us_person: boolean; lang: string; ai_monthly_tokens: number; title?: string | null; phone?: string | null; created_at?: string; super?: boolean; timezone?: string | null; prefs?: Record<string, any> };
 export type Rule = { section: string; role: string; can_write: boolean; external: boolean };
@@ -139,6 +142,13 @@ export const store = {
       const out = ((data || []) as Rec[]).map(loc); for (const s of sections) MEM.set(s, out.filter((r) => r.section === s)); return out;
     } catch (e) { if (!isNetworkError(e)) throw e; return this.withPending(sections, sections.flatMap((s) => MEM.get(s) || [])); }
   },
+  /** The record as it would be written: texts shown translated and left untouched go back to their original wording. */
+  toOriginal<T extends Record<string, any>>(r0: T): T {
+    const meta = (r0 as any)._o ? { o: (r0 as any)._o as Shown, l: (r0 as any)._l as Shown } : r0.id ? SHOWN.get(r0.id) : undefined;
+    const { _o, _l, _src, _base, ...clean } = r0 as any;
+    const back = meta ? unlocalize(clean.title, clean.data || {}, meta.o, meta.l) : null;
+    return (back ? { ...clean, title: back.title, data: back.data } : clean) as T;
+  },
   async save(r0: Partial<Rec> & { section: string; title: string }): Promise<Rec> {
     const now = new Date().toISOString();
     // Texts shown translated and left untouched keep their original wording
@@ -172,18 +182,27 @@ export const store = {
       demoSave(db); return rec;
     }
     const body: any = { section: r.section, title: r.title, status: r.status ?? null, data: r.data || {}, company: r.company || null, controlled: !!r.controlled };
+    const ver = typeof r.version === "number" ? r.version : undefined;
     // No connection: keep the change on the device and send it later (never export-controlled records)
-    if ((offline() || isTemp(r.id)) && !FLUSHING) { if (r.controlled) throw new Error("No connection — US-persons-only records are not kept on the device; save again when online."); return this.queueSave({ ...body, id: r.id }); }
+    if ((offline() || isTemp(r.id)) && !FLUSHING) { if (r.controlled) throw new Error("No connection — US-persons-only records are not kept on the device; save again when online."); return this.queueSave({ ...body, id: r.id, version: ver }, (r0 as any)._base); }
     try { return await this.saveLive(r, body); }
-    catch (e) { if (!FLUSHING && isNetworkError(e) && !r.controlled) return this.queueSave({ ...body, id: r.id }); throw e; }
+    catch (e) { if (!FLUSHING && isNetworkError(e) && !r.controlled) return this.queueSave({ ...body, id: r.id, version: ver }, (r0 as any)._base); throw e; }
   },
   async saveLive(r: Partial<Rec> & { section: string; title: string }, body: any): Promise<Rec> {
     if (r.id) {
       const { data: before } = await sb().from("records").select("status").eq("id", r.id).maybeSingle();
       if ((before?.status || "") !== (body.status || "") && (await this.spendCheck(r.section, r.id, body.status, body.data))) throw new Error(SPEND_ERR);
       if ((before?.status || "") !== (body.status || "")) { const m = await this.shipCheck(r.section, body.status, body.data); if (m.length) throw new Error(shipMsg(m, "en")); }
-      const { data, error } = await sb().from("records").update(body).eq("id", r.id).select().single();
+      // Saved only if nobody saved it after it was opened (version check); otherwise the person sees both versions
+      let q = sb().from("records").update(body).eq("id", r.id);
+      if (typeof r.version === "number") q = q.eq("version", r.version);
+      const { data, error } = await q.select().maybeSingle();
       if (error) throw error;
+      if (!data) {
+        const { data: cur } = await sb().from("records").select("*").eq("id", r.id).maybeSingle();
+        if (cur && typeof r.version === "number" && cur.version !== r.version) throw new ConflictError(cur, CONFLICT_MSG[LANG as keyof typeof CONFLICT_MSG] || CONFLICT_MSG.en);
+        throw new Error(cur ? "Not saved: you cannot change this record" : "Not saved: the record was deleted");
+      }
       if ((before?.status || "") !== (data.status || "")) automate({ id: data.id, kind: "status", from: before?.status ?? null });
       SHOWN.delete(data.id); translateLater({ id: data.id });
       return loc(data as Rec);
@@ -202,8 +221,8 @@ export const store = {
   /* ----- Offline outbox: changes wait on the device and go out in order when the connection is back ----- */
   async me0() { try { const { data } = await sb().auth.getSession(); return data.session?.user?.id || ""; } catch { return ""; } },
   async queue(x: any) { const q = await readQ(); await writeQ([...q, { ...x, id: `q-${uid()}`, at: new Date().toISOString(), user: await this.me0() } as OutItem]); },
-  async queueSave(rec: Record<string, any>): Promise<Rec> {
-    const now = new Date().toISOString(); const { q, id } = enqueueSave(await readQ(), rec, now, await this.me0(), uid); await writeQ(q);
+  async queueSave(rec: Record<string, any>, base?: Record<string, any> | null): Promise<Rec> {
+    const now = new Date().toISOString(); const { q, id } = enqueueSave(await readQ(), rec, now, await this.me0(), uid, base); await writeQ(q);
     return { company: null, controlled: false, ...rec, id, data: rec.data || {}, status: rec.status ?? null, updated_at: now, created_at: now, _offline: true } as any;
   },
   /** Lists shown offline: what was loaded in this session plus what waits in the outbox. */
@@ -215,6 +234,8 @@ export const store = {
   async outboxCount() { return (await readQ()).filter((x) => !x.error).length; },
   async outboxFailed() { return (await readQ()).filter((x) => x.error); },
   async dropOutboxItem(id: string) { await writeQ((await readQ()).filter((x) => x.id !== id)); },
+  /** A waiting change that met a newer server copy: the person keeps their version on purpose (it is saved over the newer one). */
+  async keepMine(id: string) { const q = await readQ(); await writeQ(q.map((x) => (x.id === id && x.kind === "save" && x.conflict ? { ...x, error: undefined, conflict: undefined, base: null, rec: { ...x.rec, version: x.conflict.theirs.version } } as OutItem : x))); window.dispatchEvent(new Event("agron-outbox")); },
   /** Sends the waiting changes in order; stops at the first connection error. Returns how many were sent. */
   async flushOutbox(): Promise<number> {
     if (DEMO || FLUSHING || offline()) return 0;
@@ -225,7 +246,19 @@ export const store = {
       for (const x0 of [...q]) {
         const x = q.find((y) => y.id === x0.id); if (!x || x.error || x.user !== me) continue;
         try {
-          if (x.kind === "save") { const { id, ...rest } = x.rec as any; const saved = await this.save(isTemp(id) ? rest : { ...rest, id }); if (isTemp(id)) q = remap(q, id, saved.id); }
+          if (x.kind === "save") {
+            const { id, ...rest } = x.rec as any;
+            let saved: Rec;
+            try { saved = await this.save(isTemp(id) ? rest : { ...rest, id }); }
+            catch (e: any) {
+              if (!isConflict(e) || !x.base) throw e;
+              // someone saved the record while this change waited: fields only one side changed merge by themselves
+              const m = merge3(x.base, x.rec, e.theirs);
+              if (m.conflicts.length) { q = q.map((y) => (y.id === x.id ? { ...y, error: CONFLICT_MSG[LANG as keyof typeof CONFLICT_MSG] || CONFLICT_MSG.en, conflict: { theirs: e.theirs, fields: m.conflicts.map((c) => c.field) } } as OutItem : y)); await writeQ(q); continue; }
+              saved = await this.save({ ...rest, ...m.merged, id, section: x.rec.section, version: e.theirs.version } as any);
+            }
+            if (isTemp(id)) q = remap(q, id, saved.id);
+          }
           else if (x.kind === "comment") await this.addComment(x.record_id, x.body);
           else await this.upload(x.prefix, new File([x.file], x.name, { type: x.type }));
           q = q.filter((y) => y.id !== x.id); sent++; await writeQ(q);
@@ -334,6 +367,23 @@ export const store = {
     if (DEMO) { const db = demoLoad(); db.profiles = db.profiles.map((p) => (p.id === id ? { ...p, ...patch } : p)); demoSave(db); return; }
     const { error } = await sb().from("profiles").update(patch).eq("id", id); if (error) throw error;
   },
+  /* ----- Sign-in protection: second factor (authenticator app), session state ----- */
+  async security(): Promise<{ mfaRequired: boolean; aal: string; next: string; factors: { id: string; status: string; friendly_name?: string; created_at?: string }[]; iat: number }> {
+    if (DEMO) return { mfaRequired: false, aal: "aal1", next: "aal1", factors: [], iat: 0 };
+    const [{ data: sec }, { data: aal }, { data: f }, { data: s }] = await Promise.all([
+      sb().from("security_settings").select("mfa_required").maybeSingle(), sb().auth.mfa.getAuthenticatorAssuranceLevel(), sb().auth.mfa.listFactors(), sb().auth.getSession()]);
+    let iat = 0; try { iat = JSON.parse(atob((s.session?.access_token || "").split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))).iat || 0; } catch {}
+    return { mfaRequired: !!sec?.mfa_required, aal: aal?.currentLevel || "aal1", next: aal?.nextLevel || "aal1", factors: ((f as any)?.all || f?.totp || []).filter((x: any) => x.factor_type === "totp" || !x.factor_type), iat };
+  },
+  async mfaEnroll(name: string) {
+    // a half-finished set-up from before is removed first, so the new QR code is the only one
+    const { data: f } = await sb().auth.mfa.listFactors();
+    for (const x of ((f as any)?.all || []).filter((x: any) => x.status === "unverified")) await sb().auth.mfa.unenroll({ factorId: x.id }).catch(() => null);
+    const { data, error } = await sb().auth.mfa.enroll({ factorType: "totp", friendlyName: `${name} ${new Date().toISOString().slice(0, 10)}` });
+    if (error) throw error; return { id: data.id, qr: (data as any).totp?.qr_code as string, secret: (data as any).totp?.secret as string };
+  },
+  async mfaVerify(factorId: string, code: string) { const { error } = await sb().auth.mfa.challengeAndVerify({ factorId, code: code.replace(/\s+/g, "") }); if (error) throw error; await sb().auth.refreshSession().catch(() => null); },
+  async mfaRemove(factorId: string) { const { error } = await sb().auth.mfa.unenroll({ factorId }); if (error) throw error; },
   async signOut() { if (!DEMO) await sb().auth.signOut(); },
 
   /* ----- Access rules (editable by owner/admin in Users & roles) ----- */

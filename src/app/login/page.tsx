@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DEMO, sb } from "@/lib/sb";
-import { LANGS, Lang, t } from "@/lib/i18n";
+import { LANGS, Lang, t, tx } from "@/lib/i18n";
 import { loadUiLang } from "@/lib/i18n";
 import Icon from "@/components/Icon";
 import RadarScene from "@/components/RadarScene";
@@ -38,10 +38,11 @@ export default function Login() {
     fetch(`${SUPA_URL}/auth/v1/settings`, { headers: { apikey: SUPA_KEY } }).then((r) => r.json())
       .then((j) => setEnabled(PROVIDERS.map((p) => p.id).filter((id) => j?.external?.[id]))).catch(() => {});
     try { const l = localStorage.getItem("agronws.lang") as Lang; if (l) loadUiLang(l).then(() => setLang(l), () => setLang(l)); } catch {}
-    const e = new URLSearchParams(location.search).get("error_description"); if (e) setErr(e);
+    const q = new URLSearchParams(location.search); const e = q.get("error_description"); if (e) setErr(e);
+    if (q.get("ended") === "1") setMsg(tx({ en: "Your session was ended by an administrator. Sign in again.", ru: "Администратор завершил ваш сеанс. Войдите снова.", uk: "Адміністратор завершив ваш сеанс. Увійдіть знову.", ar: "أنهى مسؤول جلستك. سجّل الدخول مجدداً." }, (localStorage.getItem("agronws.lang") as Lang) || "en"));
   }, [router]);
   const origin = typeof window !== "undefined" ? window.location.origin : "";
-  const friendly = (m: string) => /invalid login/i.test(m) ? t("err_login", lang) : /rate limit/i.test(m) ? t("err_rate", lang) : /not confirmed/i.test(m) ? t("err_confirm", lang) : m;
+  const friendly = (m: string) => /signups? not allowed|user not found|otp_disabled/i.test(m) ? tx({ en: "There is no Workspace account for this e-mail. Ask an administrator for an invitation.", ru: "Для этого e-mail нет учётной записи Workspace. Попросите администратора прислать приглашение.", uk: "Для цього e-mail немає облікового запису Workspace. Попросіть адміністратора надіслати запрошення.", ar: "لا يوجد حساب Workspace لهذا البريد. اطلب دعوة من مسؤول." }, lang) : /invalid login/i.test(m) ? t("err_login", lang) : /rate limit/i.test(m) ? t("err_rate", lang) : /not confirmed/i.test(m) ? t("err_confirm", lang) : m;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault(); setErr(""); setMsg(""); setBusy(true);
@@ -56,7 +57,7 @@ export default function Login() {
         if (error) throw error; router.replace("/"); return;
       }
       if (mode === "link") {
-        const { error } = await sb().auth.signInWithOtp({ email, options: { emailRedirectTo: `${origin}/auth/callback`, shouldCreateUser: true } });
+        const { error } = await sb().auth.signInWithOtp({ email, options: { emailRedirectTo: `${origin}/auth/callback`, shouldCreateUser: false /* accounts are created by invitation only */ } });
         if (error) throw error; setMsg(t("code_sent", lang)); setCodeSent("email");
       }
       if (mode === "forgot") {

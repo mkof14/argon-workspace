@@ -1,4 +1,5 @@
 "use client";
+import { PEOPLE_KEYS } from "@/lib/insights";
 import Approval from "./Approval";
 import dynamic from "next/dynamic";
 const ProposalBuilder = dynamic(() => import("./ProposalBuilder"), { ssr: false });
@@ -22,7 +23,9 @@ import Icon from "./Icon";
 import { useApp } from "./App";
 import { t, tx } from "@/lib/i18n";
 import { trFields, trPending, trText } from "@/lib/tr";
-import { Activity, Comment, DEMO, Rec, isExternal, store, textSim } from "@/lib/store";
+import { Activity, Comment, DEMO, Rec, isConflict, isExternal, store, textSim } from "@/lib/store";
+import { merge3, resolve, type Conflict } from "@/lib/merge";
+import ConflictDialog from "./ConflictDialog";
 import { fmt, printHtml, recordMarkdown, saveBlob, slug, spendMsg, tone } from "@/lib/format";
 import { shipMsg } from "@/lib/shipgate";
 import { marked } from "marked";
@@ -46,7 +49,7 @@ export const CHECKLISTS: Record<string, string[]> = { us: US_CHECKLIST, uae: UAE
 // Where an AI answer can be saved in a record, per section
 const APPLY: Record<string, string> = { "legal.matrix": "ai_review", "legal.requests": "answer", "legal.desks": "memo", "legal.issues": "action", "legal.programs": "elements" };
 
-const PEOPLE_KEYS = ["owner", "person", "requester", "engineer", "pm_name"];
+// fields that name a person (shared with "My day" and notifications): a chosen name also links the account
 
 export default function RecordDrawer({ section, rec, onClose, onSaved, onReload }: { section: any; rec: Rec | null; onClose: () => void; onSaved: () => void; onReload?: () => void }) {
   const { lang, me, access, toast, openAi, openMail, people } = useApp();
@@ -110,9 +113,29 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
     const sp = await store.spendCheck(section.id, rec?.id, status, data); if (sp) { toast(spendMsg(sp.roles, lang, (r) => tx((ROLES as any)[r]?.label, lang)), true); return; }
     if (status !== rec?.status) { const sm = await store.shipCheck(section.id, status, data); if (sm.length) { toast(shipMsg(sm, lang), true); return; } }
     setBusy(true);
-    try { await store.save({ id: rec?.id, section: section.id, title: title.trim(), status, data, company: company.trim() || null, controlled }); toast(t("saved", lang)); onSaved(); }
-    catch (e: any) { toast(e.message || "Error", true); } finally { setBusy(false); }
+    // names typed before the people list arrived still get linked to the person's account
+    const linked = { ...data }; for (const k of PEOPLE_KEYS) if (linked[k] && !linked[`${k}_id`]) { const p = people.find((q) => (q.full_name || q.email) === linked[k] || q.email === linked[k]); if (p) linked[`${k}_id`] = p.id; }
+    const mine = { id: rec?.id, section: section.id, title: title.trim(), status, data: linked, company: company.trim() || null, controlled, version: rec?.version };
+    try { await store.save({ ...mine, _base: rec ? store.original(rec) : null } as any); toast(t("saved", lang)); onSaved(); }
+    catch (e: any) { if (isConflict(e) && rec) await onConflict(store.toOriginal(mine), e.theirs); else toast(e.message || "Error", true); } finally { setBusy(false); }
   };
+  // Saved by someone else in the meantime: combine what does not overlap, ask about the rest (nothing is overwritten silently)
+  const [cf, setCf] = useState<null | { conflicts: Conflict[]; merged: any; theirs: any }>(null);
+  const onConflict = async (mine: any, theirs: any) => {
+    const m = merge3(store.original(rec!), mine, theirs);
+    if (!m.conflicts.length) {
+      try { await store.save({ ...mine, ...m.merged, id: rec!.id, section: section.id, version: theirs.version } as any); toast(tx({ en: "Saved together with a colleague's changes made meanwhile", ru: "Сохранено вместе с изменениями коллеги, сделанными за это время", uk: "Збережено разом зі змінами колеги, зробленими за цей час", ar: "حُفظ مع تغييرات زميل أُجريت في الأثناء" }, lang)); onSaved(); }
+      catch (e: any) { if (isConflict(e)) await onConflict(mine, e.theirs); else toast(e.message || "Error", true); }
+      return;
+    }
+    setCf({ conflicts: m.conflicts, merged: { ...mine, ...m.merged }, theirs });
+  };
+  const resolveConflict = async (choice: Record<string, "mine" | "theirs">) => {
+    if (!cf) return; const out = resolve(cf.merged, cf.conflicts, choice); setCf(null); setBusy(true);
+    try { await store.save({ ...out, id: rec!.id, section: section.id, version: cf.theirs.version } as any); toast(t("saved", lang)); onSaved(); }
+    catch (e: any) { if (isConflict(e)) await onConflict(out, e.theirs); else toast(e.message || "Error", true); } finally { setBusy(false); }
+  };
+  const fieldLabel = (k: string) => k === "title" ? t("title", lang) : k === "status" ? t("status", lang) : k === "company" ? t("visibility", lang) : k === "controlled" ? "US persons only" : tx(section.fields.find((f: any) => f.key === k.replace(/^data\./, ""))?.label, lang) || k.replace(/^data\./, "");
   const dup = async () => {
     try { await store.save({ section: section.id, title: `${title} (copy)`, status: section.statuses[0], data: { ...data, sample: undefined }, company: company.trim() || null, controlled }); toast(t("duplicated", lang)); onReload ? onReload() : onSaved(); }
     catch (e: any) { toast(e.message || "Error", true); }
@@ -131,7 +154,9 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
   const pdf = async () => { toast(t("pdf_wait", lang)); try { await markdownToPdf(typeof data.document === "string" && data.document ? data.document : md(), { title, filename: `AGRON_${slug(title)}` }); } catch (e: any) { toast(e.message || "PDF error", true); } };
 
   const field = (f: any) => {
-    const v = data[f.key] ?? ""; const set = (x: any) => setData((d) => ({ ...d, [f.key]: x })); const id = `f-${f.key}`;
+    const v = data[f.key] ?? ""; const id = `f-${f.key}`;
+    // a name picked from the people list also links the record to that person's account (notifications, "My day")
+    const set = (x: any) => setData((d) => { const n: Record<string, any> = { ...d, [f.key]: x }; if (PEOPLE_KEYS.includes(f.key)) { const p = people.find((q) => (q.full_name || q.email) === x); if (p) n[`${f.key}_id`] = p.id; else delete n[`${f.key}_id`]; } return n; });
     const ro = !canWrite;
     let ctl;
     if (f.type === "checklist") {
@@ -248,6 +273,7 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
         </div>
         <div style={{ margin: "0 36px 24px", paddingTop: 10, borderTop: "1px solid #D5DCE4", color: "#7A8796", fontSize: 10 }}>© 2026 AGRON Inc. All rights reserved. · {t("foot_conf", lang)} · www.agron1.com</div>
       </div>
+      {cf && <ConflictDialog conflicts={cf.conflicts} at={cf.theirs?.updated_at} labelOf={fieldLabel} onResolve={resolveConflict} onCancel={() => setCf(null)} />}
     </>
   );
 }

@@ -1,4 +1,5 @@
 import { adminClient, currentProfile } from "@/lib/server/supabase";
+import { limit } from "@/lib/server/authz";
 import { scan } from "@/lib/server/domainscan";
 
 export const runtime = "nodejs";
@@ -14,6 +15,7 @@ export const maxDuration = 30;
 export async function POST(req: Request) {
   const me = await currentProfile();
   if (!me || me.role === "pending" || ["partner", "vendor", "investor"].includes(me.role)) return new Response("Not allowed", { status: 403 });
+  { const lim = await limit(`security:${me.id}`, 20, 60); if (lim) return lim; }
   const b = await req.json().catch(() => ({}));
 
   if (b.action === "scan") {

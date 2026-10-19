@@ -1,5 +1,7 @@
-import { randomBytes } from "node:crypto";
+import { hashToken, newToken } from "@/lib/server/tokens";
 import { adminClient, currentProfile, userClient } from "@/lib/server/supabase";
+import { limit, clientIp } from "@/lib/server/authz";
+import { reportError } from "@/lib/server/errors";
 import { sendMail } from "@/lib/server/mailer";
 import { localizeMail } from "@/lib/server/translate";
 import { PUSH, pushTo } from "@/lib/server/push";
@@ -24,6 +26,7 @@ const sec = (id: string) => SECS.find((s) => s.id === id);
 const fmt = (f: any, v: any) => (v == null || v === "" ? "" : f?.type === "money" || f?.type === "number" ? Number(v).toLocaleString("en-US") : String(v).length > 1500 ? String(v).slice(0, 1500) + "…" : String(v));
 const L = (lang: string, en: string, ru: string) => (lang === "ru" || lang === "uk" ? ru : en);
 
+
 function details(r: any) {
   const s = sec(r.section); const rule = APPROVALS[r.section];
   return (rule?.key || []).map((k) => { const f = s?.fields.find((x: any) => x.key === k); const v = fmt(f, r.data?.[k]); return v ? { label: f?.label?.en || k, label_ru: f?.label?.ru || f?.label?.en || k, value: v } : null; }).filter(Boolean) as any[];
@@ -41,11 +44,15 @@ async function decide(db: any, a: any, decision: "approved" | "rejected", commen
   const { data: r } = await db.from("records").select("*").eq("id", a.record_id).single();
   if (!r) return "Record not found";
   const rule = APPROVALS[r.section];
+  // checked again now, not only when the link was sent: the approver must still be allowed to decide
+  const { data: ap } = await db.from("profiles").select("id,role,us_person,disabled").eq("id", a.approver_id).maybeSingle();
+  const lim = rule ? limitRoles(r.section, r.data || {}, withLimits((await getSettings(db)).limits)) : null;
+  if (!ap || ap.disabled || !rule || !(lim || rule.approvers).includes(ap.role) || (r.controlled && !ap.us_person)) return "The approver is no longer allowed to decide this request";
   const now = new Date().toISOString();
   const { data: upd } = await db.from("approvals").update({ status: decision, comment: comment || null, decided_at: now }).eq("id", a.id).eq("status", "pending").select("id");
   if (!upd?.length) return "This request was already decided";
   const status = decision === "approved" ? rule?.ok : rule?.no;
-  if (status) await db.from("records").update({ status, updated_at: now }).eq("id", r.id);
+  if (status) await db.from("records").update({ status }).eq("id", r.id);
   const who = by.full_name || by.email;
   await db.from("comments").insert({ record_id: r.id, author: by.id, body: `${decision === "approved" ? "✓ Approved" : "✗ Rejected"} by ${who}${comment ? `: ${comment}` : ""}` });
   const { data: req } = await db.from("profiles").select("email,full_name,lang").eq("id", a.requested_by).single();
@@ -60,7 +67,7 @@ async function decide(db: any, a: any, decision: "approved" | "rejected", commen
     const ml = (["uk", "ar"].includes(req.lang) ? req.lang : lang) as any; const c2 = { ...cta, label: m.text };
     await sendMail({ to: req.email, subject: m.subject, html: renderEmail({ subject: m.subject, heading: m.subject, body: m.body!, cta: c2, lang: ml, sender: COMPANY }), text: plainText({ body: m.body!, cta: c2, sender: COMPANY, lang: ml }) });
   }
-  await pushTo(db, [a.requested_by], (l) => ({ title: PUSH.decided_t[l], body: `${r.controlled ? "US-persons-only record" : r.title} — ${(decision === "approved" ? PUSH.approved : PUSH.rejected)[l]} (${who})`, url: `/${r.section.replace(".", "/")}?r=${r.id}`, tag: `ap-${a.id}` })).catch(() => 0);
+  await pushTo(db, [a.requested_by], (l) => ({ title: PUSH.decided_t[l], body: `${r.controlled ? "US-persons-only record" : r.title} — ${(decision === "approved" ? PUSH.approved : PUSH.rejected)[l]} (${who})`, url: `/${r.section.replace(".", "/")}?r=${r.id}`, tag: `ap-${a.id}` })).catch((e) => reportError(db, "approvals:push", e));
   return null;
 }
 
@@ -70,9 +77,10 @@ export async function POST(req: Request) {
 
   // Token actions work from the email link without signing in
   if (b.action === "view" || (b.action === "decide" && b.token)) {
+    const lim = await limit(`approve:${clientIp(req)}`, 30, 60, db); if (lim) return lim;
     const token = String(b.token || "");
     if (!/^[A-Za-z0-9_-]{32,}$/.test(token)) return new Response("Link is not valid", { status: 404 });
-    const { data: a } = await db.from("approvals").select("*").eq("token", token).maybeSingle();
+    const { data: a } = await db.from("approvals").select("*").eq("token_hash", hashToken(token)).maybeSingle();
     if (!a) return new Response("Link is not valid", { status: 404 });
     if (a.status === "pending" && Date.parse(a.expires_at) < Date.now()) { await db.from("approvals").update({ status: "expired" }).eq("id", a.id); a.status = "expired"; }
     const [{ data: r }, { data: rq }, { data: ap }] = await Promise.all([
@@ -100,6 +108,7 @@ export async function POST(req: Request) {
   const me = await currentProfile();
   if (!me || me.role === "pending") return new Response("Not signed in", { status: 401 });
   const sb = await userClient();
+  { const lim = await limit(`approvals:${me.id}`, 60, 60, db); if (lim) return lim; }
 
   if (b.action === "limits") return Response.json(withLimits((await getSettings(db)).limits));
   if (b.action === "approvers") {
@@ -118,9 +127,9 @@ export async function POST(req: Request) {
     const ap = (await approversFor(db, r, me.id)).find((p: any) => p.id === b.approver_id);
     if (!ap) return new Response("Choose an approver from the list", { status: 400 });
     await db.from("approvals").update({ status: "cancelled" }).eq("record_id", r.id).eq("status", "pending");
-    const token = randomBytes(24).toString("base64url");
+    const token = newToken();
     const note = String(b.note || "").slice(0, 2000);
-    const { data: a, error } = await db.from("approvals").insert({ token, record_id: r.id, section: r.section, requested_by: me.id, approver_id: ap.id, note: note || null }).select("id,status,created_at,expires_at").single();
+    const { data: a, error } = await db.from("approvals").insert({ token: null, token_hash: hashToken(token), record_id: r.id, section: r.section, requested_by: me.id, approver_id: ap.id, note: note || null }).select("id,status,created_at,expires_at").single();
     if (error) return new Response(error.message, { status: 500 });
     const lang = ap.lang === "ru" ? "ru" : "en"; const s = sec(r.section);
     const lines = details(r).map((d: any) => `- **${lang === "ru" ? d.label_ru : d.label}:** ${d.value}`).join("\n");
@@ -132,7 +141,7 @@ export async function POST(req: Request) {
     const m = ["uk", "ar"].includes(ap.lang) ? await localizeMail(db, ap.lang, { subject, body: full, text: cta.label }) : { subject, body: full, text: cta.label };
     const ml = (["uk", "ar"].includes(ap.lang) ? ap.lang : lang) as any; const c2 = { ...cta, label: m.text };
     const err = await sendMail({ to: ap.email, subject: m.subject, html: renderEmail({ subject: m.subject, heading: m.subject, body: m.body!, cta: c2, lang: ml, sender: COMPANY }), text: plainText({ body: m.body!, cta: c2, sender: COMPANY, lang: ml }), replyTo: me.email });
-    await pushTo(db, [ap.id], (l) => ({ title: PUSH.approve_t[l], body: `${r.controlled ? "US-persons-only record" : r.title} — ${me.full_name || me.email}`, url, tag: `ap-${a.id}` })).catch(() => 0);
+    await pushTo(db, [ap.id], (l) => ({ title: PUSH.approve_t[l], body: `${r.controlled ? "US-persons-only record" : r.title} — ${me.full_name || me.email}`, url, tag: `ap-${a.id}` })).catch((e) => reportError(db, "approvals:push", e));
     await sb.from("comments").insert({ record_id: r.id, author: me.id, body: `→ Sent for approval to ${ap.full_name || ap.email}${note ? `: ${note}` : ""}` });
     return Response.json({ ...a, approver: ap.full_name || ap.email, mail_error: err });
   }

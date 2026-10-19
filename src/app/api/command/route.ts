@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { adminClient, currentProfile, userClient } from "@/lib/server/supabase";
+import { limit } from "@/lib/server/authz";
 import { allSections } from "@/config/workspace.config.mjs";
 import { searchWords, validatePlan } from "@/lib/command";
 
@@ -18,6 +19,7 @@ const LANGS: Record<string, string> = { en: "English", ru: "Russian", uk: "Ukrai
 export async function POST(req: Request) {
   const me = await currentProfile();
   if (!me || !INTERNAL.includes(me.role)) return new Response("Not allowed", { status: 403 });
+  { const lim = await limit(`command:${me.id}`, 20, 60); if (lim) return lim; }
   if (!process.env.ANTHROPIC_API_KEY) return new Response("AI is not configured", { status: 503 });
   const b = await req.json().catch(() => ({}));
   const text = String(b.text || "").trim().slice(0, 2000); if (text.length < 3) return new Response("Write what to do", { status: 400 });

@@ -1,4 +1,7 @@
 import { adminClient } from "@/lib/server/supabase";
+import { limit, clientIp } from "@/lib/server/authz";
+import { hashToken } from "@/lib/server/tokens";
+import { INTERNAL_ROLES } from "@/lib/roles";
 import { allSections, defaultRules } from "@/config/workspace.config.mjs";
 import { dueItems, isMine } from "@/lib/insights";
 import { ics } from "@/lib/ics";
@@ -9,17 +12,18 @@ export const dynamic = "force-dynamic";
 
 const SECS: any[] = allSections() as any[];
 const SITE = "https://workspace.agron1.com";
-const INTERNAL = ["owner", "admin", "management", "engineering", "operations", "finance", "sales", "marketing", "hr", "legal", "security"];
+const INTERNAL: string[] = [...INTERNAL_ROLES];
 
 /** Private calendar subscription: GET /api/calendar/feed/<token>.ics — the person's open deadlines as all-day events. */
 export async function GET(_req: Request, { params }: { params: Promise<{ token: string }> }) {
   const token = (await params).token.replace(/\.ics$/i, "");
   if (!/^[A-Za-z0-9_-]{32,}$/.test(token)) return new Response("Not found", { status: 404 });
   const db = adminClient();
-  const { data: feed } = await db.from("calendar_feeds").select("user_id,scope").eq("token", token).maybeSingle();
-  if (!feed) return new Response("Not found", { status: 404 });
+  const lim = await limit(`ics:${clientIp(_req)}`, 60, 3600, db); if (lim) return lim;
+  const { data: feed } = await db.from("calendar_feeds").select("user_id,scope,expires_at,revoked_at").eq("token_hash", hashToken(token)).maybeSingle();
+  if (!feed || feed.revoked_at || (feed.expires_at && Date.parse(feed.expires_at) < Date.now())) return new Response("Not found", { status: 404 });
   const { data: p } = await db.from("profiles").select("*").eq("id", feed.user_id).single();
-  if (!p || !INTERNAL.includes(p.role)) return new Response("Not found", { status: 404 });
+  if (!p || !INTERNAL.includes(p.role) || p.disabled) return new Response("Not found", { status: 404 });
 
   // Same visibility the database enforces for this user (as in the morning digest)
   const [{ data: rules }, { data: recs }] = await Promise.all([
@@ -39,7 +43,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
     return { uid: `${r.id}-${k}@agron1.com`, date: String(r.data[k]), summary: `${r.title} · ${tx(f?.label, lang) || k}`,
       description: [tx(s?.label, lang), r.status, r.data?.owner || r.data?.assignee || "", url].filter(Boolean).join("\n"), url };
   });
-  db.from("calendar_feeds").update({ last_fetch: new Date().toISOString() }).eq("token", token).then(() => {}, () => {});
+  db.from("calendar_feeds").update({ last_fetch: new Date().toISOString() }).eq("token_hash", hashToken(token)).then(() => {}, () => {});
   return new Response(ics(feed.scope === "all" ? "AGRON — all deadlines" : "AGRON — my deadlines", events), {
     headers: { "Content-Type": "text/calendar; charset=utf-8", "Content-Disposition": 'inline; filename="agron.ics"', "Cache-Control": "private, max-age=900" },
   });

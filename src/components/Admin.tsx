@@ -6,6 +6,7 @@ import { useApp } from "./App";
 import { ROLES, ROLE_COLORS } from "@/config/workspace.config.mjs";
 import { t, tx } from "@/lib/i18n";
 import { DEMO, Profile, isExternal, store } from "@/lib/store";
+import AccountSecurity from "./AccountSecurity";
 
 export default function Admin() {
   const { lang, toast, me } = useApp();
@@ -85,6 +86,7 @@ export default function Admin() {
               <td><input className="input mono" style={{ width: 120 }} type="number" step={100000} defaultValue={p.ai_monthly_tokens} onBlur={(e) => Number(e.target.value) !== p.ai_monthly_tokens && upd(p, { ai_monthly_tokens: Number(e.target.value) })} aria-label={t("ai_limit_col", lang)} /></td></tr>); })}
           </tbody></table></div>
       </section>
+      {["owner", "admin"].includes(me.role) && <AccountSecurity />}
     </div>
   );
 }

@@ -1,7 +1,11 @@
 import { weakVendors } from "@/lib/vendors";
 import { clientLang, dunningLetter, stepFor } from "@/lib/dunning";
 import Anthropic from "@anthropic-ai/sdk";
-import { readState, saveState } from "./backup";
+import { readState, saveState, claimKeys } from "./state";
+import { sendExternal } from "./outbound";
+import { patchRecord, step, type Op } from "./records";
+import { reportError, guarded } from "./errors";
+import { alertAdmins } from "./alerts";
 import { sendMail } from "./mailer";
 import { localizeMail } from "./translate";
 import { PUSH, pushTo } from "./push";
@@ -24,43 +28,106 @@ import { AGENTS, DEPT_AGENTS, DEFAULT_RULES, aiCost, dateDue, isWorkday, matchEv
 
 /**
  * Automation engine: company settings, "when → then" rules and agents.
- * State lives next to the backups (private bucket, JSON files) — no extra database tables.
+ * State lives in database tables (v18): settings, rules, the approval/execution queue, the agent log and
+ * "already done" keys. Every proposal is claimed atomically, so it runs once even when two people approve it
+ * at the same moment or two workers pick it up; e-mail to outside addresses has its own delivery record.
  * Safety: changes from an agent in "suggest" mode, and every email to an outside address, wait in the approval queue.
  * Records marked "US persons only" are announced only to US persons. Every action is written to the agent log and the activity history.
  */
 const SECS: any[] = allSections() as any[];
 const label = (id: string) => SECS.find((s) => s.id === id)?.label?.en || id;
 const today = () => new Date().toISOString().slice(0, 10);
-const uid = () => globalThis.crypto.randomUUID();
 const esc = (s: string) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 const recUrl = (r: { id: string; section: string }) => `${SITE}/${r.section.replace(".", "/")}?r=${r.id}`;
+const isUuid = (x: any) => typeof x === "string" && /^[0-9a-f-]{36}$/i.test(x);
 
 export type LogEntry = { at: string; agent: AgentId | "system"; kind: "run" | "action" | "queued" | "error" | "decision"; text: string; record?: string; section?: string };
-export type QueueItem = { id: string; at: string; agent: AgentId; title: string; detail: string; record_id?: string; section?: string; action: Action; status: "pending" | "approved" | "rejected" | "failed"; decided_by?: string; decided_at?: string; result?: string; controlled?: boolean };
+/** status: pending (waits for a person) · processing · approved (done) · rejected · failed — state gives the exact execution stage. */
+export type QueueItem = { id: string; at: string; agent: AgentId; title: string; detail: string; record_id?: string; section?: string; action: Action; status: "pending" | "approved" | "rejected" | "failed" | "processing"; state?: string; attempts?: number; next_attempt_at?: string | null; last_error?: string | null; decided_by?: string; decided_at?: string; result?: string; controlled?: boolean };
+type Row = { id: string; created_at: string; agent: AgentId; title: string; detail: string | null; record_id: string | null; section: string | null; action: Action; controlled: boolean; dedupe_key: string | null; status: string; decided_by: string | null; decided_at: string | null; exec_id: string | null; attempts: number; max_attempts: number; next_attempt_at: string | null; result: string | null; last_error: string | null };
+const LEGACY: Record<string, QueueItem["status"]> = { pending: "pending", rejected: "rejected", processing: "processing", retrying: "processing", completed: "approved", failed: "failed", dead: "failed" };
+export const toItem = (r: Row): QueueItem => ({ id: r.id, at: r.created_at, agent: r.agent, title: r.title, detail: r.detail || "", record_id: r.record_id || undefined, section: r.section || undefined, action: r.action, status: LEGACY[r.status] || "failed", state: r.status, attempts: r.attempts, next_attempt_at: r.next_attempt_at, last_error: r.last_error, decided_by: r.decided_by || undefined, decided_at: r.decided_at || undefined, result: r.result || undefined, controlled: r.controlled });
 
 /* ---------------- State ---------------- */
-export const getSettings = async (db: any): Promise<Settings> => withDefaults(await readState(db, "settings").catch(() => null));
-export const saveSettings = (db: any, s: any) => saveState(db, "settings", withDefaults(s));
-export async function getRules(db: any): Promise<Rule[]> { const r = await readState(db, "rules").catch(() => null); return Array.isArray(r) ? r : DEFAULT_RULES; }
-export const saveRules = (db: any, rules: Rule[]) => saveState(db, "rules", rules.slice(0, 200));
-export async function getLog(db: any): Promise<LogEntry[]> { return ((await readState(db, "agentlog").catch(() => null)) as LogEntry[]) || []; }
-export async function getQueue(db: any): Promise<QueueItem[]> { return ((await readState(db, "queue").catch(() => null)) as QueueItem[]) || []; }
-async function addLog(db: any, items: LogEntry[]) { if (!items.length) return; const old = await getLog(db); await saveState(db, "agentlog", [...items.reverse(), ...old].slice(0, 500)); }
-async function addQueue(db: any, items: QueueItem[]) {
-  if (!items.length) return; const old = await getQueue(db);
-  const pending = old.filter((q) => q.status === "pending"), done = old.filter((q) => q.status !== "pending").slice(0, 200);
-  await saveState(db, "queue", [...items, ...pending, ...done].slice(0, 600));
+let legacyChecked = false;
+/** Once: moves state kept by the earlier version (JSON files in Storage) into the tables. Never overwrites table rows. */
+export async function migrateLegacy(db: any) {
+  if (legacyChecked) return; 
+  const { data: mark } = await db.from("ops_state").select("key").eq("key", "legacy_import").maybeSingle();
+  if (mark) { legacyChecked = true; return; }
+  const file = async (k: string) => { try { const { data } = await db.storage.from("backups").download(`state/${k}.json`); return data ? JSON.parse(await data.text()) : null; } catch { return null; } };
+  const [settings, rules, queue, log, fired] = await Promise.all(["settings", "rules", "queue", "agentlog", "fired"].map(file));
+  const done: Record<string, number> = {};
+  if (settings) { const { data: has } = await db.from("automation_settings").select("id").maybeSingle(); if (!has) { await db.from("automation_settings").insert({ id: true, value: withDefaults(settings) }); done.settings = 1; } }
+  if (Array.isArray(rules)) { const { count } = await db.from("automation_rules").select("id", { count: "exact", head: true }); if (!count) { await db.rpc("automation_save_rules", { p_rules: rules.slice(0, 200), p_by: "migration" }); done.rules = rules.length; } }
+  if (Array.isArray(queue) && queue.length) {
+    const st: Record<string, string> = { pending: "pending", approved: "completed", rejected: "rejected", failed: "failed" };
+    const rows = queue.slice(0, 600).map((q: any) => ({ id: isUuid(q.id) ? q.id : undefined, created_at: q.at, agent: q.agent, title: q.title, detail: q.detail || null, record_id: isUuid(q.record_id) ? q.record_id : null, section: q.section || null, action: q.action, controlled: !!q.controlled, status: st[q.status] || "failed", decided_by: q.decided_by || null, decided_at: q.decided_at || null, result: q.result || null, dedupe_key: q.status === "pending" || q.status === "rejected" ? `${q.record_id}|${q.title}` : null }));
+    const { error } = await db.from("automation_queue").upsert(rows, { onConflict: "id", ignoreDuplicates: true }); if (!error) done.queue = rows.length;
+  }
+  if (Array.isArray(log) && log.length) { await db.from("automation_log").insert(log.slice(0, 500).map((l: any) => ({ at: l.at, agent: l.agent, kind: l.kind, text: String(l.text || "").slice(0, 2000), record_id: isUuid(l.record) ? l.record : null, section: l.section || null }))); done.log = Math.min(500, log.length); }
+  if (fired && typeof fired === "object") {
+    const rows = Object.entries(fired).filter(([, d]) => /^\d{4}-\d{2}-\d{2}/.test(String(d))).map(([key, d]) => ({ key, fired_on: String(d).slice(0, 10) }));
+    for (let i = 0; i < rows.length; i += 500) await db.from("automation_fired").upsert(rows.slice(i, i + 500), { onConflict: "key", ignoreDuplicates: true });
+    done.fired = rows.length;
+  }
+  await db.from("ops_state").upsert({ key: "legacy_import", value: { at: new Date().toISOString(), ...done } }, { onConflict: "key" });
+  legacyChecked = true;
+}
+export async function getSettings(db: any): Promise<Settings> {
+  const { data } = await db.from("automation_settings").select("value").eq("id", true).maybeSingle();
+  return withDefaults(data ? data.value : await readState(db, "settings").catch(() => null));
+}
+export async function saveSettings(db: any, s: any, by?: string) {
+  const { error } = await db.from("automation_settings").upsert({ id: true, value: withDefaults(s), updated_at: new Date().toISOString(), updated_by: by || null }, { onConflict: "id" });
+  if (error) throw new Error(error.message);
+}
+export async function getRules(db: any): Promise<Rule[]> {
+  const { data } = await db.from("automation_rules").select("rule").order("position");
+  if (data?.length) return data.map((x: any) => x.rule);
+  const { data: saved } = await db.from("ops_state").select("key").eq("key", "rules_saved").maybeSingle();
+  if (saved) return []; // the owner removed every rule
+  const r = await readState(db, "rules").catch(() => null); return Array.isArray(r) ? r : DEFAULT_RULES;
+}
+export async function saveRules(db: any, rules: Rule[], by?: string) {
+  const { error } = await db.rpc("automation_save_rules", { p_rules: rules.slice(0, 200), p_by: by || null });
+  if (error) throw new Error(error.message);
+}
+export async function getLog(db: any): Promise<LogEntry[]> {
+  const { data } = await db.from("automation_log").select("at,agent,kind,text,record_id,section").order("at", { ascending: false }).limit(500);
+  return (data || []).map((l: any) => ({ at: l.at, agent: l.agent, kind: l.kind, text: l.text, record: l.record_id || undefined, section: l.section || undefined }));
+}
+export async function getQueue(db: any, opts: { status?: string[]; limit?: number } = {}): Promise<QueueItem[]> {
+  let q = db.from("automation_queue").select("*").order("created_at", { ascending: false }).limit(opts.limit || 600);
+  if (opts.status) q = q.in("status", opts.status);
+  const { data } = await q; return (data || []).map(toItem);
+}
+async function addLog(db: any, items: LogEntry[]) {
+  if (!items.length) return;
+  const { error } = await db.from("automation_log").insert(items.map((l) => ({ at: l.at, agent: l.agent, kind: l.kind, text: String(l.text).slice(0, 2000), record_id: isUuid(l.record) ? l.record : null, section: l.section || null })));
+  if (error) await reportError(db, "automation:log", error);
+}
+type NewItem = { agent: AgentId; title: string; detail: string; record_id?: string; section?: string; action: Action; controlled?: boolean; dedupe_key: string };
+async function addQueue(db: any, items: NewItem[]) {
+  if (!items.length) return 0;
+  const { data, error } = await db.rpc("automation_enqueue", { p_items: items.map((x) => ({ ...x, record_id: isUuid(x.record_id) ? x.record_id : null })) });
+  if (error) { await reportError(db, "automation:enqueue", error); return 0; }
+  return (data || []).length;
 }
 
 /* ---------------- Context ---------------- */
 type P = { id: string; email: string; full_name: string; role: string; us_person: boolean; lang?: string };
-type Ctx = { db: any; settings: Settings; profiles: P[]; access: { section: string; role: string }[]; log: LogEntry[]; queue: QueueItem[]; mail: Map<string, { p: P; lines: string[] }>; fired: Record<string, string>; known: Set<string> };
+type Ctx = { db: any; settings: Settings; profiles: P[]; access: { section: string; role: string }[]; log: LogEntry[]; queue: NewItem[]; mail: Map<string, { p: P; lines: string[] }>; known: Set<string> };
 async function context(db: any): Promise<Ctx> {
-  const [settings, { data: profiles }, { data: access }, fired, queue] = await Promise.all([getSettings(db), db.from("profiles").select("id,email,full_name,role,lang,us_person"), db.from("section_access").select("section,role"), readState(db, "fired").catch(() => null), getQueue(db)]);
-  // Proposals already waiting or rejected are not proposed again
-  const known = new Set(queue.filter((q) => q.status === "pending" || q.status === "rejected").map((q) => `${q.record_id}|${q.title}`));
-  return { db, settings, profiles: (profiles || []).filter((p: P) => p.email && p.role !== "pending"), access: access || [], log: [], queue: [], mail: new Map(), fired: fired || {}, known };
+  await migrateLegacy(db).catch((e) => reportError(db, "automation:migrate", e));
+  const [settings, { data: profiles }, { data: access }, { data: waiting }] = await Promise.all([getSettings(db), db.from("profiles").select("id,email,full_name,role,lang,us_person,disabled"), db.from("section_access").select("section,role"),
+    db.from("automation_queue").select("dedupe_key").in("status", ["pending", "rejected"]).not("dedupe_key", "is", null).limit(5000)]);
+  // Proposals already waiting or rejected are not proposed again (the database enforces it too)
+  const known = new Set<string>((waiting || []).map((q: any) => q.dedupe_key));
+  return { db, settings, profiles: (profiles || []).filter((p: P & { disabled?: boolean }) => p.email && p.role !== "pending" && !p.disabled), access: access || [], log: [], queue: [], mail: new Map(), known };
 }
+/** Claims "already done" keys for this run; only claimed ones may act. */
+const claim = (c: Ctx, items: { key: string; repeat?: number | null }[]) => claimKeys(c.db, items);
 const canRead = (c: Ctx, p: P, section: string) => ["owner", "admin"].includes(p.role) || c.access.some((a) => a.role === p.role && a.section === section);
 
 async function allRecords(db: any) {
@@ -89,20 +156,18 @@ async function flushMail(c: Ctx, subject: string) {
     const html = `<p style="font-size:15px;line-height:1.6;color:#2A3440">Hello${p.full_name ? ` ${esc(p.full_name.split(" ")[0])}` : ""}, the Workspace automation has news for you:</p><ul style="padding-left:18px;font-size:15px;line-height:1.6;color:#2A3440">${lines.map((l) => `<li>${l}</li>`).join("")}</ul><p style="font-size:13px;color:#7A8796">Rules and agents: Administration → System → Automation.</p>`;
     const m = await inLang(c, p, { subject, html, text: lines.map((l) => "- " + l.replace(/<[^>]+>/g, "")).join("\n") });
     const err = await sendMail({ to: p.email, subject: m.subject, html: renderEmail({ subject: m.subject, heading: m.subject, body: "", html: m.html, lang: (p.lang as any) || "en", sender: null }), text: m.text });
-    if (!err) sent++; else c.log.push({ at: new Date().toISOString(), agent: "system", kind: "error", text: `Email to ${p.email}: ${err}` });
+    if (!err) sent++; else { c.log.push({ at: new Date().toISOString(), agent: "system", kind: "error", text: `Email to ${p.email}: ${err}` }); await reportError(c.db, "automation:mail", err, { detail: `to ${p.email}` }); }
     // A short signal on the phone too (only on devices where the person turned notifications on)
     await pushTo(c.db, [p.id], (l) => ({ title: PUSH.agents_t[l], body: PUSH.agents_b[l].replace("{n}", String(lines.length)), url: "/today", tag: "agents" })).catch(() => 0);
   }
   c.mail.clear(); return sent;
 }
 async function save(c: Ctx) {
-  // forget fired keys older than 60 days
-  const cut = new Date(Date.now() - 60 * 864e5).toISOString().slice(0, 10);
-  for (const [k, d] of Object.entries(c.fired)) if (d < cut) delete c.fired[k];
-  await Promise.all([addLog(c.db, c.log), addQueue(c.db, c.queue), saveState(c.db, "fired", c.fired)]);
+  const items = c.queue.splice(0); const logs = c.log.splice(0);
+  await Promise.all([addLog(c.db, logs), addQueue(c.db, items)]);
 }
 const audit = (c: Ctx, agent: AgentId, rec: { id: string; section: string; title: string }, text: string) => !rec.id ? Promise.resolve() :
-  c.db.from("activity").insert({ record_id: rec.id, section: rec.section, actor: null, action: "automation", detail: { agent, title: rec.title, text } }).then(() => {}, () => {});
+  c.db.from("activity").insert({ record_id: rec.id, section: rec.section, actor: null, action: "automation", detail: { agent, title: rec.title, text } }).then(({ error }: any) => error && reportError(c.db, "automation:audit", error), (e: any) => reportError(c.db, "automation:audit", e));
 
 /* ---------------- Actions ---------------- */
 function describeAction(a: Action, rec: any) {
@@ -113,8 +178,10 @@ function describeAction(a: Action, rec: any) {
   return `Notify ${a.to.replace("role:", "")}: ${render(a.message, rec)}`;
 }
 
-/** Runs one action now. Returns a short result text. */
-async function execute(c: Ctx, agent: AgentId, a: Action, rec: any): Promise<string> {
+/** A failure that may pass on a second try (connection, mail server busy). */
+export class Retry extends Error { constructor(m: string) { super(m); this.name = "Retry"; } }
+/** Runs one action now. Returns a short result text. `idem` makes a repeated execution do nothing the second time. */
+async function execute(c: Ctx, agent: AgentId, a: Action, rec: any, o: { idem?: string; queueId?: string } = {}): Promise<string> {
   const db = c.db;
   if (a.type === "notify") {
     const ppl = recipients(c, a.to, rec);
@@ -126,37 +193,39 @@ async function execute(c: Ctx, agent: AgentId, a: Action, rec: any): Promise<str
       const { data: ex } = await db.from("records").select("id").eq("section", a.section).eq(`data->>${a.link}`, rec.id).limit(1);
       if (ex?.length) return "already exists";
     }
-    const data: Record<string, any> = { _by: `agent:${agent}`, _from: rec.id };
+    const data: Record<string, any> = { _by: `agent:${agent}`, _from: rec.id, ...(o.idem ? { _idem: o.idem } : {}) };
     for (const [k, tpl] of Object.entries(a.fields || {})) { const v = render(tpl, rec, today()); if (v) data[k] = /^-?\d+(\.\d+)?$/.test(v) && /amount|value|qty/.test(k) ? Number(v) : v; }
     if (a.link) { data[a.link] = rec.id; data[`${a.link}_title`] = rec.title; }
     const title = render(a.title, rec, today()) || rec.title;
     const { data: made, error } = await db.from("records").insert({ section: a.section, title, status: a.status || null, data, controlled: !!rec.controlled, company: null }).select("id,section,title").single();
-    if (error) throw new Error(error.message);
+    if (error) { if (error.code === "23505" && o.idem) return "already exists"; throw new Error(error.message); }
     await audit(c, agent, made, `Created from “${rec.title}” (${label(rec.section)})`);
     return `created ${made.id}`;
   }
   if (a.type === "set") {
-    const patch: any = a.field === "status" ? { status: a.value } : { data: { ...(rec.data || {}), [a.field]: a.value } };
-    const { error } = await db.from("records").update(patch).eq("id", rec.id); if (error) throw new Error(error.message);
+    const done = await patchRecord(db, rec.id, (cur) => (a.field === "status" ? (cur.status === a.value ? null : { status: a.value }) : String(cur.data?.[a.field] ?? "") === String(a.value) ? null : { data: { ...(cur.data || {}), [a.field]: a.value } }));
+    if (!done) throw new Error("The record no longer exists");
     await audit(c, agent, rec, `Set ${a.field} to “${a.value}”`);
     return "updated";
   }
   if (a.type === "file") {
-    const made = await fileRecord(c.db, a);
+    const made = await fileRecord(c.db, a, o.idem);
     await audit(c, agent, made, `Filed from email ${a.from}: ${a.subject}`);
     tell(c, recipients(c, `role:${DEPT_ROLE[a.section.split(".")[0]] || "management"}`, { ...made, data: {}, controlled: a.controlled }), `New from email: ${esc(a.subject)} (${esc(a.from)}) → ${esc(label(a.section))} — <a href="${recUrl(made)}">open</a>`);
-    return `created ${made.id}`;
+    return made.existed ? "already exists" : `created ${made.id}`;
   }
   if (a.type === "email") {
     const to = String(a.to || rec.data?.[a.to_field] || "").trim();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) throw new Error(`No valid email in “${a.to_field}”`);
     const subject = a.to ? a.subject : render(a.subject, rec); const body = a.to ? a.body : render(a.body, rec); // AI drafts are sent exactly as approved
-    const err = await sendMail({ to, subject, html: renderEmail({ subject, body, lang: "en", sender: { name: "AGRON Inc.", email: "info@agron1.com" } }), text: body, replyTo: "info@agron1.com" });
-    if (err) throw new Error(err);
+    const out = await sendExternal(db, { idem: o.idem || `adhoc:${agent}:${rec.id}:${subject}`, queueId: o.queueId, to, subject, html: renderEmail({ subject, body, lang: "en", sender: { name: "AGRON Inc.", email: "info@agron1.com" } }), text: body, replyTo: "info@agron1.com" });
+    if (out.status === "already-sent") return `already emailed ${to}`;
+    if (out.status === "in-progress" || (out.status === "failed" && out.retry)) throw new Retry(out.detail);
+    if (out.status !== "sent") throw new Error(out.detail);
     await audit(c, agent, rec, `Emailed ${to}: ${subject}`);
-    if (rec.section === "finance.invoices") { // the invoice remembers which reminders went out
-      const { data: cur } = await db.from("records").select("data").eq("id", rec.id).maybeSingle();
-      const d = cur?.data || rec.data || {}; await db.from("records").update({ data: { ...d, reminders: [...(Array.isArray(d.reminders) ? d.reminders : []), { at: new Date().toISOString().slice(0, 10), subject, to }].slice(-10) } }).eq("id", rec.id);
+    if (rec.section === "finance.invoices" && rec.id) { // the invoice remembers which reminders went out
+      await patchRecord(db, rec.id, (cur) => { const d = cur.data || {}; return { data: { ...d, reminders: [...(Array.isArray(d.reminders) ? d.reminders : []), { at: today(), subject, to }].slice(-10) } }; })
+        .catch((e) => reportError(db, "automation:invoice-reminder", e, { detail: rec.id }));
     }
     return `emailed ${to}`;
   }
@@ -164,115 +233,132 @@ async function execute(c: Ctx, agent: AgentId, a: Action, rec: any): Promise<str
 }
 
 /** Executes now or puts into the approval queue, depending on the mode. Notifications to the team always go out. */
-async function act(c: Ctx, agent: AgentId, a: Action, rec: any, mode: "auto" | "suggest", why: string) {
+async function act(c: Ctx, agent: AgentId, a: Action, rec: any, mode: "auto" | "suggest", why: string, idem?: string, dedupe?: string) {
   const now = new Date().toISOString();
   if (a.type !== "notify" && (mode === "suggest" || a.type === "email")) {
-    const k = `${rec.id}|${describeAction(a, rec)}`; if (c.known.has(k)) return; c.known.add(k);
-    c.queue.push({ id: uid(), at: now, agent, title: describeAction(a, rec), detail: why, record_id: rec.id, section: rec.section, action: a, status: "pending", controlled: !!rec.controlled });
+    const k = dedupe || `${rec.id}|${describeAction(a, rec)}`; if (c.known.has(k)) return; c.known.add(k);
+    c.queue.push({ agent, title: describeAction(a, rec), detail: why, record_id: rec.id, section: rec.section, action: a, controlled: !!rec.controlled, dedupe_key: k });
     c.log.push({ at: now, agent, kind: "queued", text: describeAction(a, rec), record: rec.id, section: rec.section });
     return;
   }
-  try { const res = await execute(c, agent, a, rec); if (a.type !== "notify" || res !== "notified 0") c.log.push({ at: now, agent, kind: "action", text: `${describeAction(a, rec)} → ${res}`, record: rec.id, section: rec.section }); }
-  catch (e: any) { c.log.push({ at: now, agent, kind: "error", text: `${describeAction(a, rec)}: ${e?.message || e}`, record: rec.id, section: rec.section }); }
+  try { const res = await execute(c, agent, a, rec, { idem }); if (a.type !== "notify" || res !== "notified 0") c.log.push({ at: now, agent, kind: "action", text: `${describeAction(a, rec)} → ${res}`, record: rec.id, section: rec.section }); }
+  catch (e: any) { c.log.push({ at: now, agent, kind: "error", text: `${describeAction(a, rec)}: ${e?.message || e}`, record: rec.id, section: rec.section }); await reportError(c.db, `automation:${agent}`, e, { detail: describeAction(a, rec) }); }
 }
 const ruleMode = (c: Ctx, r: Rule): "auto" | "suggest" => (c.settings.agents.rules === "auto" ? r.mode : "suggest");
 
 /* ---------------- Events from the app ---------------- */
-/** Called right after someone saves a record. Runs the matching rules once per record and status. */
 /** A repeating record was completed: the next occurrence is created once, with the dates moved forward. */
 async function repeatNext(db: any, rec: any) {
   const sec: any = (allSections() as any[]).find((s) => s.id === rec.section); if (!sec) return null;
   const n = nextOccurrence(rec, sec.fields, sec.statuses[0]); if (!n) return null;
   const { data: ex } = await db.from("records").select("id").eq("section", rec.section).eq("data->>_prev", rec.id).limit(1);
   if (ex?.length) return null; // already prepared
-  const { data } = await db.from("records").insert({ section: rec.section, title: n.title, status: n.status, data: n.data, company: rec.company ?? null, controlled: !!rec.controlled, created_by: rec.created_by ?? null }).select("id").single();
+  const { data, error } = await db.from("records").insert({ section: rec.section, title: n.title, status: n.status, data: { ...n.data, _idem: `repeat:${rec.id}` }, company: rec.company ?? null, controlled: !!rec.controlled, created_by: rec.created_by ?? null }).select("id").single();
+  if (error) { if (error.code === "23505") return null; throw new Error(error.message); }
   return data?.id || null;
 }
 
-/** Support requests: remember when AGRON first responded and when the request was resolved (for the SLA). */
-async function slaStamps(db: any, rec: any, ev: Ev) {
-  if (rec.section !== "operations.support" || ev.kind !== "status") return;
+/** Support requests: remember when AGRON first responded and when the request was resolved (for the SLA). Returns new data or null. */
+function slaPatch(rec: any, ev: Ev): Record<string, any> | null {
+  if (rec.section !== "operations.support" || ev.kind !== "status") return null;
   const now = new Date().toISOString(); const d = { ...(rec.data || {}) }; let ch = false;
   if (!d.responded_at && ev.from === "New" && ev.to !== "New") { d.responded_at = now; ch = true; }
   if (!d.resolved_at && /^(resolved|closed)$/i.test(ev.to || "")) { d.resolved_at = now; if (!d.responded_at) d.responded_at = now; ch = true; }
   if (/^(new|in progress|waiting client)$/i.test(ev.to || "") && d.resolved_at) { delete d.resolved_at; ch = true; } // reopened
-  if (ch) await db.from("records").update({ data: d }).eq("id", rec.id);
+  return ch ? d : null;
 }
 
-/** Factory or site acceptance closed: the draft invoices waiting for it become ready to send (a person sends them). */
+/** Factory or site acceptance closed: the draft invoices waiting for it become ready to send (a person sends them). One transaction. */
 async function milestoneStamps(db: any, rec: any, ev: Ev) {
   if (ev.kind !== "status" || !rec.data?.project || !["fat", "sat"].includes(rec.data?.project_step)) return 0;
-  const { data: inv } = await db.from("records").select("id,section,status,data").eq("section", "finance.invoices").eq("data->>project", rec.data.project).eq("data->>trigger", rec.data.project_step);
-  const ch = milestoneReady(rec, inv || [], new Date().toISOString().slice(0, 10));
-  for (const c of ch) await db.from("records").update({ data: c.data }).eq("id", c.id);
-  if (ch.length) {
+  let n = 0; let first = "";
+  await step(db, async () => {
+    const { data: inv } = await db.from("records").select("id,section,status,data,version").eq("section", "finance.invoices").eq("data->>project", rec.data.project).eq("data->>trigger", rec.data.project_step);
+    const ch = milestoneReady(rec, inv || [], today()); n = ch.length; first = ch[0]?.id || "";
+    return ch.map((x): Op => ({ op: "update", id: x.id, set: { data: x.data }, if_version: (inv || []).find((i: any) => i.id === x.id)?.version }));
+  });
+  if (n) {
     const { data: fin } = await db.from("profiles").select("id").in("role", ["finance", "owner"]);
-    await pushTo(db, (fin || []).map((p: any) => p.id), (l) => ({ title: PUSH.pay_t[l], body: PUSH.pay_b[l].replace("{n}", String(ch.length)), url: `/finance/invoices?r=${ch[0].id}`, tag: `pay-${rec.id}` })).catch(() => 0);
+    await pushTo(db, (fin || []).map((p: any) => p.id), (l) => ({ title: PUSH.pay_t[l], body: PUSH.pay_b[l].replace("{n}", String(n)), url: `/finance/invoices?r=${first}`, tag: `pay-${rec.id}` })).catch((e) => reportError(db, "automation:push", e));
   }
-  return ch.length;
+  return n;
 }
 
 /** A planned service is done: the unit's next service moves forward by its plan interval. */
 async function serviceStamps(db: any, rec: any, ev: Ev) {
   if (ev.kind !== "status" || rec.section !== "operations.support" || !rec.data?.pm || !rec.data?.unit_ref) return;
-  const { data: u } = await db.from("records").select("id,section,status,data").eq("id", rec.data.unit_ref).maybeSingle();
-  const ch = serviceDone(rec, u, new Date().toISOString().slice(0, 10));
-  if (ch) await db.from("records").update({ status: ch.status, data: ch.data }).eq("id", ch.id);
+  await step(db, async () => {
+    const { data: u } = await db.from("records").select("id,section,status,data,version").eq("id", rec.data.unit_ref).maybeSingle();
+    const ch = serviceDone(rec, u, today());
+    return ch ? [{ op: "update", id: ch.id, set: { status: ch.status, data: ch.data }, if_version: u.version } as Op] : [];
+  });
 }
 
-/** A change order is signed: its amount goes into the project payments (once). */
-async function changeOrderStamps(db: any, rec: any, ev: Ev) {
-  if (ev.kind !== "status" || rec.section !== "legal.contracts" || rec.status !== "Signed" || rec.data?.type !== "Change order") return;
-  const { data: inv } = await db.from("records").select("id,section,title,status,data").eq("section", "finance.invoices").eq("data->>deal_ref", rec.data?.deal_ref || "-");
-  const e = changeOrderEffects(rec, inv || [], new Date().toISOString().slice(0, 10)); if (!e) return;
-  if (e.create) await db.from("records").insert({ ...e.create, controlled: !!rec.controlled, company: null, created_by: rec.created_by ?? null });
-  if (e.update) await db.from("records").update({ data: e.update.data }).eq("id", e.update.id);
-  await db.from("records").update({ data: e.co }).eq("id", rec.id);
+/** A change order is signed: its amount goes into the project payments (once) — all records in one transaction. */
+async function changeOrderStamps(db: any, rec0: any, ev: Ev) {
+  if (ev.kind !== "status" || rec0.section !== "legal.contracts" || rec0.status !== "Signed" || rec0.data?.type !== "Change order") return;
+  let changed = false;
+  await step(db, async () => {
+    const { data: rec } = await db.from("records").select("*").eq("id", rec0.id).single();
+    const { data: inv } = await db.from("records").select("id,section,title,status,data,version").eq("section", "finance.invoices").eq("data->>deal_ref", rec.data?.deal_ref || "-");
+    const e = changeOrderEffects(rec, inv || [], today()); if (!e) { changed = false; return []; }
+    changed = true; const ops: Op[] = [];
+    if (e.create) ops.push({ op: "insert", row: { ...e.create, controlled: !!rec.controlled, company: null, created_by: rec.created_by ?? null } });
+    if (e.update) ops.push({ op: "update", id: e.update.id, set: { data: e.update.data }, if_version: (inv || []).find((i: any) => i.id === e.update!.id)?.version });
+    ops.push({ op: "update", id: rec.id, set: { data: e.co }, if_version: rec.version });
+    return ops;
+  });
+  if (!changed) return;
   const { data: fin } = await db.from("profiles").select("id").in("role", ["finance", "owner"]);
-  await pushTo(db, (fin || []).map((p: any) => p.id), (l) => ({ title: PUSH.co_t[l], body: `${rec.title}`, url: `/legal/contracts?r=${rec.id}`, tag: `co-${rec.id}` })).catch(() => 0);
+  await pushTo(db, (fin || []).map((p: any) => p.id), (l) => ({ title: PUSH.co_t[l], body: `${rec0.title}`, url: `/legal/contracts?r=${rec0.id}`, tag: `co-${rec0.id}` })).catch((e) => reportError(db, "automation:push", e));
 }
 
-export async function onRecordEvent(db: any, rec: any, ev: Ev) {
-  await changeOrderStamps(db, rec, ev).catch(() => {});
-  await serviceStamps(db, rec, ev).catch(() => {});
-  if (ev.kind === "status") { const d = poStamps(ev.from, rec, new Date().toISOString().slice(0, 10)); if (d) await db.from("records").update({ data: d }).eq("id", rec.id).then(() => 0, () => 0); }
-  await slaStamps(db, rec, ev).catch(() => {});
-  await milestoneStamps(db, rec, ev).catch(() => 0);
-  const next = ev.kind === "status" ? await repeatNext(db, rec).catch(() => null) : null;
+/** Called right after someone saves a record. Runs the matching rules once per record and status. */
+export async function onRecordEvent(db: any, rec0: any, ev: Ev) {
+  const { data: fresh } = await db.from("records").select("id,section,title,status,data,company,controlled,created_by,created_at,updated_at,version").eq("id", rec0.id).maybeSingle();
+  let rec = fresh || rec0;
+  // stamps on the record itself, written only if nobody changed it meanwhile
+  rec = (await guarded(db, "automation:stamps", () => patchRecord(db, rec.id, (r) => {
+    let d: Record<string, any> | null = null;
+    if (ev.kind === "status") { const po = poStamps(ev.from, r, today()); if (po) d = po; }
+    const sla = slaPatch(d ? { ...r, data: d } : r, ev); if (sla) d = sla;
+    return d ? { data: d } : null;
+  }), null)) || rec;
+  await guarded(db, "automation:change-order", () => changeOrderStamps(db, rec, ev), undefined, { detail: rec.id });
+  await guarded(db, "automation:service", () => serviceStamps(db, rec, ev), undefined, { detail: rec.id });
+  await guarded(db, "automation:milestones", () => milestoneStamps(db, rec, ev), 0, { detail: rec.id });
+  const next = ev.kind === "status" ? await guarded(db, "automation:repeat", () => repeatNext(db, rec), null, { detail: rec.id }) : null;
   const c = await context(db);
   if (next) c.log.push({ at: new Date().toISOString(), agent: "rules", kind: "action", text: `Repeating: next “${rec.title}” prepared`, record: next, section: rec.section } as any);
   if (c.settings.agents.rules === "off") { if (next) await save(c); return { matched: 0, next }; }
   const rules = (await getRules(db)).filter((r) => matchEvent(r, rec, ev));
+  const keyOf = (r: Rule) => `${r.id}|${rec.id}|${ev.kind === "created" ? "new" : ev.to}`;
+  const mine = await claim(c, rules.map((r) => ({ key: keyOf(r), repeat: null })));
   for (const r of rules) {
-    const key = `${r.id}|${rec.id}|${ev.kind === "created" ? "new" : ev.to}`;
-    if (c.fired[key]) continue; c.fired[key] = today();
-    for (const a of r.actions) await act(c, "rules", a, rec, ruleMode(c, r), `Rule “${r.name}”`);
+    if (!mine.has(keyOf(r))) continue;
+    for (const [i, a] of r.actions.entries()) await act(c, "rules", a, rec, ruleMode(c, r), `Rule “${r.name}”`, `rule:${keyOf(r)}:${i}`);
   }
-  if (rules.length) await flushMail(c, "AGRON Workspace: automatic update");
-  if (rules.length || next) await save(c);
-  return { matched: rules.length, next };
+  if (mine.size) await flushMail(c, "AGRON Workspace: automatic update");
+  if (mine.size || next || c.log.length) await save(c);
+  return { matched: mine.size, next };
 }
 
 /* ---------------- Agents ---------------- */
 async function rulesAgent(c: Ctx, recs: any[]) {
   // Date rules, plus a catch-up for status changes made outside the app (for example by another agent or an import)
-  const rules = (await getRules(c.db)).filter((r) => r.enabled); const t = today(); let n = 0;
-  for (const r of rules.filter((x) => x.on === "date")) for (const rec of recs) {
-    const fire = dateDue(r, rec, t); if (!fire) continue;
-    const key = `${r.id}|${rec.id}|${fire}`; if (c.fired[key]) continue; c.fired[key] = t; n++;
-    for (const a of r.actions) await act(c, "rules", a, rec, ruleMode(c, r), `Rule “${r.name}”`);
-  }
+  const rules = (await getRules(c.db)).filter((r) => r.enabled); const t = today();
+  const todo: { key: string; r: Rule; rec: any; why: string }[] = [];
+  for (const r of rules.filter((x) => x.on === "date")) for (const rec of recs) { const fire = dateDue(r, rec, t); if (fire) todo.push({ key: `${r.id}|${rec.id}|${fire}`, r, rec, why: `Rule “${r.name}”` }); }
   const since = new Date(Date.now() - 26 * 3600e3).toISOString();
   const { data: acts } = await c.db.from("activity").select("record_id,action,detail,created_at").in("action", ["status", "created"]).gte("created_at", since).limit(2000);
   const byId = new Map(recs.map((r) => [r.id, r]));
   for (const x of acts || []) {
     const rec = byId.get(x.record_id); if (!rec) continue;
     const ev: Ev = x.action === "created" ? { kind: "created" } : { kind: "status", from: x.detail?.from, to: x.detail?.to };
-    for (const r of rules.filter((rr) => rr.on !== "date" && matchEvent(rr, rec, ev))) {
-      const key = `${r.id}|${rec.id}|${ev.kind === "created" ? "new" : ev.to}`; if (c.fired[key]) continue; c.fired[key] = t; n++;
-      for (const a of r.actions) await act(c, "rules", a, rec, ruleMode(c, r), `Rule “${r.name}” (catch-up)`);
-    }
+    for (const r of rules.filter((rr) => rr.on !== "date" && matchEvent(rr, rec, ev))) todo.push({ key: `${r.id}|${rec.id}|${ev.kind === "created" ? "new" : ev.to}`, r, rec, why: `Rule “${r.name}” (catch-up)` });
   }
+  const mine = await claim(c, todo.map((x) => ({ key: x.key, repeat: null }))); let n = 0;
+  for (const x of todo) { if (!mine.has(x.key)) continue; mine.delete(x.key); n++; for (const [i, a] of x.r.actions.entries()) await act(c, "rules", a, x.rec, ruleMode(c, x.r), x.why, `rule:${x.key}:${i}`); }
   return `${n} rule run(s)`;
 }
 
@@ -282,9 +368,9 @@ async function deadlinesAgent(c: Ctx, recs: any[]) {
   const late = due.filter((x) => x.d <= -s.escalate_after);
   const nobody = due.filter((x) => x.d >= -1 && !PEOPLE_KEYS.some((k) => String(x.r.data?.[k] || "").trim()) && x.r.section !== "company.tasks");
   // Each item is raised once when it crosses the line, then again weekly while it stays open
-  const once = (k: string) => { const last = c.fired[k]; const wk = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10); if (last && last > wk) return false; c.fired[k] = today(); return true; };
-  for (const x of late.filter((x) => once(`late|${x.r.id}|${x.k}`))) tell(c, recipients(c, "leads", x.r), `<b>Overdue ${-x.d} days:</b> ${esc(x.r.title)} — ${esc(label(x.r.section))}${x.r.data?.owner ? ` (${esc(x.r.data.owner)})` : ""} — <a href="${recUrl(x.r)}">open</a>`);
-  for (const x of nobody.filter((x) => once(`nobody|${x.r.id}|${x.k}`))) tell(c, recipients(c, "leads", x.r), `<b>Nobody responsible</b>, ${x.d < 0 ? "overdue" : `due in ${x.d} days`}: ${esc(x.r.title)} — ${esc(label(x.r.section))} — <a href="${recUrl(x.r)}">open</a>`);
+  const mine = await claim(c, [...late.map((x) => ({ key: `late|${x.r.id}|${x.k}`, repeat: 7 })), ...nobody.map((x) => ({ key: `nobody|${x.r.id}|${x.k}`, repeat: 7 }))]);
+  for (const x of late.filter((x) => mine.has(`late|${x.r.id}|${x.k}`))) tell(c, recipients(c, "leads", x.r), `<b>Overdue ${-x.d} days:</b> ${esc(x.r.title)} — ${esc(label(x.r.section))}${x.r.data?.owner ? ` (${esc(x.r.data.owner)})` : ""} — <a href="${recUrl(x.r)}">open</a>`);
+  for (const x of nobody.filter((x) => mine.has(`nobody|${x.r.id}|${x.k}`))) tell(c, recipients(c, "leads", x.r), `<b>Nobody responsible</b>, ${x.d < 0 ? "overdue" : `due in ${x.d} days`}: ${esc(x.r.title)} — ${esc(label(x.r.section))} — <a href="${recUrl(x.r)}">open</a>`);
   return `${late.length} escalated, ${nobody.length} without owner`;
 }
 
@@ -295,12 +381,12 @@ async function complianceAgent(c: Ctx, recs: any[], mode: "auto" | "suggest") {
   let made = 0;
   for (const d of recs.filter((r) => r.section === "sales.pipeline" && ["Proposal", "Negotiation", "Won"].includes(r.status))) {
     const party = String(d.data?.client || d.title); if (has(party, d.id)) continue;
-    await act(c, "compliance", { type: "create", section: "security.screening", title: party, status: "Pending", link: "deal_ref", fields: { party, party_type: "Client", country: "{country}", date: "{today}" } }, d, mode, `Deal “${d.title}” is at ${d.status} without a screening`); made++;
+    await act(c, "compliance", { type: "create", section: "security.screening", title: party, status: "Pending", link: "deal_ref", fields: { party, party_type: "Client", country: "{country}", date: "{today}" } }, d, mode, `Deal “${d.title}” is at ${d.status} without a screening`, `screening:deal:${d.id}`); made++;
   }
   for (const [sec, type, st] of [["operations.vendors", "Vendor", ["Under review", "Approved"]], ["sales.partners", "Partner", ["Onboarding", "Active"]]] as const) {
     for (const v of recs.filter((r) => r.section === sec && (st as readonly string[]).includes(r.status))) {
       if (has(v.title)) continue;
-      await act(c, "compliance", { type: "create", section: "security.screening", title: v.title, status: "Pending", fields: { party: v.title, party_type: type, country: "{country}", date: "{today}" } }, v, mode, `${type} “${v.title}” is ${v.status} without a screening`); made++;
+      await act(c, "compliance", { type: "create", section: "security.screening", title: v.title, status: "Pending", fields: { party: v.title, party_type: type, country: "{country}", date: "{today}" } }, v, mode, `${type} “${v.title}” is ${v.status} without a screening`, `screening:party:${v.id}`); made++;
     }
   }
   // Automatic check against the US Consolidated Screening List
@@ -313,19 +399,21 @@ async function complianceAgent(c: Ctx, recs: any[], mode: "auto" | "suggest") {
       const j = await r.json(); const hits = (j.results || []).filter((x: any) => (x.score ?? 100) >= 90);
       const note = hits.length ? `Automatic CSL check ${today()}: ${hits.length} possible match(es): ${hits.map((h: any) => `${h.name} (${h.source})`).join("; ")}` : `Automatic CSL check ${today()}: no matches on the US Consolidated Screening List.`;
       const status = hits.length ? "Flagged" : mode === "auto" ? "Cleared" : s.status;
-      await c.db.from("records").update({ status, data: { ...s.data, csl_checked: today(), lists: "US Consolidated Screening List (data.trade.gov)", result: [s.data?.result, note].filter(Boolean).join("\n") } }).eq("id", s.id);
+      await patchRecord(c.db, s.id, (cur) => cur.data?.csl_checked ? null : { status, data: { ...cur.data, csl_checked: today(), lists: "US Consolidated Screening List (data.trade.gov)", result: [cur.data?.result, note].filter(Boolean).join("\n") } });
       await audit(c, "compliance", s, note); checked++;
       c.log.push({ at: new Date().toISOString(), agent: "compliance", kind: "action", text: `${s.title}: ${note}`, record: s.id, section: s.section });
       if (hits.length) tell(c, [...recipients(c, "role:security", s), ...recipients(c, "leads", s)], `<b style="color:#B4232F">Possible sanctions match:</b> ${esc(s.title)} — ${hits.length} hit(s). Work with this party is on hold until security decides. <a href="${recUrl(s)}">open</a>`);
       else if (mode !== "auto") tell(c, recipients(c, "role:security", s), `No CSL matches for ${esc(s.title)} — confirm and mark Cleared. <a href="${recUrl(s)}">open</a>`);
-    } catch (e: any) { c.log.push({ at: new Date().toISOString(), agent: "compliance", kind: "error", text: `${s.title}: ${e?.message || e}` }); }
+    } catch (e: any) { c.log.push({ at: new Date().toISOString(), agent: "compliance", kind: "error", text: `${s.title}: ${e?.message || e}` }); await reportError(c.db, "automation:csl", e, { detail: s.id }); }
   }
-  // Waiting too long, and blocked deals
+  // Waiting too long, and blocked deals (each raised once, then weekly)
   const wait = c.settings.thresholds.screening_wait;
-  const once = (k: string) => { const last = c.fired[k]; const wk = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10); if (last && last > wk) return false; c.fired[k] = today(); return true; };
-  for (const s of scr.filter((x) => x.status === "Pending" && (Date.now() - Date.parse(x.created_at)) / 864e5 > wait && once(`wait|${x.id}`))) tell(c, recipients(c, "role:security", s), `Screening waiting more than ${wait} days: ${esc(s.title)} — <a href="${recUrl(s)}">open</a>`);
+  const waiting = scr.filter((x) => x.status === "Pending" && (Date.now() - Date.parse(x.created_at)) / 864e5 > wait);
   const bad = new Set(scr.filter((s) => ["Flagged", "Escalated"].includes(s.status) && s.data?.deal_ref).map((s) => s.data.deal_ref));
-  for (const d of recs.filter((r) => r.section === "sales.pipeline" && bad.has(r.id) && ["Negotiation", "Won"].includes(r.status) && once(`blocked|${r.id}`))) tell(c, recipients(c, "leads", d), `<b style="color:#B4232F">Deal with a flagged screening:</b> ${esc(d.title)} (${esc(d.status)}). Stop until cleared. <a href="${recUrl(d)}">open</a>`);
+  const blocked = recs.filter((r) => r.section === "sales.pipeline" && bad.has(r.id) && ["Negotiation", "Won"].includes(r.status));
+  const mine = await claim(c, [...waiting.map((x) => ({ key: `wait|${x.id}`, repeat: 7 })), ...blocked.map((x) => ({ key: `blocked|${x.id}`, repeat: 7 }))]);
+  for (const s of waiting.filter((x) => mine.has(`wait|${x.id}`))) tell(c, recipients(c, "role:security", s), `Screening waiting more than ${wait} days: ${esc(s.title)} — <a href="${recUrl(s)}">open</a>`);
+  for (const d of blocked.filter((x) => mine.has(`blocked|${x.id}`))) tell(c, recipients(c, "leads", d), `<b style="color:#B4232F">Deal with a flagged screening:</b> ${esc(d.title)} (${esc(d.status)}). Stop until cleared. <a href="${recUrl(d)}">open</a>`);
   return `${made} screening(s) prepared, ${checked} checked automatically${key ? "" : " (CSL key not set)"}`;
 }
 
@@ -335,10 +423,10 @@ async function qualityAgent(c: Ctx, recs: any[], mode: "auto" | "suggest") {
   const fixable = issues.filter((i) => i.fix);
   if (fixable.length) {
     if (mode === "auto") {
-      for (const i of fixable) { const r = recs.find((x) => x.id === i.id); if (!r) continue; const data = { ...r.data }; for (const [k, v] of Object.entries(i.fix!)) { if (v === null) delete data[k]; else data[k] = v; } await c.db.from("records").update({ data }).eq("id", r.id); }
+      for (const i of fixable) await patchRecord(c.db, i.id, (cur) => { const data = { ...cur.data }; for (const [k, v] of Object.entries(i.fix!)) { if (v === null) delete data[k]; else data[k] = v; } return { data }; }).catch((e) => reportError(c.db, "automation:quality", e, { detail: i.id }));
       c.log.push({ at: new Date().toISOString(), agent: "quality", kind: "action", text: `Fixed ${fixable.length} link(s)` });
-    } else if (!(await getQueue(c.db)).some((q) => q.status === "pending" && q.agent === "quality")) {
-      c.queue.push({ id: uid(), at: new Date().toISOString(), agent: "quality", title: `Fix ${fixable.length} link(s) between records`, detail: fixable.slice(0, 8).map((i) => `${i.title}: ${i.detail}`).join("; "), action: { type: "set", field: "_quality_fix", value: "all" }, status: "pending" });
+    } else {
+      c.queue.push({ agent: "quality", title: `Fix ${fixable.length} link(s) between records`, detail: fixable.slice(0, 8).map((i) => `${i.title}: ${i.detail}`).join("; "), action: { type: "set", field: "_quality_fix", value: "all" }, dedupe_key: "quality|fix-links" });
     }
   }
   const counts: Record<string, number> = {}; for (const i of issues) counts[i.kind] = (counts[i.kind] || 0) + 1;
@@ -348,7 +436,7 @@ async function qualityAgent(c: Ctx, recs: any[], mode: "auto" | "suggest") {
 }
 export async function applyQualityFixes(db: any) {
   const recs = await allRecords(db); const issues = qualityIssues(recs, SECS, { staleDays: 9999 }).filter((i) => i.fix); let n = 0;
-  for (const i of issues) { const r = recs.find((x) => x.id === i.id); if (!r) continue; const data = { ...r.data }; for (const [k, v] of Object.entries(i.fix!)) { if (v === null) delete data[k]; else data[k] = v; } const { error } = await db.from("records").update({ data }).eq("id", r.id); if (!error) n++; }
+  for (const i of issues) { const ok = await patchRecord(db, i.id, (cur) => { const data = { ...cur.data }; for (const [k, v] of Object.entries(i.fix!)) { if (v === null) delete data[k]; else data[k] = v; } return { data }; }).catch(() => null); if (ok) n++; }
   return n;
 }
 
@@ -408,12 +496,12 @@ const COLOR = { bad: "#B4232F", warn: "#A15C00", info: "#2A3440" };
 async function deptAgent(c: Ctx, recs: any[], agent: AgentId, mode: "auto" | "suggest") {
   const finder = FINDERS[agent]; if (!finder) return "no checks";
   const t = today(); const found = finder(recs, t, c.settings.thresholds); let told = 0, acted = 0; const fresh: Finding[] = [];
+  const mine = await claim(c, found.map((x) => ({ key: x.key, repeat: x.repeat ?? 7 })));
   for (const x of found) {
-    const last = c.fired[x.key]; const isNew = !last || last <= new Date(Date.now() - (x.repeat ?? 7) * 864e5).toISOString().slice(0, 10);
-    if (!isNew) continue; c.fired[x.key] = t; fresh.push(x);
+    if (!mine.has(x.key)) continue; mine.delete(x.key); fresh.push(x);
     const ppl = [...new Map(x.who.flatMap((w) => recipients(c, w, x.rec)).map((p) => [p.email, p])).values()];
     if (ppl.length) { tell(c, ppl, `<span style="color:${COLOR[x.level]}">${x.level === "bad" ? "<b>" : ""}${esc(x.text)}${x.level === "bad" ? "</b>" : ""}</span> — <a href="${recUrl(x.rec)}">open</a>`); told++; }
-    if (x.action) { await act(c, agent, x.action, x.rec, mode, x.why || x.text); acted++; }
+    if (x.action) { await act(c, agent, x.action, x.rec, mode, x.why || x.text, `finding:${x.key}:${t}`, `finding|${x.key}|${describeAction(x.action, x.rec)}`); acted++; }
   }
   if (agent === "sales") acted += await salesDrafts(c, recs, fresh);
   // What the agent sees now, for the department overview (titles only; access is checked when it is shown)
@@ -429,7 +517,7 @@ async function salesDrafts(c: Ctx, recs: any[], fresh: Finding[]) {
     const kind = x.key.startsWith("sal-valid") ? "proposal" : "followup";
     const d = await draftEmail(c.db, kind, { client: deal.data?.client || deal.title, deal: deal.title, stage: deal.status, configuration: deal.data?.config, country: deal.data?.country, segment: deal.data?.segment, last_activity: deal.updated_at?.slice(0, 10), valid_until: x.rec.data?.valid_until, notes: String(deal.data?.notes || "").slice(0, 1500) });
     if (!d) continue;
-    await act(c, "sales", { type: "email", to_field: "", to, subject: d.subject, body: d.body }, x.rec, "suggest", `AI draft (${d.lang}) — ${kind === "proposal" ? "proposal expiring" : "deal without movement"}`); n++;
+    await act(c, "sales", { type: "email", to_field: "", to, subject: d.subject, body: d.body }, x.rec, "suggest", `AI draft (${d.lang}) — ${kind === "proposal" ? "proposal expiring" : "deal without movement"}`, undefined, `sales-draft|${x.key}`); n++;
   }
   return n;
 }
@@ -452,12 +540,12 @@ async function intakeAgent(c: Ctx, mode: "auto" | "suggest") {
   if (r.skipped) return r.skipped;
   for (const it of r.items) {
     const a: Action = { type: "file", section: it.section, title: it.title, status: it.status, data: it.data, controlled: it.controlled, files: it.files, from: it.from, subject: it.subject, summary: it.summary };
-    const now = new Date().toISOString();
+    const now = new Date().toISOString(); const key = `intake|${r.validity || ""}|${it.uid}`;
     if (mode === "auto") {
-      try { const res = await execute(c, "intake", a, { id: "", section: it.section, title: it.title, data: {} }); c.log.push({ at: now, agent: "intake", kind: "action", text: `${describeAction(a, null)} → ${res}`, section: it.section }); }
-      catch (e: any) { c.log.push({ at: now, agent: "intake", kind: "error", text: `${it.subject}: ${e?.message || e}` }); }
+      try { const res = await execute(c, "intake", a, { id: "", section: it.section, title: it.title, data: {} }, { idem: key }); c.log.push({ at: now, agent: "intake", kind: "action", text: `${describeAction(a, null)} → ${res}`, section: it.section }); }
+      catch (e: any) { c.log.push({ at: now, agent: "intake", kind: "error", text: `${it.subject}: ${e?.message || e}` }); await reportError(c.db, "automation:intake", e, { detail: it.subject }); }
     } else {
-      c.queue.push({ id: uid(), at: now, agent: "intake", title: describeAction(a, null), detail: [it.summary, it.reason].filter(Boolean).join(" — "), section: it.section, action: a, status: "pending", controlled: it.controlled });
+      c.queue.push({ agent: "intake", title: describeAction(a, null), detail: [it.summary, it.reason].filter(Boolean).join(" — "), section: it.section, action: a, controlled: it.controlled, dedupe_key: key });
       c.log.push({ at: now, agent: "intake", kind: "queued", text: describeAction(a, null), section: it.section });
     }
   }
@@ -466,7 +554,7 @@ async function intakeAgent(c: Ctx, mode: "auto" | "suggest") {
     const d = await draftEmail(c.db, "reply", { from: it.from, subject: it.subject, email: it.text });
     if (!d) continue;
     const a: Action = { type: "email", to_field: "", to: it.from, subject: d.subject, body: d.body };
-    c.queue.push({ id: uid(), at: new Date().toISOString(), agent: "intake", title: describeAction(a, null), detail: `AI reply draft (${d.lang}) to a new inquiry: ${it.subject}`, section: "marketing.leads", action: a, status: "pending" });
+    c.queue.push({ agent: "intake", title: describeAction(a, null), detail: `AI reply draft (${d.lang}) to a new inquiry: ${it.subject}`, section: "marketing.leads", action: a, dedupe_key: `intake-reply|${r.validity || ""}|${it.uid}` });
   }
   if (mode !== "auto" && r.items.length) for (const p of c.profiles.filter((x) => ["owner", "admin"].includes(x.role))) tell(c, [p], `${r.items.length} new email(s) at info@agron1.com are prepared for filing — <a href="${SITE}/admin/system?tab=auto">approve</a>`);
   return `${r.items.length} email(s) ${mode === "auto" ? "filed" : "prepared"}, ${r.ignored.length} skipped (newsletters, auto-replies, own mail)`;
@@ -494,46 +582,83 @@ export async function runAgents(db: any, opts: { only?: AgentId; manual?: boolea
     try {
       out[a] = a === "intake" ? await intakeAgent(c, mode) : DEPT_AGENTS.includes(a) ? await deptAgent(c, recs, a, mode) : a === "rules" ? await rulesAgent(c, recs) : a === "deadlines" ? await deadlinesAgent(c, recs) : a === "compliance" ? await complianceAgent(c, recs, mode) : a === "quality" ? await qualityAgent(c, recs, mode) : await briefAgent(c, recs, !!opts.manual);
       c.log.push({ at: new Date().toISOString(), agent: a, kind: "run", text: out[a] });
-    } catch (e: any) { out[a] = `error: ${e?.message || e}`; c.log.push({ at: new Date().toISOString(), agent: a, kind: "error", text: String(e?.message || e) }); }
+    } catch (e: any) { out[a] = `error: ${e?.message || e}`; c.log.push({ at: new Date().toISOString(), agent: a, kind: "error", text: String(e?.message || e) }); await reportError(db, `agent:${a}`, e); }
   }
   out.emails = String(await flushMail(c, "AGRON Workspace: what the agents found today"));
-  if (c.queue.length) { // new proposals wait for a decision
-    const admins = c.profiles.filter((p) => ["owner", "admin"].includes(p.role)).map((p) => p.id);
-    await pushTo(db, admins, (l) => ({ title: PUSH.queue_t[l], body: PUSH.queue_b[l].replace("{n}", String(c.queue.length)), url: "/admin/system?tab=auto", tag: "queue" })).catch(() => 0);
-  }
+  const proposals = c.queue.length;
   await save(c);
+  if (proposals) { // new proposals wait for a decision
+    const admins = c.profiles.filter((p) => ["owner", "admin"].includes(p.role)).map((p) => p.id);
+    await pushTo(db, admins, (l) => ({ title: PUSH.queue_t[l], body: PUSH.queue_b[l].replace("{n}", String(proposals)), url: "/admin/system?tab=auto", tag: "queue" })).catch((e) => reportError(db, "automation:push", e));
+  }
   await saveState(db, "agents", { at: new Date().toISOString(), result: out, manual: !!opts.manual });
   return out;
 }
 
-/** Approve or reject a proposal from the queue. */
+/** Runs a claimed queue item and records the outcome; a passing failure is retried with back-off, then dead-lettered. */
+async function executeQueued(c: Ctx, row: Row): Promise<Row> {
+  const db = c.db; const now = new Date().toISOString(); const a = row.action; const idem = `queue:${row.id}`;
+  let ok = false, retry = false, result = "", error = "";
+  try {
+    if (a.type === "set" && a.field === "_quality_fix") result = `fixed ${await applyQualityFixes(db)}`;
+    else if (a.type === "file") result = await execute(c, row.agent, a, { id: "", section: a.section, title: a.title, data: {} }, { idem, queueId: row.id });
+    else if (!row.record_id && a.type === "email" && a.to) result = await execute(c, row.agent, a, { id: "", section: row.section || "", title: a.subject, data: {} }, { idem, queueId: row.id });
+    else {
+      const { data: rec } = await db.from("records").select("id,section,title,status,data,controlled,created_at,updated_at,version").eq("id", row.record_id).maybeSingle();
+      if (!rec) throw new Error("The record no longer exists");
+      result = await execute(c, row.agent, a, rec, { idem, queueId: row.id });
+    }
+    ok = true;
+  } catch (e: any) { error = String(e?.message || e).slice(0, 1000); retry = e instanceof Retry; }
+  const { data: fin, error: fe } = await db.rpc("automation_finish", { p_id: row.id, p_exec: row.exec_id, p_ok: ok, p_result: result || null, p_error: error || null, p_retry: retry });
+  if (fe) await reportError(db, "automation:finish", fe, { detail: row.id });
+  const done: Row = fin?.[0] || { ...row, status: ok ? "completed" : "failed", result, last_error: error };
+  c.log.push({ at: now, agent: row.agent, kind: ok ? "decision" : "error", text: ok ? `Done: ${row.title} → ${result}` : `${row.title}: ${error}${done.status === "retrying" ? " (will retry)" : done.status === "dead" ? " (gave up)" : ""}`, record: row.record_id || undefined, section: row.section || undefined });
+  if (done.status === "dead") await alertAdmins(db, { key: `dead|${row.id}`, subject: "AGRON Workspace: an automatic action gave up", lines: [`${row.title}`, `Tried ${done.attempts} times. Last error: ${error}`], repeatDays: 3650 }).catch(() => 0);
+  return done;
+}
+
+/** Approve or reject a proposal from the queue. Only one decision can ever win; the action runs once. */
 export async function decide(db: any, id: string, approve: boolean, by: { id: string; us_person: boolean; email: string }, edit?: { subject?: string; body?: string }) {
-  const q = await getQueue(db); const item = q.find((x) => x.id === id);
-  if (!item || item.status !== "pending") throw new Error("Already decided or not found");
-  if (approve && edit && item.action.type === "email") { // the approver corrected the draft
-    if (typeof edit.subject === "string" && edit.subject.trim()) item.action.subject = edit.subject.trim().slice(0, 200);
-    if (typeof edit.body === "string" && edit.body.trim()) item.action.body = edit.body.trim().slice(0, 6000);
+  const { data: cur } = await db.from("automation_queue").select("*").eq("id", id).maybeSingle();
+  if (!cur || cur.status !== "pending") throw new Error("Already decided or not found");
+  if (cur.controlled && !by.us_person) throw new Error("US-persons-only record: a US person must decide");
+  let action: any = null;
+  if (approve && edit && cur.action?.type === "email") { // the approver corrected the draft
+    action = { ...cur.action };
+    if (typeof edit.subject === "string" && edit.subject.trim()) action.subject = edit.subject.trim().slice(0, 200);
+    if (typeof edit.body === "string" && edit.body.trim()) action.body = edit.body.trim().slice(0, 6000);
   }
-  if (item.controlled && !by.us_person) throw new Error("US-persons-only record: a US person must decide");
-  const now = new Date().toISOString(); item.decided_by = by.email; item.decided_at = now;
-  const c = await context(db);
-  if (!approve) { item.status = "rejected"; if (item.action.type === "file" && item.action.files?.length) await db.storage.from("files").remove(item.action.files.filter((p) => p.startsWith("_intake/mail/"))).catch(() => {}); c.log.push({ at: now, agent: item.agent, kind: "decision", text: `Rejected by ${by.email}: ${item.title}` }); }
-  else {
-    try {
-      if (item.action.type === "set" && item.action.field === "_quality_fix") item.result = `fixed ${await applyQualityFixes(db)}`;
-      else if (item.action.type === "file") item.result = await execute(c, item.agent, item.action, { id: "", section: item.action.section, title: item.action.title, data: {} });
-      else if (!item.record_id && item.action.type === "email" && item.action.to) item.result = await execute(c, item.agent, item.action, { id: "", section: item.section || "", title: item.action.subject, data: {} });
-      else {
-        const { data: rec } = await db.from("records").select("id,section,title,status,data,controlled,created_at,updated_at").eq("id", item.record_id).single();
-        if (!rec) throw new Error("The record no longer exists");
-        item.result = await execute(c, item.agent, item.action, rec);
-      }
-      item.status = "approved"; c.log.push({ at: now, agent: item.agent, kind: "decision", text: `Approved by ${by.email}: ${item.title} → ${item.result}` });
-    } catch (e: any) { item.status = "failed"; item.result = e?.message || String(e); c.log.push({ at: now, agent: item.agent, kind: "error", text: `${item.title}: ${item.result}` }); }
+  const { data: rows, error } = await db.rpc("automation_decide", { p_id: id, p_approve: approve, p_by: by.email, p_us_person: !!by.us_person, p_action: action });
+  if (error) throw new Error(error.message);
+  const row: Row | undefined = rows?.[0]; if (!row) throw new Error("Already decided or not found");
+  const c = await context(db); const now = new Date().toISOString(); let out: Row = row;
+  if (!approve) {
+    if (row.action.type === "file" && (row.action as any).files?.length) await db.storage.from("files").remove((row.action as any).files.filter((p: string) => p.startsWith("_intake/mail/"))).catch((e: any) => reportError(db, "automation:intake-files", e));
+    c.log.push({ at: now, agent: row.agent, kind: "decision", text: `Rejected by ${by.email}: ${row.title}` });
+  } else {
+    c.log.push({ at: now, agent: row.agent, kind: "decision", text: `Approved by ${by.email}: ${row.title}` });
+    out = await executeQueued(c, row);
   }
-  await saveState(db, "queue", q);
-  await flushMail(c, "AGRON Workspace: automatic update"); await addLog(db, c.log);
-  return item;
+  await flushMail(c, "AGRON Workspace: automatic update"); await save(c);
+  return toItem(out);
+}
+
+/** Scheduled every 15 minutes: retries whose time has come, and work a stopped worker left half-way. */
+export async function runRetries(db: any) {
+  const stuck = await db.rpc("outbound_mark_stuck", { p_minutes: 10 }).then((r: any) => r.data || 0, () => 0);
+  const { data: rows, error } = await db.rpc("automation_claim_due", { p_limit: 20, p_stale_minutes: 15 });
+  if (error) throw new Error(error.message);
+  const c = await context(db); const res: Record<string, number> = { claimed: (rows || []).length, completed: 0, retrying: 0, dead: 0, failed: 0, uncertain_marked: stuck };
+  for (const r of rows || []) { const d = await executeQueued(c, r); res[d.status] = (res[d.status] || 0) + 1; }
+  if (stuck) await alertAdmins(db, { key: `uncertain|${today()}`, subject: "AGRON Workspace: e-mail delivery needs a check", lines: [`${stuck} e-mail(s) to outside addresses may or may not have been delivered.`, "Check the Sent folder of info@agron1.com, then mark each one in Operations."] }).catch(() => 0);
+  await flushMail(c, "AGRON Workspace: automatic update"); await save(c);
+  return res;
+}
+/** An administrator sends a failed or dead item round again. */
+export async function requeue(db: any, id: string, by: string) {
+  const { data, error } = await db.rpc("automation_requeue", { p_id: id, p_by: by }); if (error) throw new Error(error.message);
+  if (!data?.length) throw new Error("Only failed or dead items can be retried"); return toItem(data[0]);
 }
 
 /** Which keys are set (never their values) and what each one unlocks. */
@@ -544,7 +669,8 @@ export function integrations() {
     { key: "CRON_SECRET", on: has("CRON_SECRET"), what: "Daily schedule (agents 10:00 UTC, digest 11:00 UTC)", need: true },
     { key: "SMTP_PASS", on: has("SMTP_PASS"), what: "Emails from info@agron1.com", need: true },
     { key: "ANTHROPIC_API_KEY", on: has("ANTHROPIC_API_KEY"), what: "AI answers, texts, summaries, Monday brief conclusions", need: true },
-    { key: "BACKUP_PASSPHRASE", on: has("BACKUP_PASSPHRASE"), what: "Encrypted weekly backup sent by email", need: false },
+    { key: "BACKUP_PASSPHRASE", on: has("BACKUP_PASSPHRASE"), what: "Encryption of every backup (no backup is written without it)", need: true },
+    { key: "BACKUP_S3_ENDPOINT", on: has("BACKUP_S3_ENDPOINT") && has("BACKUP_S3_BUCKET") && has("BACKUP_S3_KEY_ID") && has("BACKUP_S3_SECRET"), what: "Off-site backup store (S3-compatible: BACKUP_S3_ENDPOINT, _BUCKET, _REGION, _KEY_ID, _SECRET)", need: true },
     { key: "CSL_API_KEY", on: has("CSL_API_KEY"), what: "Automatic sanctions screening (Compliance agent)", need: false },
     { key: "YOUTUBE_API_KEY", on: has("YOUTUBE_API_KEY"), what: "YouTube statistics in Marketing → Channels", need: false },
     { key: "GITHUB_TOKEN", on: has("GITHUB_TOKEN"), what: "Private repository facts in Technical → Systems", need: false },

@@ -1,11 +1,13 @@
-import { sweep } from "@/lib/server/translate";
-import { purgeOld } from "@/lib/server/trash";
-import { slaJob } from "@/lib/server/sla";
-import { syncAll } from "@/lib/server/gcal";
-import { adminClient, currentProfile } from "@/lib/server/supabase";
-import { BUCKET, collectData, listFiles, pack } from "@/lib/server/backup";
-import { backupJob, monitorJob, opsStatus, reportsJob } from "@/lib/server/ops";
-import { runAgents } from "@/lib/server/automation";
+import { adminClient } from "@/lib/server/supabase";
+import { requireUser } from "@/lib/server/authz";
+import { collectData, listFiles, pack, listBackups } from "@/lib/server/backup";
+import { opsStatus, operationsChecks, monitorJob } from "@/lib/server/ops";
+import { runJob, jobHealth } from "@/lib/server/jobs";
+import { JOBS_FNS } from "@/lib/server/schedule";
+import { requeue } from "@/lib/server/automation";
+import { resolveDelivery } from "@/lib/server/outbound";
+import { s3Config, presignGet } from "@/lib/server/s3";
+import { jobDef, slotOf } from "@/lib/jobs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,42 +15,56 @@ export const maxDuration = 60;
 
 /**
  * Company operations.
- * GET  ?job=backup|monitor|reports|agents|intake|translate|trash|calendar|sla  — scheduled run (Authorization: Bearer CRON_SECRET)
- * POST status | backup | monitor | reports  — run now from Administration → System (owner; status also admin)
- * POST data   → gzip JSON of all data for a local copy (owner; export-controlled records only for a US-person owner)
- * POST files  → list of stored files with short-lived download links, for the local copy (owner)
- * POST link {name} → download link for an automatic backup (owner)
- * POST restore {records, comments} → puts back records and comments that no longer exist; never overwrites (owner)
+ * GET  ?job=<id>  — one scheduled job now (Authorization: Bearer CRON_SECRET); same lock and history as the scheduler
+ * POST (owner/administrator, with the second factor once it is required):
+ *   status · ops (jobs, missed runs, dead letters, deliveries to check, problems)
+ *   run {job} · revive {job, slot} · requeue {id} · delivery {id, arrived}
+ *   backup | monitor | reports (= run) · data · files · link {name} · restore {records, comments} (owner)
  */
 export async function GET(req: Request) {
   const s = process.env.CRON_SECRET;
   if (!s || req.headers.get("authorization") !== `Bearer ${s}`) return new Response("Not allowed", { status: 401 });
-  const job = new URL(req.url).searchParams.get("job"); const db = adminClient();
-  try {
-    if (job === "backup") return Response.json(await backupJob(db));
-    if (job === "monitor") return Response.json(await monitorJob(db));
-    if (job === "reports") return Response.json(await reportsJob(db));
-    if (job === "agents") return Response.json(await runAgents(db));
-    if (job === "intake") return Response.json(await runAgents(db, { only: "intake", manual: true }));
-    if (job === "translate") return Response.json(await sweep(db, 50000));
-    if (job === "trash") return Response.json(await purgeOld(db));
-    if (job === "sla") return Response.json(await slaJob(db));
-    if (job === "calendar") return Response.json(await syncAll(db, 50000));
-  } catch (e: any) { return new Response(e?.message || "Failed", { status: 500 }); }
-  return new Response("Unknown job", { status: 400 });
+  const job = new URL(req.url).searchParams.get("job") || ""; const def = jobDef(job);
+  if (!def || !JOBS_FNS[job]) return new Response("Unknown job", { status: 400 });
+  const r = await runJob(adminClient(), job, "cron-job", JOBS_FNS[job], { slot: slotOf(def, new Date()) });
+  return Response.json(r, { status: r.status === "failed" ? 500 : 200 });
 }
 
 export async function POST(req: Request) {
-  const me = await currentProfile();
-  if (!me || !["owner", "admin"].includes(me.role)) return new Response("Only owners and administrators", { status: 403 });
+  const g = await requireUser("admin"); if (g instanceof Response) return g; const me = g.me;
   const b = await req.json().catch(() => ({}));
   const db = adminClient();
-  if (b.action === "status") return Response.json(await opsStatus(db));
-  if (me.role !== "owner") return new Response("Only the owner", { status: 403 });
   try {
-    if (b.action === "backup") return Response.json(await backupJob(db));
-    if (b.action === "monitor") return Response.json(await monitorJob(db, { alwaysEmail: !!b.email }));
-    if (b.action === "reports") return Response.json(await reportsJob(db, /^\d{4}-\d{2}$/.test(b.period || "") ? b.period : undefined));
+    if (b.action === "status") return Response.json(await opsStatus(db));
+    if (b.action === "ops") {
+      const [health, problems, dead, deliveries, retrying, backups] = await Promise.all([
+        jobHealth(db), operationsChecks(db),
+        db.from("automation_queue").select("id,agent,title,status,attempts,last_error,finished_at,updated_at,controlled").in("status", ["dead", "failed"]).order("updated_at", { ascending: false }).limit(50).then((r: any) => r.data || []),
+        db.from("outbound_messages").select("id,to_addr,subject,status,attempts,last_error,updated_at,queue_id").in("status", ["uncertain", "failed", "sending"]).order("updated_at", { ascending: false }).limit(50).then((r: any) => r.data || []),
+        db.from("automation_queue").select("id,agent,title,status,attempts,next_attempt_at,last_error").in("status", ["retrying", "processing"]).order("updated_at", { ascending: false }).limit(50).then((r: any) => r.data || []),
+        listBackups(db).catch(() => []),
+      ]);
+      const hide = (x: any) => (x.controlled && !me.us_person ? { ...x, title: "US-persons-only record", last_error: "Details hidden" } : x);
+      return Response.json({ ...health, problems, dead: dead.map(hide), deliveries: deliveries.map((d: any) => ({ ...d, to_addr: d.to_addr.replace(/^(.).*(@.*)$/, "$1…$2") })), retrying, backups: backups.slice(0, 20), offsite: !!s3Config(), passphrase: !!process.env.BACKUP_PASSPHRASE });
+    }
+    const run = (job: string) => JOBS_FNS[job] ? runJob(db, job, `manual:${me.email}`, JOBS_FNS[job]) : Promise.resolve({ job, status: "unknown" });
+    if (b.action === "run") return Response.json(await run(String(b.job || "")));
+    if (b.action === "backup" || b.action === "monitor" || b.action === "reports") {
+      if (me.role !== "owner") return new Response("Only the owner", { status: 403 });
+      if (b.action === "monitor") return Response.json(await runJob(db, "monitor", `manual:${me.email}`, () => monitorJob(db, { alwaysEmail: !!b.email })));
+      return Response.json(await run(b.action));
+    }
+    if (b.action === "revive") { const { data, error } = await db.rpc("job_revive", { p_job: String(b.job || ""), p_slot: b.slot ?? null }); if (error) throw new Error(error.message); return Response.json({ cleared: data }); }
+    if (b.action === "requeue") return Response.json(await requeue(db, String(b.id || ""), me.email));
+    if (b.action === "delivery") {
+      const d = await resolveDelivery(db, String(b.id || ""), !!b.arrived, me.email);
+      if (d.queue_id) {
+        if (b.arrived) await db.from("automation_queue").update({ status: "completed", result: `delivery confirmed by ${me.email}`, last_error: null, finished_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", d.queue_id).in("status", ["failed", "dead"]);
+        else await requeue(db, d.queue_id, me.email).catch(() => null); // one more send, through the same delivery record
+      }
+      return Response.json({ ok: true });
+    }
+    if (me.role !== "owner") return new Response("Only the owner", { status: 403 });
     if (b.action === "data") {
       const data = await collectData(db, { controlled: !!me.us_person });
       return new Response(new Uint8Array(pack(data)), { headers: { "Content-Type": "application/gzip", "Cache-Control": "no-store", "x-controlled": String(!!me.us_person) } });
@@ -67,8 +83,9 @@ export async function POST(req: Request) {
       return Response.json(out);
     }
     if (b.action === "link") {
-      if (!/^auto\/[\w.-]+$/.test(String(b.name || ""))) return new Response("Bad name", { status: 400 });
-      const { data, error } = await db.storage.from(BUCKET).createSignedUrl(b.name, 600, { download: true });
+      if (!/^db\/AGRON_Workspace_[\w.-]+\.agronbackup$/.test(String(b.name || ""))) return new Response("Bad name", { status: 400 });
+      const c = s3Config(); if (c) return Response.json({ url: presignGet(c, b.name, 600) });
+      const { data, error } = await db.storage.from("backups").createSignedUrl(`v3/${b.name}`, 600, { download: true });
       if (error) return new Response(error.message, { status: 404 });
       return Response.json({ url: data.signedUrl });
     }

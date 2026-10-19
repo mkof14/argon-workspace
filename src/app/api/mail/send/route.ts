@@ -1,5 +1,6 @@
 import nodemailer from "nodemailer";
 import { currentProfile, userClient } from "@/lib/server/supabase";
+import { limit } from "@/lib/server/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,6 +18,7 @@ export async function GET() {
 export async function POST(req: Request) {
   const me = await currentProfile();
   if (!me || !INTERNAL.includes(me.role)) return new Response("Not allowed", { status: 403 });
+  { const lim = await limit(`mailsend:${me.id}`, 20, 60); if (lim) return lim; }
   if (!configured()) return new Response("SMTP is not configured", { status: 501 });
 
   const b = await req.json();

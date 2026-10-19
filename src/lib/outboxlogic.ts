@@ -2,19 +2,27 @@
 // Pure queue logic (tested); the browser storage lives in lib/outbox.ts.
 
 export type OutItem =
-  | { id: string; kind: "save"; at: string; user: string; rec: Record<string, any>; error?: string }
+  | { id: string; kind: "save"; at: string; user: string; rec: Record<string, any>; error?: string; base?: Record<string, any> | null; conflict?: { theirs: Record<string, any>; fields: string[] } }
   | { id: string; kind: "comment"; at: string; user: string; record_id: string; body: string; error?: string }
   | { id: string; kind: "upload"; at: string; user: string; prefix: string; name: string; type: string; file: Blob; error?: string };
 
 export const isTemp = (id: any) => typeof id === "string" && id.startsWith("off-");
 
 /** Adds a record save. A record created offline and changed again stays one item; repeated changes of one record merge. */
-export function enqueueSave(q: OutItem[], rec: Record<string, any>, at: string, user: string, newId: () => string): { q: OutItem[]; id: string } {
+export function enqueueSave(q: OutItem[], rec: Record<string, any>, at: string, user: string, newId: () => string, base?: Record<string, any> | null): { q: OutItem[]; id: string } {
   const id = rec.id || `off-${newId()}`; const full: Record<string, any> = { ...rec, id };
   const i = q.findIndex((x) => x.kind === "save" && x.rec.id === id && !x.error);
-  if (i >= 0) { const old = q[i] as Extract<OutItem, { kind: "save" }>; const merged = { ...old.rec, ...full, data: { ...(old.rec.data || {}), ...(full.data || {}) } }; return { q: q.map((x, k) => (k === i ? { ...old, at, rec: merged } : x)), id }; }
-  return { q: [...q, { id: `q-${newId()}`, kind: "save", at, user, rec: full }], id };
+  // the version the first offline change started from stays: replay checks it, so a newer server copy is never overwritten
+  if (i >= 0) { const old = q[i] as Extract<OutItem, { kind: "save" }>; const merged = { ...old.rec, ...full, version: old.rec.version ?? full.version, data: { ...(old.rec.data || {}), ...(full.data || {}) } }; return { q: q.map((x, k) => (k === i ? { ...old, at, rec: merged } : x)), id }; }
+  return { q: [...q, { id: `q-${newId()}`, kind: "save", at, user, rec: full, base: base || null }], id };
 }
+
+/** Saving was refused because someone saved the record after it was opened. `theirs` = the copy in the database now. */
+export class ConflictError extends Error {
+  theirs: Record<string, any>;
+  constructor(theirs: Record<string, any>, msg = "Someone changed this record after you opened it") { super(msg); this.name = "ConflictError"; this.theirs = theirs; }
+}
+export const isConflict = (e: any) => e?.name === "ConflictError" || e instanceof ConflictError;
 
 /** After a temporary record got its real id, later items point to the real one. */
 export function remap(q: OutItem[], from: string, to: string): OutItem[] {

@@ -1,19 +1,21 @@
 /** @type {import('next').NextConfig} */
 const supabase = "https://*.supabase.co";
+// a non-Supabase-cloud project URL (the isolated test stack) is allowed too
+const own = (() => { try { const u = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL || ""); return u.hostname.endsWith(".supabase.co") ? "" : u.origin; } catch { return ""; } })();
 const csp = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self' data:",
-  `img-src 'self' data: blob: https://workspace.agron1.com ${supabase}`,
+  `img-src 'self' data: blob: https://workspace.agron1.com ${supabase}${own ? ` ${own}` : ""}`,
   `media-src 'self' blob: ${supabase}`,
-  `connect-src 'self' ${supabase} wss://*.supabase.co`,
-  `frame-src 'self' blob: data: ${supabase}`,
+  `connect-src 'self' ${supabase} wss://*.supabase.co${own ? ` ${own}` : ""}`,
+  `frame-src 'self' blob: data: ${supabase}${own ? ` ${own}` : ""}`,
   "frame-ancestors 'none'",
   "form-action 'self'",
   "base-uri 'self'",
   "object-src 'none'",
-  "upgrade-insecure-requests",
+  ...(own.startsWith("http://") ? [] : ["upgrade-insecure-requests"]),
 ].join("; ");
 
 const security = [
@@ -29,6 +31,8 @@ const security = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // the isolated test stack builds into its own folder, so the demo and production builds are untouched
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   // The user guide PDFs are read by /api/guide (signed-in staff only), so they ship with that function
   outputFileTracingIncludes: { "/api/guide": ["./guide/*.pdf", "./guide/manifest.json"] },
   poweredByHeader: false,

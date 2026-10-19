@@ -3,7 +3,12 @@ import { checkSystems } from "./systems";
 import { scan, type Check } from "./domainscan";
 import { sendMail } from "./mailer";
 import { localizeMail } from "./translate";
-import { listBackups, readState, runBackup, saveState } from "./backup";
+import { listBackups, runBackup, backupStore, BackupConfigError } from "./backup";
+import { readState, saveState } from "./state";
+import { jobHealth } from "./jobs";
+import { alertAdmins } from "./alerts";
+import { reportError } from "./errors";
+import { s3Config } from "./s3";
 import { renderEmail, SITE } from "@/lib/mail";
 import { departmentReport } from "@/lib/reports";
 import { prevMonth, thisMonth } from "@/lib/channels";
@@ -22,17 +27,16 @@ async function mailTo(db: any, p: { email: string; lang?: string }, m: { subject
 }
 
 /* ---------- Backup ---------- */
-export async function backupJob(db: any) {
-  const r = await runBackup(db);
-  const to = await people(db, ["owner"]);
-  const small = r.encrypted && r.bytes < 18 * 1024 * 1024;
-  const html = `<p style="font-size:16px;line-height:1.6;color:#2A3440">Weekly backup saved: <b>${r.name.split("/").pop()}</b> (${(r.bytes / 1024).toFixed(0)} KB) — ${r.counts.records} records, ${r.counts.comments} comments, ${r.counts.profiles} people.</p>
-<p style="font-size:15px;line-height:1.6;color:#2A3440">${r.encrypted ? (small ? "The encrypted copy is attached. Keep it on your computer or drive; open it in Workspace → Administration → System → Backup with the backup password." : "The file is larger than an email allows; download it from Workspace → Administration → System → Backup.") : "<b>The copy is stored in Workspace but not encrypted, so it is not emailed.</b> Add BACKUP_PASSPHRASE in Vercel to receive an encrypted copy every week."}</p>
-<p style="font-size:14px;color:#7A8796">Files (PDF, images) stay in storage; make a full local copy with files from the same System page.</p>`;
-  const subject = `AGRON Workspace backup ${new Date().toISOString().slice(0, 10)}`;
-  for (const p of to) await mailTo(db, p, { subject, html, text: `Weekly backup saved: ${r.name}. ${r.counts.records} records.` }, small ? [{ filename: r.name.split("/").pop()!, content: r.body, contentType: "application/octet-stream" }] : undefined);
-  await saveState(db, "backup", { at: new Date().toISOString(), name: r.name, bytes: r.bytes, encrypted: r.encrypted, counts: r.counts, emailed: small ? to.length : 0 });
-  return { name: r.name, bytes: r.bytes, encrypted: r.encrypted, counts: r.counts };
+/** Daily encrypted backup (data + files) to the backup store; administrators are told when it fails. */
+export async function backupJob(db: any, o: { deadline?: number } = {}) {
+  try {
+    const r: any = await runBackup(db, { deadline: o.deadline });
+    if (r.partial) return r; // continues on the next run
+    return r;
+  } catch (e: any) {
+    await alertAdmins(db, { key: `backup-failed|${new Date().toISOString().slice(0, 10)}`, subject: "AGRON Workspace: the backup failed", lines: [String(e?.message || e), e instanceof BackupConfigError ? "Nothing was written. Set the missing setting and the next run makes the backup." : "The scheduler tries again with increasing pauses."] }).catch(() => 0);
+    throw e;
+  }
 }
 
 /* ---------- Monitoring ---------- */
@@ -45,6 +49,9 @@ export async function monitorJob(db: any, opts: { alwaysEmail?: boolean } = {}) 
   for (const s of systems as any[]) if (!s.skipped && s.status !== "Operational") problems.push({ what: s.title, detail: `${s.status} — ${s.last_check}${s.ms ? ` (${s.ms} ms)` : ""}`, level: s.status === "Down" ? "fail" : "warn" });
   const important = new Set(["tls", "spf", "dmarc", "http"]);
   for (const d of scans) for (const c of d.checks as Check[]) if (c.status === "fail" && important.has(c.id) || (c.id === "tls" && c.status !== "pass")) problems.push({ what: `${d.domain}: ${c.label}`, detail: c.detail, level: c.status === "fail" ? "fail" : "warn" });
+  // Workspace itself: scheduled jobs, dead-lettered actions, uncertain e-mail deliveries, backup age
+  const ops = await operationsChecks(db).catch((e) => { reportError(db, "monitor:ops", e); return [] as Problem[]; });
+  problems.push(...ops);
   const prev = await readState(db, "monitor").catch(() => null);
   const key = problems.map((p) => p.what + p.level).sort().join("|");
   const changed = (prev?.key || "") !== key;
@@ -82,7 +89,39 @@ export async function reportsJob(db: any, period?: string) {
   return { period: p, sent, departments: depts.length };
 }
 
+/** Checks of Workspace's own operations, also used by the status screen. */
+export async function operationsChecks(db: any): Promise<Problem[]> {
+  const out: Problem[] = []; const now = Date.now();
+  const h = await jobHealth(db);
+  for (const m of h.missed) out.push({ what: `Scheduled job missed: ${m.label}`, detail: m.last ? `last finished ${m.last.slice(0, 16).replace("T", " ")} UTC` : "never finished", level: "fail" });
+  for (const j of h.jobs) for (const d of j.dead) out.push({ what: `Job stopped trying: ${j.label}`, detail: `${d.slot || ""} — ${d.error || ""}`.slice(0, 300), level: "fail" });
+  const [{ count: dead }, { count: unc }] = await Promise.all([
+    db.from("automation_queue").select("id", { count: "exact", head: true }).eq("status", "dead"),
+    db.from("outbound_messages").select("id", { count: "exact", head: true }).eq("status", "uncertain"),
+  ]);
+  if (dead) out.push({ what: "Automatic actions that gave up", detail: `${dead} item(s) — Operations → Retry or close`, level: "fail" });
+  if (unc) out.push({ what: "E-mail deliveries to check", detail: `${unc} message(s) may or may not have arrived — Operations → mark each one`, level: "warn" });
+  const b = await readState(db, "backup").catch(() => null);
+  if (!process.env.BACKUP_PASSPHRASE) out.push({ what: "Backups are off", detail: "BACKUP_PASSPHRASE is not set — no backup is written without encryption", level: "fail" });
+  else if (!b || now - Date.parse(b.at) > 30 * 3600e3) out.push({ what: "No recent backup", detail: b ? `last ${String(b.at).slice(0, 16).replace("T", " ")} UTC` : "no backup yet", level: "fail" });
+  if (process.env.BACKUP_PASSPHRASE && !s3Config()) out.push({ what: "Backups are not off-site", detail: "copies stay in the same Supabase project until the S3-compatible store is set (BACKUP_S3_*)", level: "warn" });
+  return out;
+}
+
+/** Housekeeping with the daily recycle-bin job: old counters, keys, runs and logs leave the database. */
+export async function housekeeping(db: any) {
+  const d = (n: number) => new Date(Date.now() - n * 864e5).toISOString();
+  const res: Record<string, any> = {};
+  const del = async (t: string, col: string, before: string, extra?: (q: any) => any) => { let q = db.from(t).delete({ count: "exact" }).lt(col, before); if (extra) q = extra(q); const { count, error } = await q; if (error) throw new Error(`${t}: ${error.message}`); res[t] = count || 0; };
+  await del("rate_limits", "window_start", d(2));
+  await del("automation_fired", "fired_on", d(60).slice(0, 10), (q) => q.not("key", "like", "digest|%"));
+  await del("automation_fired", "fired_on", d(3).slice(0, 10), (q) => q.like("key", "digest|%"));
+  await del("job_runs", "started_at", d(90), (q) => q.neq("status", "running"));
+  await del("automation_log", "at", d(180));
+  return res;
+}
+
 export async function opsStatus(db: any) {
-  const [backup, monitor, reports, files] = await Promise.all([readState(db, "backup").catch(() => null), readState(db, "monitor").catch(() => null), readState(db, "reports").catch(() => null), listBackups(db).catch(() => [])]);
-  return { backup, monitor, reports, backups: files, passphrase: !!process.env.BACKUP_PASSPHRASE, csl: !!process.env.CSL_API_KEY, youtube: !!process.env.YOUTUBE_API_KEY };
+  const [backup, monitor, reports, files, drill] = await Promise.all([readState(db, "backup").catch(() => null), readState(db, "monitor").catch(() => null), readState(db, "reports").catch(() => null), listBackups(db).catch(() => []), readState(db, "restore-drill").catch(() => null)]);
+  return { backup, monitor, reports, backups: files, drill, passphrase: !!process.env.BACKUP_PASSPHRASE, offsite: !!s3Config(), target: backupStore(db).kind, csl: !!process.env.CSL_API_KEY, youtube: !!process.env.YOUTUBE_API_KEY };
 }

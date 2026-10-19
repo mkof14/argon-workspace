@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createHash } from "node:crypto";
 import { adminClient, currentProfile, userClient } from "@/lib/server/supabase";
+import { limit } from "@/lib/server/authz";
 import { ITEM_REVIEW_FORMAT, PROJECT_RULES, deskById } from "@/config/legal";
 
 export const runtime = "nodejs";
@@ -25,6 +26,7 @@ const CACHE_DAYS = 14;
 export async function POST(req: Request) {
   const me = await currentProfile();
   if (!me || me.role === "pending") return new Response("Not signed in", { status: 401 });
+  { const lim = await limit(`ai:${me.id}`, 30, 60); if (lim) return lim; }
   if (!process.env.ANTHROPIC_API_KEY) return new Response("AI is not configured", { status: 503 });
 
   const { messages = [], tier = "quick", context = "", who = "", section = "", lang = "en", desk: deskId = "", format = "" } = await req.json();

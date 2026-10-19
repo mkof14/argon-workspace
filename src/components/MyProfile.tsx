@@ -7,6 +7,7 @@ import Icon from "./Icon";
 import { useApp } from "./App";
 import PasswordInput from "./PasswordInput";
 import CalendarLink from "./CalendarLink";
+import MfaSetup from "./MfaSetup";
 import InstallApp from "./InstallApp";
 import { ROLES, ROLE_COLORS } from "@/config/workspace.config.mjs";
 import { t, tx } from "@/lib/i18n";
@@ -60,6 +61,7 @@ export default function MyProfile() {
       </section>
       <InstallApp />
       <NotifyCard />
+      <MfaSetup />
       {!["partner", "vendor", "investor"].includes(me.role) && <CalendarLink />}
       {!["partner", "vendor", "investor"].includes(me.role) && <GcalCard />}
     </div>

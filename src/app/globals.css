@@ -1106,7 +1106,7 @@ small.neg,.neg{color:var(--bad)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .wi-scen{stroke:#3D85F2}:root:not([data-theme="light"]) .wi-key.scen::before{border-top-color:#3D85F2}}
 :root[data-theme="dark"] .wi-scen{stroke:#3D85F2}:root[data-theme="dark"] .wi-key.scen::before{border-top-color:#3D85F2}
 .ph-modes{display:grid;gap:10px}.ph-mode{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;align-items:center;text-align:start;padding:14px;border:1px solid var(--line);border-radius:12px;background:transparent;color:var(--ink);cursor:pointer}.ph-mode svg{grid-row:span 2;width:24px;height:24px}.ph-mode:disabled{opacity:.45;cursor:default}.ph-mode:not(:disabled):hover{border-color:var(--ink-3)}
-.offbar{position:fixed;z-index:65;left:50%;bottom:16px;transform:translateX(-50%);width:min(640px,calc(100% - 32px));display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:10px 14px;border-radius:12px;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-lg);font-size:14px}.offbar.off{border-color:var(--warn);background:var(--warn-bg)}.offbar-err{flex-basis:100%;color:var(--bad);font-size:13px}
+.offbar{position:fixed;z-index:65;left:50%;top:10px;transform:translateX(-50%);width:min(640px,calc(100% - 32px));display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:10px 14px;border-radius:12px;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-lg);font-size:14px}.offbar.off{border-color:var(--warn);background:var(--warn-bg)}.offbar-err{flex-basis:100%;color:var(--bad);font-size:13px}.offbar>svg{width:18px;height:18px;flex:none}.offbar.off>svg{color:var(--warn)}
 .ss-cols{display:grid;grid-template-columns:1fr 1fr;gap:20px}@media (max-width:760px){.ss-cols{grid-template-columns:1fr}}
 .ss-row{display:grid;grid-template-columns:minmax(90px,140px) 1fr 40px 56px;gap:8px;align-items:center;margin-top:6px;font-size:14px}.ss-row>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ss-bar{height:10px;border-radius:6px;background:var(--line);overflow:hidden}.ss-bar i{display:block;height:100%;background:#2F7DF6}.ss-bar.lost i{background:var(--bad)}.ss-conv{text-align:end}
@@ -1186,3 +1186,19 @@ small.neg,.neg{color:var(--bad)}
 [dir="rtl"] .gd-html .arr,[dir="rtl"] .gd-pdfm-t svg:first-child{transform:scaleX(-1)}
 @media (max-width:900px){.gd{grid-template-columns:1fr}.gd-toc{position:static;max-height:none}.gd-toc nav{display:none}.gd-toc.open nav{display:grid}.gd-toc-btn{display:inline-flex}.gd-hero{padding:20px 18px}.gd-hero h1{font-size:25px}.gd-pdfm-menu{inset-inline-end:auto;inset-inline-start:0}
  .gd-html .ui{grid-template-columns:1fr 1fr}.gd-html .ui-list{display:none}.gd-html .kvl{grid-template-columns:1fr}.gd-html .rh{grid-template-columns:auto 1fr}.gd-html .rh .tag{grid-column:2}.gd-ch{padding:16px}}
+
+/* Phase 1: conflict dialog, two-step sign-in, operations */
+.modal-back{position:fixed;inset:0;z-index:75;background:rgba(6,9,12,.55);display:grid;place-items:center;padding:16px;overflow:auto}
+.modal-back .modal{position:relative;left:auto;top:auto;transform:none;width:min(720px,100%);max-height:calc(100vh - 32px);overflow:auto;padding:0;display:block}
+.modal-back .card-h h2{display:flex;gap:8px;align-items:center;font-size:17px;margin:0}.modal-back .card-h h2 svg{width:20px;height:20px;color:var(--warn);flex:none}
+.cf-list{display:grid;gap:10px}
+.cf-row{border:1px solid var(--line);border-radius:10px;padding:10px 12px 12px;margin:0;display:grid;grid-template-columns:1fr 1fr;gap:10px;min-width:0}
+.cf-row legend{padding:0 6px;font-size:13.5px}
+.cf-opt{display:flex;gap:8px;align-items:flex-start;padding:10px;border:1px solid var(--line-2);border-radius:8px;cursor:pointer;min-width:0;overflow-wrap:anywhere;font-size:14px}
+.cf-opt small{display:block;color:var(--faint,#888);font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px}
+.cf-opt.on{border-color:var(--accent);background:var(--accent-soft)}
+.cf-opt input{margin-top:3px;accent-color:var(--accent)}
+@media (max-width:600px){.cf-row{grid-template-columns:1fr}}
+.mfa-qr{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.mfa-qr img{width:180px;height:180px;background:#fff;padding:8px;border-radius:10px;border:1px solid var(--line);flex:none}
+.mfa-qr>div{flex:1 1 200px;min-width:0}

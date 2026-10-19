@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { adminClient, currentProfile, userClient } from "@/lib/server/supabase";
+import { limit } from "@/lib/server/authz";
 import { tsQuery } from "@/lib/server/docs";
 import { CHECK_FIELDS, bannedHits } from "@/config/marketing";
 import { allSections } from "@/config/workspace.config.mjs";
@@ -68,6 +69,7 @@ function recordText(sec: any, title: string, data: Record<string, any>) {
 export async function POST(req: Request) {
   const me = await currentProfile();
   if (!me || me.role === "pending" || ["partner", "vendor", "investor"].includes(me.role)) return new Response("Not allowed", { status: 403 });
+  { const lim = await limit(`marketing:${me.id}`, 20, 60); if (lim) return lim; }
   if (!process.env.ANTHROPIC_API_KEY) return new Response("AI is not configured", { status: 503 });
   const b = await req.json().catch(() => ({}));
   const action = String(b.action || "");

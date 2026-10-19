@@ -6,6 +6,7 @@ import { t } from "@/lib/i18n";
 import { DEMO, sb } from "@/lib/sb";
 import { FullExport } from "./DataTools";
 import BackupCenter from "./BackupCenter";
+import OpsCenter from "./OpsCenter";
 import Automation, { useAuto, L } from "./Automation";
 import SysSettings from "./SysSettings";
 import Quality from "./Quality";
@@ -13,6 +14,7 @@ import { tx, type Lang } from "@/lib/i18n";
 
 const TABS = [
   { k: "health", icon: "pulse", t: L("Health", "Состояние", "Стан", "الحالة") },
+  { k: "ops", icon: "server", t: L("Operations", "Операции", "Операції", "العمليات") },
   { k: "auto", icon: "cpu", t: L("Automation", "Автоматизация", "Автоматизація", "الأتمتة") },
   { k: "quality", icon: "check", t: L("Data quality & audit", "Качество данных и аудит", "Якість даних і аудит", "جودة البيانات والتدقيق") },
   { k: "settings", icon: "gear", t: L("Settings", "Настройки", "Налаштування", "الإعدادات") },
@@ -29,9 +31,10 @@ export default function System() {
   const pending = a.s?.queue.filter((q) => q.status === "pending").length || 0;
   const isOwnerOrAdmin = ["owner", "admin"].includes(me.role);
   return (<div style={{ display: "grid", gap: 16 }}>
-    <div className="tabs card" role="tablist" style={{ ["--dc" as any]: "#5B6CF0" }}>{TABS.filter((x) => x.k !== "backup" || isOwnerOrAdmin).map((x) => (
+    <div className="tabs card" role="tablist" style={{ ["--dc" as any]: "#5B6CF0" }}>{TABS.filter((x) => !["backup", "ops"].includes(x.k) || isOwnerOrAdmin).map((x) => (
       <button key={x.k} role="tab" aria-selected={tab === x.k} className={tab === x.k ? "on" : ""} onClick={() => go(x.k)}><Icon n={x.icon} />{tx(x.t, lang as Lang)}{x.k === "auto" && pending > 0 && <span className="chip c-warn" style={{ padding: "0 7px" }}>{pending}</span>}</button>))}</div>
     {tab === "health" && <Health />}
+    {tab === "ops" && isOwnerOrAdmin && <OpsCenter />}
     {tab === "auto" && <Automation a={a} />}
     {tab === "quality" && <Quality a={a} />}
     {tab === "settings" && <SysSettings a={a} />}

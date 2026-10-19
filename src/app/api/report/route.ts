@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { adminClient, currentProfile } from "@/lib/server/supabase";
+import { limit } from "@/lib/server/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,6 +12,7 @@ const LANGS: Record<string, string> = { en: "English", ru: "Russian", uk: "Ukrai
 export async function POST(req: Request) {
   const me = await currentProfile();
   if (!me || me.role === "pending" || ["partner", "vendor", "investor"].includes(me.role)) return new Response("Not allowed", { status: 403 });
+  { const lim = await limit(`report:${me.id}`, 10, 60); if (lim) return lim; }
   if (!process.env.ANTHROPIC_API_KEY) return new Response("AI is not configured", { status: 503 });
   const b = await req.json().catch(() => ({}));
   const report = String(b.report || "").slice(0, 40000);

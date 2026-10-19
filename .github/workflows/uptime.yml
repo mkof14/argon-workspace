@@ -24,38 +24,15 @@ jobs:
         run: |
           code=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' https://workspace.agron1.com/login)
           echo "login: $code"; [ "$code" = "200" ] || { echo "::error::Sign-in page returned $code"; exit 1; }
-      - name: Email intake (only when the CRON_SECRET repository secret is set; otherwise once a day by Vercel)
+      - name: Scheduler — every due background job in one call (needs the CRON_SECRET repository secret)
+        # One endpoint runs whatever is due (retries, email intake, SLA, calendar, digest, translation, backup, agents,
+        # monitor, recycle bin, reports) and records each attempt in Operations. Without the secret, Vercel Cron still
+        # calls it once a day at 10:00 UTC and missed jobs are caught up then.
         if: ${{ github.event_name == 'schedule' }}
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          if [ -z "$CRON_SECRET" ]; then echo "CRON_SECRET is not set in GitHub — email intake runs once a day"; exit 0; fi
-          curl -sS --max-time 65 -o /dev/null -w 'intake: %{http_code}\n' -H "authorization: Bearer $CRON_SECRET" "https://workspace.agron1.com/api/ops?job=intake" || true
-      - name: Translate new texts (records from agents and e-mail intake; needs CRON_SECRET)
-        if: ${{ github.event_name == 'schedule' }}
-        env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-        run: |
-          if [ -z "$CRON_SECRET" ]; then echo "CRON_SECRET is not set in GitHub — translation of agent records runs once a day"; exit 0; fi
-          curl -sS --max-time 65 -o /dev/null -w 'translate: %{http_code}\n' -H "authorization: Bearer $CRON_SECRET" "https://workspace.agron1.com/api/ops?job=translate" || true
-      - name: Morning digest at 8:00 in each person's time zone (needs CRON_SECRET)
-        if: ${{ github.event_name == 'schedule' }}
-        env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-        run: |
-          if [ -z "$CRON_SECRET" ]; then echo "CRON_SECRET is not set in GitHub — the digest goes out once a day at 11:00 UTC"; exit 0; fi
-          curl -sS --max-time 65 -o /dev/null -w 'digest: %{http_code}\n' -H "authorization: Bearer $CRON_SECRET" "https://workspace.agron1.com/api/digest?local=1" || true
-      - name: Google Calendar sync (needs CRON_SECRET; otherwise once a day)
-        if: ${{ github.event_name == 'schedule' }}
-        env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-        run: |
-          if [ -z "$CRON_SECRET" ]; then echo "CRON_SECRET is not set in GitHub — calendars sync once a day"; exit 0; fi
-          curl -sS --max-time 65 -o /dev/null -w 'calendar: %{http_code}\n' -H "authorization: Bearer $CRON_SECRET" "https://workspace.agron1.com/api/ops?job=calendar" || true
-      - name: Service SLA alerts (needs CRON_SECRET; otherwise once a day)
-        if: ${{ github.event_name == 'schedule' }}
-        env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-        run: |
-          if [ -z "$CRON_SECRET" ]; then echo "CRON_SECRET is not set in GitHub — SLA alerts run once a day"; exit 0; fi
-          curl -sS --max-time 65 -o /dev/null -w 'sla: %{http_code}\n' -H "authorization: Bearer $CRON_SECRET" "https://workspace.agron1.com/api/ops?job=sla" || true
+          if [ -z "$CRON_SECRET" ]; then echo "CRON_SECRET is not set in GitHub — background jobs run once a day"; exit 0; fi
+          out=$(curl -sS --max-time 65 -w '\n%{http_code}' -H "authorization: Bearer $CRON_SECRET" "https://workspace.agron1.com/api/cron?trigger=github") || true
+          echo "$out"; code=$(echo "$out" | tail -1)
+          [ "$code" = "200" ] || echo "::warning::scheduler returned $code"

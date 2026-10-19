@@ -1,5 +1,6 @@
 name: CI
-# Every push and pull request: type check, unit tests, production build.
+# Every push and pull request: type check, unit tests, production build; then the integration suite on an
+# isolated stack (local Postgres + Supabase Auth + PostgREST, synthetic data only — never production).
 # Vercel deploys separately; a red CI run means the change needs a look before it is trusted.
 on:
   push:
@@ -29,5 +30,27 @@ jobs:
         run: npm test
       - name: Build
         run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Postgres 16 server binaries (no service started)
+        run: |
+          sudo apt-get update -q && sudo apt-get install -yq postgresql-16 postgresql-client-16
+          sudo systemctl stop postgresql || true
+          echo "PG_BIN=/usr/lib/postgresql/16/bin" >> "$GITHUB_ENV"
+      - name: Chromium for the browser tests
+        run: npx --yes playwright@1.56.1 install --with-deps chromium && npm i -g playwright@1.56.1
+      - name: Integration suite (RLS, automation, scheduler, concurrency, backup + restore drill, API, end to end)
+        run: node scripts/stack/integration.mjs
         env:
           NEXT_TELEMETRY_DISABLED: 1

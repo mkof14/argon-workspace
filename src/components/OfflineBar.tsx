@@ -11,7 +11,7 @@ const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk,
 /** Connection bar: without a connection changes wait on the device; when it is back they are sent by themselves. */
 export default function OfflineBar() {
   const { lang, toast, reload } = useApp(); const T = (x: T4) => tx(x, lang as Lang);
-  const [on, setOn] = useState(true); const [n, setN] = useState(0); const [busy, setBusy] = useState(false); const [failed, setFailed] = useState<{ id: string; error?: string; kind: string }[]>([]);
+  const [on, setOn] = useState(true); const [n, setN] = useState(0); const [busy, setBusy] = useState(false); const [failed, setFailed] = useState<{ id: string; error?: string; kind: string; conflict?: { fields: string[] }; rec?: any }[]>([]);
   const count = async () => { setN(await store.outboxCount()); setFailed(await store.outboxFailed() as any); };
   const flush = async () => {
     if (busy || !navigator.onLine) return; setBusy(true);
@@ -30,6 +30,8 @@ export default function OfflineBar() {
     <Icon n={on ? "refresh" : "alert"} />
     <span>{!on ? T(L("No connection — your changes are kept on this device and will be sent by themselves.", "Нет связи — ваши изменения сохраняются на этом устройстве и отправятся сами.", "Немає зв'язку — ваші зміни зберігаються на цьому пристрої й надішлються самі.", "لا اتصال — تُحفظ تغييراتك على هذا الجهاز وتُرسل تلقائياً.")) : busy ? T(L("Sending saved changes…", "Отправляю сохранённые изменения…", "Надсилаю збережені зміни…", "أرسل التغييرات المحفوظة…")) : T(L("Changes waiting to be sent", "Изменения ждут отправки", "Зміни чекають надсилання", "تغييرات بانتظار الإرسال"))}{n ? ` · ${n}` : ""}</span>
     {on && n > 0 && !busy && <button className="btn sm" onClick={flush}>{T(L("Send now", "Отправить сейчас", "Надіслати зараз", "أرسل الآن"))}</button>}
-    {failed.map((f) => <span key={f.id} className="offbar-err">{T(L("Not sent", "Не отправлено", "Не надіслано", "لم يُرسل"))}: {f.error} <button className="linkbtn" onClick={async () => { await store.dropOutboxItem(f.id); count(); }}>{T(L("Discard", "Удалить", "Видалити", "تجاهل"))}</button></span>)}
+    {failed.map((f) => <span key={f.id} className="offbar-err">{f.conflict
+      ? <>{T(L("Changed by someone else while you were offline", "Пока вы были без связи, это изменил кто-то другой", "Поки ви були без зв'язку, це змінив хтось інший", "غيّره شخص آخر أثناء انقطاعك"))}: <b>{f.rec?.title}</b> ({f.conflict.fields.map((x) => x.replace(/^data\./, "")).join(", ")}) <button className="linkbtn" onClick={async () => { await store.keepMine(f.id); await count(); flush(); }}>{T(L("Keep mine", "Оставить моё", "Залишити моє", "احتفظ بنسختي"))}</button> · <button className="linkbtn" onClick={async () => { await store.dropOutboxItem(f.id); count(); reload(); }}>{T(L("Keep theirs", "Оставить их версию", "Залишити їхню", "احتفظ بنسختهم"))}</button></>
+      : <>{T(L("Not sent", "Не отправлено", "Не надіслано", "لم يُرسل"))}: {f.error} <button className="linkbtn" onClick={async () => { await store.dropOutboxItem(f.id); count(); }}>{T(L("Discard", "Удалить", "Видалити", "تجاهل"))}</button></>}</span>)}
   </div>;
 }

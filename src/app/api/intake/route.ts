@@ -1,4 +1,5 @@
 import { adminClient, currentProfile, userClient } from "@/lib/server/supabase";
+import { limit } from "@/lib/server/authz";
 import { indexFile } from "@/lib/server/docs";
 import { classify, INTAKE_SECTIONS } from "@/lib/server/classify";
 
@@ -29,6 +30,7 @@ async function writable(me: any): Promise<any[]> {
 export async function POST(req: Request) {
   const me = await currentProfile();
   if (!me || me.role === "pending") return new Response("Not signed in", { status: 401 });
+  { const lim = await limit(`intake:${me.id}`, 20, 60); if (lim) return lim; }
   if (["partner", "vendor", "investor"].includes(me.role)) return new Response("Not allowed", { status: 403 });
   const b = await req.json().catch(() => ({}));
   const admin = adminClient();

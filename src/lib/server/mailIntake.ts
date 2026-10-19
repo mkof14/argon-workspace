@@ -21,11 +21,11 @@ export async function readInbox(db: any, opts: { max?: number; budgetMs?: number
   const t0 = Date.now(); const budget = opts.budgetMs ?? 38_000; const max = opts.max ?? 8;
   const state = (await readState(db, "mailintake").catch(() => null)) || {};
   const client = new ImapFlow({ host: process.env.IMAP_HOST || "imap.gmail.com", port: 993, secure: true, auth: { user, pass }, logger: false });
-  const items: Filed[] = []; const ignored: string[] = [];
+  const items: Filed[] = []; const ignored: string[] = []; let validity = "";
   await client.connect();
   const lock = await client.getMailboxLock("INBOX");
   try {
-    const validity = String((client.mailbox as any)?.uidValidity || "");
+    validity = String((client.mailbox as any)?.uidValidity || "");
     let last = state.validity === validity ? Number(state.last || 0) : 0;
     let uids: number[];
     if (!last) { // first run: only the last 2 days, so old mail is not filed
@@ -67,14 +67,18 @@ export async function readInbox(db: any, opts: { max?: number; budgetMs?: number
     }
     await saveState(db, "mailintake", { validity, last, at: new Date().toISOString(), filed: (state.filed || 0) + items.length });
   } finally { lock.release(); await client.logout().catch(() => {}); }
-  return { items, ignored };
+  return { items, ignored, validity };
 }
 
 /** Creates the record and attaches the staged files (used right away in Auto mode, or when a proposal is approved). */
-export async function fileRecord(db: any, f: Pick<Filed, "section" | "title" | "status" | "data" | "controlled" | "files" | "from" | "subject">) {
+export async function fileRecord(db: any, f: Pick<Filed, "section" | "title" | "status" | "data" | "controlled" | "files" | "from" | "subject">, idem?: string): Promise<{ id: string; section: string; title: string; existed?: boolean }> {
   const sec = INTAKE_SECTIONS.find((s) => s.id === f.section); if (!sec) throw new Error("Unknown section");
-  const data = { ...f.data, _by: "agent:intake", _email: `${f.from} — ${f.subject}`.slice(0, 300) };
+  const data = { ...f.data, _by: "agent:intake", _email: `${f.from} — ${f.subject}`.slice(0, 300), ...(idem ? { _idem: idem } : {}) };
   const { data: rec, error } = await db.from("records").insert({ section: sec.id, title: f.title, status: sec.statuses.includes(f.status) ? f.status : sec.statuses[0], data, controlled: !!f.controlled, company: null }).select("id,section,title").single();
+  if (error && error.code === "23505" && idem) { // filed before (a retry): the same record, files already moved
+    const { data: ex } = await db.from("records").select("id,section,title").eq("data->>_idem", idem).maybeSingle();
+    if (ex) return { ...ex, existed: true };
+  }
   if (error) throw new Error(error.message);
   for (const p of f.files || []) {
     if (!p.startsWith("_intake/mail/")) continue;
