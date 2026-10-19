@@ -16,6 +16,12 @@ test("the guide texts are complete in every language", () => {
     assert.deepEqual(Object.keys(T.ROLE_DESC).sort(), Object.keys(en.ROLE_DESC).sort(), `role texts in ${l}`);
     for (const k of ["ABOUT", "HOWTO", "UI", "RHYTHM", "RULES", "LAUNCH"] as const) assert.ok((T as any)[k].length > 200, `${k} in ${l}`);
     assert.equal(T.S.flow_boxes.split("|").length, 10); assert.equal(T.S.layers.split("|").length, 6);
+    assert.equal(T.S.ph.split("|").length, 4); assert.equal(T.S.ui_zones.split("|").length, 4); assert.equal(T.S.appr_lbl.split("|").length, 4);
+    for (const k of ["ui_bar", "ui_nav", "ui_rec"]) assert.equal(T.S[k].split("|").length, 6, `${k} in ${l}`);
+    // the visual blocks parse the texts: part list, rhythm table, rules and launch steps
+    assert.equal(T.HOWTO.split("\n").filter((x) => /^- \*\*[^*]+\*\* — /.test(x)).length, 8, `parts list in ${l}`);
+    assert.equal(T.RULES.split("\n").filter((x) => /^- \*\*/.test(x)).length, 6, `rules in ${l}`);
+    assert.ok(T.LAUNCH.split("\n").filter((x) => /^\d+\.\s/.test(x)).length >= 5, `launch steps in ${l}`);
   }
 });
 
@@ -36,5 +42,7 @@ test("the model builds every part from the sources", () => {
   const b = guideBlocks("en", src, en as any, (s) => `<p>${s}</p>`);
   assert.equal(b.filter((x) => x.kind === "part").length, 7); assert.equal(b[b.length - 1].id, "app");
   assert.ok(b.some((x) => x.title === "newfeature"), "a new handbook chapter appears by itself");
-  assert.ok(b.some((x) => x.html.includes("Deals pipeline") && x.html.includes("Lead → Won")));
+  assert.ok(b.some((x) => x.html.includes("Deals pipeline") && x.html.includes('<span class="st">Lead</span>') && x.html.includes('<span class="st">Won</span>')));
+  const flow = b.find((x) => x.html.includes('class="phases"'))!; assert.equal((flow.html.match(/class="fl"/g) || []).length, en.FLOW.length, "every step is in a phase");
+  assert.ok(b.every((x) => x.icon), "every part and chapter has an icon");
 });

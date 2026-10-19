@@ -12,15 +12,16 @@ const ASSETS = `file://${here}assets`; const IMG = `${here}img/${lang}`; const i
 const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const md = (s) => marked.parse(String(s || ""), { gfm: true });
 const blocks = guideBlocks(lang, src, T, md, img);
+const tile = (b) => `<span class="tile"${b.color ? ` style="--c:${b.color}"` : ""}>${src.icon(b.icon || "book")}</span>`;
 const mk = (id) => `<span class="mk">QZ${id}QZ</span>`;
 let body = ""; const toc = [];
 for (const b of blocks) {
   if (b.kind === "part") { toc.push({ lvl: 1, id: b.id, t: `${S.part} ${b.num}. ${b.title}` });
-    body += `<section class="divider">${mk(b.id)}<div class="dv-in"><div class="dv-n">${S.part} ${b.num}</div><h1>${esc(b.title)}</h1><p>${esc(b.lead)}</p><ol class="dv-list">${b.items.map((x) => `<li>${esc(x)}</li>`).join("")}</ol></div></section>`; }
+    body += `<section class="divider">${mk(b.id)}<div class="dv-in">${src.icon(b.icon || "book", "i dv-ic")}<div class="dv-n">${S.part} ${b.num}</div><h1>${esc(b.title)}</h1><p>${esc(b.lead)}</p><ol class="dv-list">${b.items.map((x) => `<li>${esc(x)}</li>`).join("")}</ol></div></section>`; }
   else if (b.id === "app") { toc.push({ lvl: 1, id: "app", t: S.appendix });
-    body += `<section class="chapter">${mk("app")}<div class="ch-n">${S.appendix}</div><h2>${esc(b.title)}</h2>${b.html}<div class="end"><img src="${ASSETS}/agron.png"><p>AGRON Inc. · AGRON Workspace ${VERSION} · ${S.month}<br>${esc(S.end_note)}</p></div></section>`; }
+    body += `<section class="chapter">${mk("app")}<div class="ch-h">${tile(b)}<div><div class="ch-n">${S.appendix}</div><h2>${esc(b.title)}</h2></div></div>${b.html}<div class="end"><img src="${ASSETS}/agron.png"><p>AGRON Inc. · AGRON Workspace ${VERSION} · ${S.month}<br>${esc(S.end_note)}</p></div></section>`; }
   else { toc.push({ lvl: 2, id: b.id, t: `${b.num}. ${b.title}` });
-    body += `<section class="chapter">${mk(b.id)}<div class="ch-n">${S.chapter} ${b.num}</div><h2>${esc(b.title)}</h2>${b.html}</section>`; }
+    body += `<section class="chapter">${mk(b.id)}<div class="ch-h">${tile(b)}<div><div class="ch-n">${S.chapter} ${b.num}</div><h2>${esc(b.title)}</h2></div></div>${b.html}</section>`; }
 }
 const tocHtml = `<section class="toc"><h2>${S.contents}</h2><div class="toc-list">${toc.map((x) => `<div class="t${x.lvl}"><span>${esc(x.t)}</span><i></i><b>${pages[x.id] || ""}</b></div>`).join("")}</div></section>`;
 const cover = `<section class="cover"><div class="cv-top"><img class="cv-logo" src="${ASSETS}/agron-tagline.png"></div>

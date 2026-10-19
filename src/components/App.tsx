@@ -37,7 +37,7 @@ const Decisions = dynamic(() => import("./Decisions"), { ssr: false });
 const PhotoCapture = dynamic(() => import("./PhotoCapture"), { ssr: false });
 const OfflineBar = dynamic(() => import("./OfflineBar"), { ssr: false });
 const Guide = dynamic(() => import("./Guide"), { ssr: false });
-export const VERSION = "2.32";
+export const VERSION = "2.33";
 
 type Ctx = {
   lang: Lang; me: Profile; access: Access; toast: (m: string, err?: boolean) => void;
