@@ -13,7 +13,8 @@
     "deploymentEnabled": {
       "phase1-reliability": false,
       "phase2-daily-operations": false,
-      "phase3-communications": false
+      "phase3-communications": false,
+      "phase4-information": false
     }
   }
 }
