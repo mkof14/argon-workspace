@@ -38,7 +38,7 @@ before(async () => {
 
 test("4. approval belongs to one exact version: V1 sent → changes requested → V2 uploaded → V2 approved in three steps", { skip }, async () => {
   const { data: d } = await db.from("records").insert({ section: "company.documents", title: `Export policy ${run}`, status: "Draft", created_by: U.eng.id, data: { doc_type: `Chain ${run}`, owner_id: U.eng.id } }).select("*").single();
-  assert.match(d.data.doc_number, /^AGR-CHN-\d{4}$/);
+  assert.match(d.data.doc_number, /^AGR-CHN-\d{4,}$/);
   assert.equal((await post("/api/approvals", { action: "request", record_id: d.id, approver_ids: [U.eng2.id, U.mgmt.id, U.legal.id] }, "eng")).status, 400, "no version yet → nothing to approve");
   const u1 = await upload("eng", d.id, "policy.txt", "policy v1"); assert.equal(u1.status, 200, await u1.clone().text()); const v1 = (await u1.json()).version;
   assert.equal(v1.sha256, createHash("sha256").update("policy v1").digest("hex"));

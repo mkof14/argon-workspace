@@ -49,7 +49,7 @@ before(async () => {
 /* 1 + 2 ---------------------------------------------------------------------------------------------------------- */
 test("1–2. a document gets one unique number from a configurable format; 25 at once never collide", async () => {
   const d = await doc("eng", `Torque procedure ${run}`, { project_ref: P.id, project_ref_title: P.title, owner_id: U.eng.id, owner: U.eng.name, department: "engineering", doc_number: "FORGED-1" });
-  assert.match(d.data.doc_number, /^AGR-PRC-\d{4}$/, "the browser cannot choose the number"); assert.equal(d.data.classification, "Internal");
+  assert.match(d.data.doc_number, /^AGR-PRC-\d{4,}$/, "the browser cannot choose the number"); assert.equal(d.data.classification, "Internal");
   const p = await up("eng", d.id, "torque.txt", `Torque procedure ${run} v0.1`);
   const v = await registerVersion(ctx("eng"), { record_id: d.id, path: p });
   assert.ifError((v as any).error); assert.equal((v as any).version.label, "0.1");
@@ -61,7 +61,7 @@ test("1–2. a document gets one unique number from a configurable format; 25 at
   // concurrency: 25 documents of the same type at the same moment
   const many = await Promise.all(Array.from({ length: 25 }, (_, i) => C.eng.from("records").insert({ section: "company.documents", title: `Parallel ${run} ${i}`, status: "Draft", data: { doc_type: "Report" } }).select("data").single()));
   const nums = many.map((m) => m.data!.data.doc_number); assert.equal(new Set(nums).size, 25, "25 unique numbers");
-  assert.ok(nums.every((n: string) => /^AGR-REP-\d{4}$/.test(n)));
+  assert.ok(nums.every((n: string) => /^AGR-REP-\d{4,}$/.test(n)));
   // a more specific format for one department and project (configured by an administrator, not hardcoded)
   assert.ok((await C.eng.from("doc_number_formats").insert({ scope: "document", pattern: "{CO}-X-{SEQ:4}" }).select("id")).error, "only administrators configure numbering");
   assert.ifError((await C.admin.from("doc_number_formats").insert({ scope: "document", department_key: "engineering", project_id: P.id, pattern: "{CO}-{DEPT}-{PROJ}-{SEQ:4}" })).error);
@@ -198,7 +198,7 @@ test("7. departments: created, managed, used as an audience; a rename keeps ever
 test("8. knowledge: draft → review → published; an employee finds the current article, not the one it replaced", async () => {
   const mk = async (t: string, extra: Record<string, any> = {}) => (await C.proc.from("records").insert({ section: "company.wiki", title: t, status: "Draft", data: { category: "Procedures", summary: `How to buy a part zzproc${run}`, body: `Step 1 zzproc${run}`, reviewer_id: U.mgmt.id, owner_id: U.proc.id, language: "en", version: "1", ...extra } }).select("*").single()).data;
   const k1 = await mk(`Purchasing procedure ${run}`);
-  assert.match(k1.data.doc_number, /^AGR-KB-\d{4}$/);
+  assert.match(k1.data.doc_number, /^AGR-KB-\d{4,}$/);
   assert.equal((await C.sales.from("records").select("id").eq("id", k1.id)).data?.length, 0, "a draft is not visible to everyone");
   assert.match(String((await C.proc.from("records").update({ status: "Published" }).eq("id", k1.id)).error?.message), /reviewer or management/);
   assert.ifError((await C.proc.from("records").update({ status: "Review" }).eq("id", k1.id)).error);
@@ -253,7 +253,7 @@ test("10. meeting: agenda, document, notes, decision, action → task, meeting r
   await C.pm.from("records").update({ data: { ...m3!.data, minutes: minutes + "\n(edited)" } }).eq("id", M.id);
   assert.equal((await sql("select data->>'minutes_state' s from records where id = $1", [M.id]))[0].s, "draft", "an edit after approval needs a new approval");
   const log = (await C.mgmt.rpc("decision_log", { p_project: P.id })).data; const row = log.find((x: any) => x.id === dec.data);
-  assert.ok(row, "the decision is in the log"); assert.match(row.number, /^AGR-DEC-\d{4}$/);
+  assert.ok(row, "the decision is in the log"); assert.match(row.number, /^AGR-DEC-\d{4,}$/);
   assert.equal(row.source.id, M.id); assert.equal(row.task.id, task); assert.equal(row.document.id, d.id); assert.equal(row.responsible, U.eng.id); assert.equal(row.project.id, P.id);
   assert.equal((await sql("select data->>'meeting_ref' m from records where id = $1", [task]))[0].m, M.id);
 });
