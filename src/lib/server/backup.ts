@@ -43,16 +43,24 @@ async function all(db: any, table: string, cols = "*", filter?: (q: any) => any)
 export async function collectData(db: any, opts: { controlled: boolean }) {
   const records = await all(db, "records", "*", (q) => (opts.controlled ? q : q.eq("controlled", false)));
   const ids = new Set(records.map((r) => r.id));
-  const [comments, activity, faq, rules, approvals, profiles] = await Promise.all([
+  const [comments, activity, faq, rules, approvals, profiles, departments, taxonomy, doc_number_formats, doc_counters, document_versions, document_access_log] = await Promise.all([
     all(db, "comments"), all(db, "activity").catch(() => []), all(db, "faq").catch(() => []), all(db, "section_access"),
-    all(db, "approvals", "id,record_id,section,requested_by,approver_id,note,status,comment,created_at,decided_at,expires_at").catch(() => []),
-    all(db, "profiles", "id,email,full_name,role,company,us_person,lang,title,phone,timezone,prefs,disabled,created_at").catch(() => all(db, "profiles", "id,email,full_name,role,company,us_person,lang,created_at")),
+    all(db, "approvals", "id,record_id,section,requested_by,approver_id,note,status,comment,created_at,decided_at,expires_at,decided_by,version_id,chain_id,step,chain_mode")
+      .catch(() => all(db, "approvals", "id,record_id,section,requested_by,approver_id,note,status,comment,created_at,decided_at,expires_at")).catch(() => []),
+    all(db, "profiles", "id,email,full_name,role,company,us_person,lang,title,phone,timezone,prefs,disabled,created_at,department,department_id,manager_id,notify_prefs")
+      .catch(() => all(db, "profiles", "id,email,full_name,role,company,us_person,lang,title,phone,timezone,prefs,disabled,created_at"))
+      .catch(() => all(db, "profiles", "id,email,full_name,role,company,us_person,lang,created_at")),
+    // v21: organisation, numbering, versions and the download audit (older databases simply have none)
+    all(db, "departments").catch(() => []), all(db, "taxonomy", "*", (q) => q.order("kind")).catch(() => []), all(db, "doc_number_formats").catch(() => []),
+    all(db, "doc_counters", "*", (q) => q.order("prefix")).catch(() => []), all(db, "document_versions").catch(() => []), all(db, "document_access_log").catch(() => []),
   ]);
   return {
-    format: "agron-workspace-backup", version: 3, created_at: new Date().toISOString(), controlled_included: opts.controlled,
+    format: "agron-workspace-backup", version: 4, created_at: new Date().toISOString(), controlled_included: opts.controlled,
     counts: { records: records.length, comments: comments.length, activity: activity.length, faq: faq.length, profiles: profiles.length, section_access: rules.length },
     records, comments: comments.filter((c: any) => ids.has(c.record_id)), activity: activity.filter((a: any) => !a.record_id || ids.has(a.record_id)),
     faq, section_access: rules, approvals: approvals.filter((a: any) => ids.has(a.record_id)), profiles,
+    departments, taxonomy, doc_number_formats, doc_counters,
+    document_versions: document_versions.filter((v: any) => ids.has(v.record_id)), document_access_log: document_access_log.filter((l: any) => !l.record_id || ids.has(l.record_id)),
   };
 }
 
@@ -180,7 +188,7 @@ export async function listBackups(db: any) {
 }
 
 /* ---------------- restore (into an empty, separate project) ---------------- */
-const RESTORE_TABLES = ["section_access", "profiles", "records", "comments", "activity", "approvals", "faq"] as const;
+const RESTORE_TABLES = ["section_access", "departments", "profiles", "taxonomy", "doc_number_formats", "doc_counters", "records", "document_versions", "comments", "activity", "approvals", "faq", "document_access_log"] as const;
 /**
  * Restores a backup into another, empty Workspace database (disaster recovery or a restore drill).
  * Needs the target's service key. Users are created in the target's sign-in service with the same ids and e-mails

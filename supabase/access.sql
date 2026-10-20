@@ -540,6 +540,7 @@ insert into public.section_access (section, role, can_write, external) values
 ('company.documents','hr',true,false),
 ('company.documents','legal',true,false),
 ('company.documents','security',true,false),
+('company.documents','partner',false,true),
 ('company.wiki','management',true,false),
 ('company.wiki','engineering',true,false),
 ('company.wiki','operations',true,false),

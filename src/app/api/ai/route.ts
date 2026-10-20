@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { adminClient, currentProfile, userClient } from "@/lib/server/supabase";
 import { limit } from "@/lib/server/authz";
 import { ITEM_REVIEW_FORMAT, PROJECT_RULES, deskById } from "@/config/legal";
+import { RETRIEVAL_RULES, retrieve, sourcesBlock } from "@/lib/server/retrieval";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,13 +30,24 @@ export async function POST(req: Request) {
   { const lim = await limit(`ai:${me.id}`, 30, 60); if (lim) return lim; }
   if (!process.env.ANTHROPIC_API_KEY) return new Response("AI is not configured", { status: 503 });
 
-  const { messages = [], tier = "quick", context = "", who = "", section = "", lang = "en", desk: deskId = "", format = "" } = await req.json();
+  const body0 = await req.json();
+  const { messages = [], tier = "quick", who = "", section = "", lang = "en", desk: deskId = "", format = "" } = body0;
+  // Workspace questions are answered from what the person may open, read here on the server — the browser's copy
+  // of the page is not used as data (it could be stale, edited or show more than the person may see)
+  const useRetrieval = body0.retrieve === true;
+  let context = useRetrieval ? "" : String(body0.context || "");
   const desk = deskById(String(deskId));
   const legal = !!desk || String(section).startsWith("legal.");
   const clean = (messages as any[]).filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content)
     .slice(-10).map((m) => ({ role: m.role, content: String(m.content).slice(0, 8000) }));
   if (!clean.length || clean[clean.length - 1].role !== "user") return new Response("Bad request", { status: 400 });
 
+  let sourcesHeader = "";
+  if (useRetrieval) {
+    const r = await retrieve(await userClient(), me, { q: clean[clean.length - 1].content, recordId: body0.record_id || null, lang });
+    context = `${RETRIEVAL_RULES}\n\n${sourcesBlock(r)}`;
+    sourcesHeader = Buffer.from(JSON.stringify(r.sources.map((x) => ({ n: x.n, kind: x.kind, title: x.title, link: x.link, suspicious: !!x.suspicious })))).toString("base64url");
+  }
   // Monthly per-user cap
   const admin = adminClient();
   const since = new Date(); since.setUTCDate(1); since.setUTCHours(0, 0, 0, 0);
@@ -46,12 +58,12 @@ export async function POST(req: Request) {
   // 1) Same first question on the same data → reuse the saved answer (no tokens)
   const first = clean.length === 1;
   const q = clean[clean.length - 1].content;
-  const key = sha([norm(q), tier, lang, section, desk?.id || "", format, sha(String(context))].join("|"));
+  const key = sha([norm(q), tier, lang, section, desk?.id || "", format, sha(String(context)), useRetrieval ? me.id : ""].join("|"));
   if (first) {
     const { data: hit } = await admin.from("ai_cache").select("answer,created_at,hits").eq("key", key).maybeSingle();
     if (hit && Date.now() - new Date(hit.created_at).getTime() < CACHE_DAYS * 864e5) {
       await admin.from("ai_cache").update({ hits: (hit.hits || 0) + 1, last_hit: new Date().toISOString() }).eq("key", key);
-      return new Response(hit.answer, { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "x-ai-cache": "hit", "x-ai-usage": `${Math.round(used / 1000)}k / ${Math.round((me.ai_monthly_tokens || 0) / 1000)}k` } });
+      return new Response(hit.answer, { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "x-ai-cache": "hit", "x-ai-sources": sourcesHeader, "x-ai-usage": `${Math.round(used / 1000)}k / ${Math.round((me.ai_monthly_tokens || 0) / 1000)}k` } });
     }
   }
   // 2) Verified company FAQ answers close to the question go into the prompt
@@ -90,5 +102,5 @@ export async function POST(req: Request) {
     },
     cancel() { stream.abort(); },
   });
-  return new Response(body, { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "x-ai-cache": "miss", "x-ai-usage": `${Math.round(used / 1000)}k / ${Math.round((me.ai_monthly_tokens || 0) / 1000)}k` } });
+  return new Response(body, { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "x-ai-cache": "miss", "x-ai-sources": sourcesHeader, "x-ai-usage": `${Math.round(used / 1000)}k / ${Math.round((me.ai_monthly_tokens || 0) / 1000)}k` } });
 }

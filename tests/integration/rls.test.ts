@@ -38,7 +38,8 @@ function expected(u: U) {
   const readable = new Set(access.filter((x) => x.role === u.role).map((x) => x.section));
   const external = EXTERNAL.includes(u.role) || u.role === "pending";
   // v20: an announcement that is not yet published is seen only by owners, administrators and management
-  const ann = (r: { section: string }) => r.section !== "company.announcements" || full || u.role === "management";
+  // v21: a knowledge article that is still a draft is seen by its author, owner, reviewer and management only
+  const ann = (r: { section: string }) => !["company.announcements", "company.wiki"].includes(r.section) || full || u.role === "management";
   return new Set(recs.filter((r) => ann(r) && (full || readable.has(r.section)) && (!r.controlled || u.us) && (!external || r.company === "*" || (u.company && r.company === u.company))).map((r) => r.id));
 }
 async function visibleApi(u: U) {

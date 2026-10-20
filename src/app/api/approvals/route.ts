@@ -32,8 +32,22 @@ function details(r: any) {
   return (rule?.key || []).map((k) => { const f = s?.fields.find((x: any) => x.key === k); const v = f?.type === "ref" ? String(r.data?.[`${k}_title`] || "") : fmt(f, r.data?.[k]); return v ? { label: f?.label?.en || k, label_ru: f?.label?.ru || f?.label?.en || k, value: v } : null; }).filter(Boolean) as any[];
 }
 
-async function approversFor(db: any, r: any, exclude: string) {
+/** The approval plan of a document type: single approver, or a sequential / parallel chain of steps with roles. */
+async function docPlan(db: any, r: any) {
+  const { data: t } = await db.from("taxonomy").select("meta").eq("kind", "doc_type").eq("code", r.data?.doc_type || "").maybeSingle();
+  const ap = t?.meta?.approval || {};
+  const mode: "single" | "sequential" | "all" = ap.mode === "sequential" || ap.mode === "all" ? ap.mode : "single";
+  const steps: { label?: string; roles?: string[] }[] = Array.isArray(ap.steps) && ap.steps.length ? ap.steps : [{}];
+  return { mode, steps: mode === "single" ? [steps[0]] : steps };
+}
+async function stepRoles(db: any, r: any, a: any): Promise<string[] | null> {
+  if (r.section !== "company.documents" || !a.chain_id) return null;
+  const plan = await docPlan(db, r); const roles = plan.steps[(a.step || 1) - 1]?.roles;
+  return Array.isArray(roles) && roles.length ? roles : null;
+}
+async function approversFor(db: any, r: any, exclude: string, roles?: string[] | null) {
   const rule = APPROVALS[r.section]; if (!rule) return [];
+  if (roles?.length) { const { data } = await db.from("profiles").select("id,full_name,email,role,us_person,lang,disabled").in("role", roles).neq("id", exclude); return (data || []).filter((p: any) => !p.disabled && (!r.controlled || p.us_person)); }
   // Spending: only the roles whose limit covers this amount (Administration → System → Settings → Approval limits)
   const lim = limitRoles(r.section, r.data || {}, withLimits((await getSettings(db)).limits));
   const { data } = await db.from("profiles").select("id,full_name,email,role,us_person,lang").in("role", lim || rule.approvers).neq("id", exclude);
@@ -48,13 +62,39 @@ async function decide(db: any, a: any, decision: Decision, comment: string, by: 
   // checked again now, not only when the link was sent: the approver must still be allowed to decide
   const { data: ap } = await db.from("profiles").select("id,role,us_person,disabled").eq("id", a.approver_id).maybeSingle();
   const lim = rule ? limitRoles(r.section, r.data || {}, withLimits((await getSettings(db)).limits)) : null;
-  if (!ap || ap.disabled || !rule || !(lim || rule.approvers).includes(ap.role) || (r.controlled && !ap.us_person)) return "The approver is no longer allowed to decide this request";
+  const sr = rule ? await stepRoles(db, r, a) : null;
+  if (!ap || ap.disabled || !rule || !(sr || lim || rule.approvers).includes(ap.role) || (r.controlled && !ap.us_person)) return "The approver is no longer allowed to decide this request";
   const now = new Date().toISOString();
   const { data: upd } = await db.from("approvals").update({ status: decision, comment: comment || null, decided_at: now, decided_by: by.id }).eq("id", a.id).eq("status", "pending").select("id");
   if (!upd?.length) return "This request was already decided";
-  const status = decision === "approved" ? rule?.ok : decision === "changes_requested" ? rule?.changes || rule?.no || rule?.wait[0] : rule?.no;
-  if (status) await db.from("records").update({ status }).eq("id", r.id);
   const who = by.full_name || by.email;
+  // a chain: the next step, or the end of the chain
+  if (a.chain_id) {
+    const { data: chain } = await db.from("approvals").select("*").eq("chain_id", a.chain_id).order("step");
+    if (decision === "approved") {
+      const rest = (chain || []).filter((x: any) => x.id !== a.id && x.status !== "approved" && x.status !== "cancelled");
+      if (rest.length) {
+        if (a.chain_mode === "sequential") { const next = rest.filter((x: any) => x.status === "queued").sort((x: any, y: any) => x.step - y.step)[0]; if (next) await activateStep(db, r, next); }
+        await db.from("comments").insert({ record_id: r.id, author: by.id, kind: "approval", body: `✓ Step ${a.step} approved by ${who}${comment ? `: ${comment}` : ""}` });
+        return null;
+      }
+    } else {
+      await db.from("approvals").update({ status: "cancelled", comment: `Stopped: step ${a.step} ${decision === "rejected" ? "rejected" : "asked for changes"}` }).eq("chain_id", a.chain_id).in("status", ["pending", "queued"]);
+    }
+  }
+  // the decision belongs to the exact version it was asked for; the record follows only if that version is still current
+  const current = !a.version_id || r.data?.current_version_id === a.version_id;
+  if (a.version_id) await db.rpc("document_version_decided", { p_version: a.version_id, p_state: decision, p_by: by.id });
+  const status = decision === "approved" ? rule?.ok : decision === "changes_requested" ? rule?.changes || rule?.no || rule?.wait[0] : rule?.no;
+  if (status && current) await db.from("records").update({ status }).eq("id", r.id);
+  if (decision === "approved" && r.section === "company.documents") {
+    const { data: v } = a.version_id ? await db.from("document_versions").select("label").eq("id", a.version_id).maybeSingle() : { data: null };
+    const key = `approval:${a.chain_id || a.id}`;
+    const { data: ex } = await db.from("records").select("id").eq("section", "company.decisions").eq("data->>_idem", key).maybeSingle();
+    if (!ex) await db.from("records").insert({ section: "company.decisions", title: `Approved: ${r.title}${v?.label ? ` v${v.label}` : ""}`.slice(0, 200), status: "Approved", controlled: r.controlled, created_by: by.id,
+      data: { _idem: key, date: now.slice(0, 10), decision: `${r.data?.doc_number || r.title}${v?.label ? ` version ${v.label}` : ""} approved by ${who}${comment ? ` — ${comment}` : ""}`, made_by_id: by.id, source_ref: r.id, source_ref_title: r.title, source_section: "approval",
+        document_ref: r.id, document_ref_title: r.title, project_ref: r.data?.project_ref, project_ref_title: r.data?.project_ref_title, version_id: a.version_id, version: v?.label } });
+  }
   await db.from("comments").insert({ record_id: r.id, author: by.id, kind: "approval", body: `${decision === "approved" ? "✓ Approved" : decision === "changes_requested" ? "↺ Changes requested" : "✗ Rejected"} by ${who}${comment ? `: ${comment}` : ""}` });
   const { data: req } = await db.from("profiles").select("email,full_name,lang").eq("id", a.requested_by).single();
   if (req?.email) {
@@ -116,6 +156,11 @@ export async function POST(req: Request) {
   if (b.action === "approvers") {
     const { data: r } = await sb.from("records").select("id,section,controlled,data").eq("id", b.record_id).maybeSingle();
     if (!r || !APPROVALS[r.section]) return Response.json([]);
+    if (r.section === "company.documents") {
+      const plan = await docPlan(db, r);
+      const steps = await Promise.all(plan.steps.map(async (st, i) => ({ step: i + 1, label: st.label || null, people: (await approversFor(db, r, me.id, st.roles)).map((p: any) => ({ id: p.id, name: p.full_name || p.email, role: p.role })) })));
+      return Response.json(Object.assign(steps[0].people, { mode: plan.mode, steps }));
+    }
     return Response.json((await approversFor(db, r, me.id)).map((p: any) => ({ id: p.id, name: p.full_name || p.email, role: p.role })));
   }
 
@@ -126,11 +171,12 @@ export async function POST(req: Request) {
     if (!rule) return new Response("This section has no approvals", { status: 400 });
     if (!rule.wait.includes(r.status)) return new Response(`Only records in status ${rule.wait.join(" / ")} can be sent for approval`, { status: 400 });
     if (approvalNeeds(r.section, r.data)) return new Response("Run the compliance check first (Passed or Cleared by legal), then send for approval", { status: 400 });
+    const note = String(b.note || "").slice(0, 2000);
+    if (r.section === "company.documents") return requestDocument(db, r, me, b, note);
     const ap = (await approversFor(db, r, me.id)).find((p: any) => p.id === b.approver_id);
     if (!ap) return new Response("Choose an approver from the list", { status: 400 });
     await db.from("approvals").update({ status: "cancelled" }).eq("record_id", r.id).eq("status", "pending");
     const token = newToken();
-    const note = String(b.note || "").slice(0, 2000);
     const { data: a, error } = await db.from("approvals").insert({ token: null, token_hash: hashToken(token), record_id: r.id, section: r.section, requested_by: me.id, approver_id: ap.id, note: note || null }).select("id,status,created_at,expires_at").single();
     if (error) return new Response(error.message, { status: 500 });
     const lang = ap.lang === "ru" ? "ru" : "en"; const s = sec(r.section);
@@ -166,4 +212,56 @@ export async function POST(req: Request) {
     return Response.json({ ok: true, status: d });
   }
   return new Response("Unknown action", { status: 400 });
+}
+
+/** The approver of a step is told (e-mail with the one-click link, phone); the request is noted on the record. */
+async function mailApprover(db: any, r: any, a: any, ap: any, token: string, by: any, note: string, extra = "") {
+  const lang = ap.lang === "ru" ? "ru" : "en"; const s = sec(r.section);
+  const lines = details(r).map((d: any) => `- **${lang === "ru" ? d.label_ru : d.label}:** ${d.value}`).join("\n");
+  const subject = `${L(lang, "Approval needed", "Нужно согласование")}: ${r.controlled ? L(lang, "US-persons-only document", "Документ только для US persons") : r.title}`;
+  const body = `${L(lang, `${by.full_name || by.email} asks you to approve:`, `${by.full_name || by.email} просит согласовать:`)}\n\n**${r.controlled ? r.data?.doc_number || "—" : r.title}** · ${s?.label?.[lang] || s?.label?.en}${extra}\n\n${r.controlled ? "" : lines}${note ? `\n\n${L(lang, "Note", "Комментарий")}: ${note}` : ""}`;
+  const url = `${SITE}/approve/${token}`; const cta = { label: L(lang, "Approve or reject", "Согласовать или отклонить"), url };
+  const m = ["uk", "ar"].includes(ap.lang) ? await localizeMail(db, ap.lang, { subject, body, text: cta.label }) : { subject, body, text: cta.label };
+  const ml = (["uk", "ar"].includes(ap.lang) ? ap.lang : lang) as any; const c2 = { ...cta, label: m.text };
+  const err = await sendMail({ to: ap.email, subject: m.subject, html: renderEmail({ subject: m.subject, heading: m.subject, body: m.body!, cta: c2, lang: ml, sender: COMPANY }), text: plainText({ body: m.body!, cta: c2, sender: COMPANY, lang: ml }), replyTo: by.email });
+  await pushTo(db, [ap.id], (l) => ({ title: PUSH.approve_t[l], body: `${r.controlled ? "US-persons-only record" : r.title} — ${by.full_name || by.email}`, url, tag: `ap-${a.id}` })).catch((e) => reportError(db, "approvals:push", e));
+  return err;
+}
+
+/** A queued step of a sequential chain becomes the next approver's request. */
+async function activateStep(db: any, r: any, next: any) {
+  const token = newToken();
+  const { data: upd } = await db.from("approvals").update({ status: "pending", token_hash: hashToken(token), expires_at: new Date(Date.now() + 14 * 864e5).toISOString() }).eq("id", next.id).eq("status", "queued").select("*");
+  if (!upd?.length) return;
+  const [{ data: ap }, { data: by }] = await Promise.all([db.from("profiles").select("id,full_name,email,lang").eq("id", next.approver_id).single(), db.from("profiles").select("id,full_name,email").eq("id", next.requested_by).single()]);
+  if (ap?.email) await mailApprover(db, r, next, ap, token, by || { email: "" }, next.note || "", ` · ${L(ap.lang, "step", "этап")} ${next.step}`);
+}
+
+/** A document is approved as one exact version: one approver, or a chain (sequential or all at once) set by its type. */
+async function requestDocument(db: any, r: any, me: any, b: any, note: string) {
+  const versionId = r.data?.current_version_id;
+  if (!versionId) return new Response("Upload a version first: approval is given to an exact version", { status: 400 });
+  const plan = await docPlan(db, r);
+  const ids: string[] = (Array.isArray(b.approver_ids) ? b.approver_ids : [b.approver_id]).map(String).filter(Boolean).slice(0, plan.steps.length);
+  if (ids.length !== plan.steps.length) return new Response(plan.steps.length > 1 ? `Choose an approver for each of the ${plan.steps.length} steps` : "Choose an approver from the list", { status: 400 });
+  if (new Set(ids).size !== ids.length) return new Response("Each step needs a different approver", { status: 400 });
+  const people: any[] = [];
+  for (let i = 0; i < ids.length; i++) {
+    const ap = (await approversFor(db, r, me.id, plan.steps[i].roles)).find((p: any) => p.id === ids[i]);
+    if (!ap) return new Response(`The approver for step ${i + 1} is not allowed to approve this document`, { status: 400 });
+    people.push(ap);
+  }
+  await db.from("approvals").update({ status: "cancelled" }).eq("record_id", r.id).in("status", ["pending", "queued"]);
+  const chain = plan.mode === "single" ? null : crypto.randomUUID();
+  const rows = people.map((ap, i) => ({ ap, token: newToken(), status: plan.mode === "sequential" && i > 0 ? "queued" : "pending", step: i + 1 }));
+  const { data: made, error } = await db.from("approvals").insert(rows.map((x) => ({ token: null, token_hash: hashToken(x.token), record_id: r.id, section: r.section, requested_by: me.id, approver_id: x.ap.id,
+    note: note || null, status: x.status, step: x.step, chain_id: chain, chain_mode: plan.mode, version_id: versionId }))).select("id,status,step,created_at,expires_at,approver_id");
+  if (error) return new Response(error.message, { status: 500 });
+  await db.rpc("document_version_decided", { p_version: versionId, p_state: "pending", p_by: me.id });
+  if (["Draft", "Changes requested"].includes(r.status)) await db.from("records").update({ status: "In review" }).eq("id", r.id);
+  let mail_error: string | null = null;
+  for (const x of rows) if (x.status === "pending") { const a = (made || []).find((m: any) => m.approver_id === x.ap.id); const e = await mailApprover(db, r, a, x.ap, x.token, me, note, plan.mode === "single" ? "" : ` · step ${x.step}/${rows.length}`); mail_error = mail_error || (e as any); }
+  const { data: v } = await db.from("document_versions").select("label").eq("id", versionId).maybeSingle();
+  await db.from("comments").insert({ record_id: r.id, author: me.id, kind: "approval", body: `→ Version ${v?.label || "?"} sent for approval to ${people.map((p) => p.full_name || p.email).join(plan.mode === "sequential" ? " → " : ", ")}${note ? `: ${note}` : ""}` });
+  return Response.json({ ...(made || [])[0], chain_id: chain, mode: plan.mode, steps: made, version: v?.label, approver: people[0].full_name || people[0].email, mail_error });
 }

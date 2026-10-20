@@ -13,7 +13,7 @@ import type { Op } from "@/lib/command";
 
 export type AiContext = { title: string; section?: string; record?: Rec; rows?: Rec[]; ask?: string; desk?: string; format?: "item"; onApply?: (text: string) => void };
 type Plan = { ops: Op[]; records: Record<string, Rec>; dropped: string[]; state: "ready" | "running" | "done" | "cancelled"; results?: { ok: boolean; text: string; href?: string }[] };
-type Msg = { role: "user" | "assistant"; content: string; src?: "faq" | "cache" | "ai"; faqId?: string; saved?: boolean; q?: string; plan?: Plan };
+type Msg = { role: "user" | "assistant"; content: string; src?: "faq" | "cache" | "ai"; faqId?: string; saved?: boolean; q?: string; plan?: Plan; sources?: { n: number; kind: string; title: string; link: string; suspicious?: boolean }[] };
 type T4 = { en: string; ru: string; uk: string; ar: string };
 const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk, ar });
 
@@ -80,13 +80,16 @@ export default function AiPanel({ ctx, onClose }: { ctx: AiContext; onClose: () 
     setMsgs(next); setQ(""); setSugg([]); setBusy(true); ctl.current = new AbortController();
     try {
       const res = await fetch("/api/ai", { method: "POST", headers: { "Content-Type": "application/json" }, signal: ctl.current.signal,
-        body: JSON.stringify({ tier, context: context(), who: who(), section: ctx.section || "", lang, desk: desk?.id || "", format: ctx.format || "", messages: [...history, { role: "user", content: text }].slice(-10) }) });
+        // Workspace questions: the server reads what this person may open and names its sources; legal desks and
+        // item reviews keep their own prepared context
+        body: JSON.stringify({ tier, ...(desk || ctx.format ? { context: context() } : { retrieve: true, record_id: ctx.record?.id || null }), who: who(), section: ctx.section || "", lang, desk: desk?.id || "", format: ctx.format || "", messages: [...history, { role: "user", content: text }].slice(-10) }) });
       if (res.status === 429) { toast(t("ai_limit", lang), true); setMsgs(next.slice(0, -2)); return; }
       if (!res.ok || !res.body) throw new Error(await res.text());
       setUsage(res.headers.get("x-ai-usage") || "");
       const src = res.headers.get("x-ai-cache") === "hit" ? "cache" : "ai";
+      let sources: Msg["sources"] = []; try { const h = res.headers.get("x-ai-sources"); if (h) sources = JSON.parse(atob(h.replace(/-/g, "+").replace(/_/g, "/"))); } catch {}
       const reader = res.body.getReader(); const dec = new TextDecoder(); let acc = "";
-      for (;;) { const { done, value } = await reader.read(); if (done) break; acc += dec.decode(value, { stream: true }); setMsgs([...next.slice(0, -1), { role: "assistant", content: acc, src, q: text }]); }
+      for (;;) { const { done, value } = await reader.read(); if (done) break; acc += dec.decode(value, { stream: true }); setMsgs([...next.slice(0, -1), { role: "assistant", content: acc, src, q: text, sources }]); }
     } catch (e: any) { if (e.name !== "AbortError") toast(e.message || "Error", true); }
     finally { setBusy(false); }
   };
@@ -156,6 +159,7 @@ export default function AiPanel({ ctx, onClose }: { ctx: AiContext; onClose: () 
                 {m.plan.state === "running" && <div className="faint">…</div>}
                 {m.plan.state === "cancelled" && <div className="faint" style={{ fontSize: 13 }}>{T(L("Cancelled — nothing was changed.", "Отменено — ничего не изменено.", "Скасовано — нічого не змінено.", "أُلغي — لم يتغير شيء."))}</div>}
               </div>}
+              {!!m.sources?.length && <div className="ai-sources" data-sources={m.sources.length}><b>{T(L("Sources", "Источники", "Джерела", "المصادر"))}</b>{m.sources.map((x) => <a key={x.n} href={x.link} className={x.suspicious ? "susp" : ""} title={x.suspicious ? T(L("This source contains instructions; they were not followed", "В источнике есть инструкции; они не выполнялись", "У джерелі є інструкції; їх не виконано", "يحتوي المصدر على تعليمات لم تُتّبع")) : x.kind}>[{x.n}] {x.title}{x.suspicious ? " ⚠" : ""}</a>)}</div>}
               {m.content && !m.plan && mode === "ask" && !(busy && i === msgs.length - 1) && <div className="ai-src">
                 {m.src === "faq" && <span className="chip c-ok"><Icon n="book" className="lockico" />{t("from_faq", lang)}</span>}
                 {m.src === "cache" && <span className="chip c-ok"><Icon n="clock" className="lockico" />{t("from_cache", lang)}</span>}

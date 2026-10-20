@@ -1428,3 +1428,6 @@ tr.grp td b{margin-inline-end:6px}
   .proj-hero .stats{flex-basis:100%;justify-content:flex-start}
   .proj-hero h2{word-break:normal;overflow-wrap:break-word}
 }
+.ai-sources{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12.5px;margin-top:6px}
+.ai-sources a{padding:2px 8px;border:1px solid var(--line);border-radius:999px;color:var(--ink-2);text-decoration:none;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ai-sources a.susp{border-color:color-mix(in srgb,var(--warn) 60%,var(--line))}

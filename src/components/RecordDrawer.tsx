@@ -191,6 +191,7 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
     if (f.type === "people") return <PeopleField key={f.key} f={f} data={data} setData={setData} ro={ro} />;
     if (f.type === "dept") return <DeptField key={f.key} f={f} value={v} set={set} ro={ro} id={id} />;
     if (f.type === "rich") return <RichField key={f.key} f={f} value={v} set={set} ro={ro} id={id} />;
+    if (f.type === "readonly") return v ? <div key={f.key} className="field"><label>{tx(f.label, lang)}</label><div className="input ro mono" id={id} data-field={f.key}>{String(v)}</div></div> : null;
     if (f.auto) return v ? <div key={f.key} className="field"><label>{tx(f.label, lang)}</label><div className="input ro mono" id={id}>{String(v)}</div></div> : null;
     if (f.type === "html") return v ? <div key={f.key} className="field wide"><label>{tx(f.label, lang)}</label><iframe title={tx(f.label, lang)} className="mailframe" style={{ height: 560 }} srcDoc={String(v)} sandbox="" /></div> : null;
     if (f.type === "select") ctl = <select id={id} className="input" value={v} disabled={ro} onChange={(e) => set(e.target.value)}><option value="" />{f.options.map((o: string) => <option key={o}>{o}</option>)}</select>;
