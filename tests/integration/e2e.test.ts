@@ -15,7 +15,7 @@ import { deliverNotifications } from "../../src/lib/server/notify.ts";
 const skip = !APP;
 const db = admin(); const run = uid();
 let pw: any, browser: any; let erin: any, omar: any, pat: any, olga: any, mia: any, admn: any;
-export const evidence: Record<string, any> = { timings: {} as Record<string, number[]>, screenshots: [] as string[] };
+export const evidence: Record<string, any> = { timings: {} as Record<string, number[]>, summary: {} as Record<string, any>, screenshots: [] as string[] };
 const SHOTS = path.join(ENV.STACK_DIR || ".stack", "shots"); fs.mkdirSync(SHOTS, { recursive: true });
 const loadPw = () => { try { return createRequire(import.meta.url)("playwright"); } catch { return createRequire(path.join(execSync("npm root -g").toString().trim(), "x.js"))("playwright"); } };
 const time = (k: string, ms: number) => { (evidence.timings[k] ||= []).push(Math.round(ms)); };
@@ -260,7 +260,7 @@ test("performance: measured page loads, navigation, task creation, search, docum
   const { c } = await (await import("./_stack.ts")).signIn(mia.email);
   for (let i = 0; i < 20; i++) { const t0 = performance.now(); const r = await c.from("records").insert({ section: "company.tasks", title: `Perf ${run} ${i}`, status: "New", data: { assignee_id: erin.id } }).select("id").single(); time("api_task_create", performance.now() - t0); assert.ifError(r.error); }
   for (let i = 0; i < 20; i++) { const t0 = performance.now(); const r = await c.rpc("search_records", { q: `Perf ${run}`, n: 25 }); time("api_search", performance.now() - t0); assert.ifError(r.error); }
-  for (const k of Object.keys(evidence.timings)) { const xs = [...evidence.timings[k]].sort((a: number, b: number) => a - b); evidence.timings[k] = { n: xs.length, median: xs[Math.floor(xs.length / 2)], p90: xs[Math.min(xs.length - 1, Math.floor(xs.length * 0.9))], max: xs[xs.length - 1] } as any; }
+  for (const k of Object.keys(evidence.timings)) { const xs = [...evidence.timings[k]].sort((a: number, b: number) => a - b); (evidence.summary ||= {})[k] = { n: xs.length, median: xs[Math.floor(xs.length / 2)], p90: xs[Math.min(xs.length - 1, Math.floor(xs.length * 0.9))], max: xs[xs.length - 1] } as any; }
 });
 
 /* ---------------- Phase 3 in the browser ---------------- */
