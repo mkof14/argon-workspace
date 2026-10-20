@@ -131,7 +131,43 @@ drop function if exists public.class_meta(text);
 drop function if exists public.profile_department_sync();
 drop function if exists public.department_guard();
 
+-- v20 message search
+create or replace function public.search_messages(p_q text, p_project uuid default null, p_author uuid default null, p_from date default null, p_to date default null,
+  p_kind text default null, p_mentions_me boolean default false, p_decisions boolean default false, p_limit integer default 30)
+returns table (id uuid, record_id uuid, section text, title text, project_ref text, author uuid, created_at timestamptz, excerpt text, flag text, kind text)
+language plpgsql stable security definer set search_path = public as $$
+-- The same rules as reading a discussion (p_comments_read, p_comments_internal, p_session_*), applied once per record
+-- instead of once per message: first the records this person may open, then only their messages.
+declare me uuid := auth.uid(); ext boolean; w1 text;
+begin
+  if me is null or not public.session_ok() or length(trim(coalesce(p_q, ''))) < 2 then return; end if;
+  ext := public.is_external();
+  w1 := replace(replace(replace(lower(split_part(trim(p_q), ' ', 1)), '\', '\\'), '%', '\%'), '_', '\_');
+  return query
+  with vis as materialized (
+    select r.id, r.section, r.title, r.data from public.records r
+    where (p_project is null or r.id = p_project or r.data->>'project_ref' = p_project::text)
+      and public.record_visible(r) and public.announcement_visible(r))
+  select c.id, c.record_id, v.section, v.title, coalesce(case when v.section = 'company.projects' then v.id::text end, v.data->>'project_ref'), c.author, c.created_at,
+    left(regexp_replace(substr(c.body, greatest(1, strpos(lower(c.body), lower(split_part(trim(p_q), ' ', 1))) - 60), 220), '@\[([^\]]+)\]\([0-9a-fA-F-]{36}\)', '@\1', 'g'), 220),
+    c.flag, c.kind
+  from public.comments c join vis v on v.id = c.record_id
+  where c.deleted_at is null and not (c.internal and ext)
+    and lower(c.body) like '%' || w1 || '%'
+    and not exists (select 1 from unnest(string_to_array(lower(trim(p_q)), ' ')) w where w <> '' and position(w in lower(c.body || ' ' || v.title)) = 0)
+    and (p_author is null or c.author = p_author)
+    and (p_from is null or c.created_at >= p_from) and (p_to is null or c.created_at < p_to + 1)
+    and (p_kind is null or v.section = p_kind or c.kind = p_kind)
+    and (not p_mentions_me or me = any(c.mentions))
+    and (not p_decisions or c.flag = 'decision')
+  order by c.created_at desc limit least(greatest(coalesce(p_limit, 30), 1), 100);
+end $$;
+revoke execute on function public.search_messages(text, uuid, uuid, date, date, text, boolean, boolean, integer) from public, anon;
+grant execute on function public.search_messages(text, uuid, uuid, date, date, text, boolean, boolean, integer) to authenticated;
+drop function if exists public.as_uuid(text);
+
 -- indexes added by v21 (the numbers stay in the records)
+drop index if exists public.records_section_created_idx;
 drop index if exists public.records_doc_number_uq;
 drop index if exists public.records_text_trgm_idx;
 drop index if exists public.records_cal_idx;

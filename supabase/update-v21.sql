@@ -221,6 +221,7 @@ revoke execute on function public.allocate_doc_number(text, text, text, uuid) fr
 create unique index if not exists records_doc_number_uq on public.records ((data->>'doc_number'))
   where section in ('company.documents', 'company.decisions', 'company.wiki') and data ? 'doc_number';
 create index if not exists records_section_updated_idx on public.records (section, updated_at desc);
+create index if not exists records_section_created_idx on public.records (section, created_at desc);
 create index if not exists records_doc_project_idx on public.records ((data->>'project_ref')) where section in ('company.documents', 'company.decisions', 'company.wiki', 'company.meetings', 'company.tasks', 'company.milestones');
 create index if not exists records_text_trgm_idx on public.records using gin ((lower(title || ' ' || coalesce(data->>'doc_number', '') || ' ' || coalesce(data->>'description', '') || ' ' || coalesce(data->>'summary', '') || ' ' || coalesce(data->>'body', '') || ' ' || coalesce(data->>'decision', '') || ' ' || coalesce(data->>'notes', '') || ' ' || coalesce(data->>'tags', ''))) extensions.gin_trgm_ops);
 create index if not exists records_cal_idx on public.records ((coalesce(data->>'date', data->>'due', data->>'review_due', data->>'expiration_date'))) where section in ('company.meetings', 'company.milestones', 'company.tasks', 'company.documents');
@@ -230,46 +231,69 @@ create index if not exists records_cal_idx on public.records ((coalesce(data->>'
       Adds to v20: restricted classifications, knowledge drafts, decisions follow their source, and announcement
       audiences now also cover the comments and files of the announcement.
    --------------------------------------------------------------------------------------------- */
-create or replace function public.extra_visible(p_uid uuid, r public.records) returns boolean
-language sql stable security definer set search_path = public as $$
-  select case
-    when r.section = 'company.announcements' then
-      exists (select 1 from public.profiles q where q.id = p_uid and q.role in ('owner', 'admin', 'management')) or p_uid = r.created_by
-      or (r.status = 'Published' and coalesce(r.data->>'publish_at', '') <= to_char(now() at time zone 'utc', 'YYYY-MM-DD')
-          and (coalesce(r.data->>'expires', '') = '' or r.data->>'expires' >= to_char(now() at time zone 'utc', 'YYYY-MM-DD'))
-          and p_uid in (select public.announcement_audience(r)))
-    when r.section in ('company.documents', 'company.wiki') then
-      (not coalesce((public.class_meta(r.data->>'classification')->>'restricted')::boolean, false)
-        or p_uid = r.created_by or coalesce(r.data->>'owner_id', '') = p_uid::text or coalesce(r.data->>'reviewer_id', '') = p_uid::text
-        or coalesce(r.data->'access_ids', '[]'::jsonb) ? p_uid::text or coalesce(r.data->'contributors_ids', '[]'::jsonb) ? p_uid::text
-        or exists (select 1 from public.profiles q where q.id = p_uid and q.role in ('owner', 'management')))
-      and (r.section <> 'company.wiki' or coalesce(r.status, 'Published') in ('Published', 'Superseded', 'Archived')
-        or p_uid = r.created_by or coalesce(r.data->>'owner_id', '') = p_uid::text or coalesce(r.data->>'reviewer_id', '') = p_uid::text
-        or exists (select 1 from public.profiles q where q.id = p_uid and q.role in ('owner', 'admin', 'management')))
-    when r.section = 'company.decisions' and coalesce(r.data->>'source_ref', '') ~ '^[0-9a-f-]{36}$' then
-      not exists (select 1 from public.records s where s.id = (r.data->>'source_ref')::uuid)
-      or exists (select 1 from public.records s where s.id = (r.data->>'source_ref')::uuid and public.record_visible_for(p_uid, s))
-    else true end
+-- a text reference to a record id, or null: lets lookups by data->>'…_ref' use the primary key instead of a full scan
+create or replace function public.as_uuid(t text) returns uuid language sql immutable parallel safe as $$
+  select case when t ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then t::uuid end
 $$;
+
+-- PL/pgSQL rather than SQL: the statements are prepared once per session, so the check costs ~20 µs a row instead of
+-- ~0.7 ms (measured in tests/integration/docperf.test.ts at 10,000 documents). The rules are unchanged.
+create or replace function public.extra_visible(p_uid uuid, r public.records) returns boolean
+language plpgsql stable security definer set search_path = public as $$
+declare rl text; today text;
+begin
+  if r.section = 'company.announcements' then
+    if p_uid = r.created_by then return true; end if;
+    select role into rl from public.profiles where id = p_uid;
+    if rl in ('owner', 'admin', 'management') then return true; end if;
+    today := to_char(now() at time zone 'utc', 'YYYY-MM-DD');
+    return coalesce(r.status = 'Published' and coalesce(r.data->>'publish_at', '') <= today
+      and (coalesce(r.data->>'expires', '') = '' or r.data->>'expires' >= today)
+      and exists (select 1 from public.announcement_audience(r) a where a = p_uid), false);
+  elsif r.section in ('company.documents', 'company.wiki') then
+    if p_uid = r.created_by or coalesce(r.data->>'owner_id', '') = p_uid::text or coalesce(r.data->>'reviewer_id', '') = p_uid::text then return true; end if;
+    select role into rl from public.profiles where id = p_uid;
+    if coalesce((select (t.meta->>'restricted')::boolean from public.taxonomy t where t.kind = 'classification' and t.code = r.data->>'classification'), false)
+       and not coalesce(coalesce(r.data->'access_ids', '[]'::jsonb) ? p_uid::text or coalesce(r.data->'contributors_ids', '[]'::jsonb) ? p_uid::text or rl in ('owner', 'management'), false) then
+      return false;
+    end if;
+    return coalesce(r.section <> 'company.wiki' or coalesce(r.status, 'Published') in ('Published', 'Superseded', 'Archived') or rl in ('owner', 'admin', 'management'), false);
+  elsif r.section = 'company.decisions' and coalesce(r.data->>'source_ref', '') ~ '^[0-9a-f-]{36}$' then
+    return not exists (select 1 from public.records s where s.id = (r.data->>'source_ref')::uuid)
+      or exists (select 1 from public.records s where s.id = (r.data->>'source_ref')::uuid and public.record_visible_for(p_uid, s));
+  end if;
+  return true;
+end $$;
 revoke execute on function public.extra_visible(uuid, public.records) from public, anon, authenticated;
 
 create or replace function public.record_visible(r public.records) returns boolean
-language sql stable security definer set search_path = public as $$
-  select public.can_read(r.section)
-    and (not r.controlled or coalesce((select us_person from public.profiles where id = auth.uid()), false))
-    and (not public.is_external() or r.company = '*' or r.company = (select company from public.profiles where id = auth.uid()))
-    and public.extra_visible(auth.uid(), r)
-$$;
+language plpgsql stable security definer set search_path = public as $$
+declare me uuid := auth.uid(); p record;
+begin
+  select pp.role, pp.us_person, pp.company into p from public.profiles pp where pp.id = me;
+  if not found then return false; end if;
+  if coalesce(p.role not in ('owner', 'admin'), true) and not exists (select 1 from public.section_access a where a.role = p.role and a.section = r.section) then return false; end if;
+  -- NULL-safe: an unknown flag or company counts as the stricter case, exactly as the SQL version did
+  if r.controlled is distinct from false and not coalesce(p.us_person, false) then return false; end if;
+  if coalesce(p.role in ('partner', 'vendor', 'investor', 'pending'), true) and not coalesce(r.company = '*' or r.company = p.company, false) then return false; end if;
+  if r.section in ('company.announcements', 'company.documents', 'company.wiki', 'company.decisions') then return coalesce(public.extra_visible(me, r), false); end if;
+  return true;
+end $$;
 revoke execute on function public.record_visible(public.records) from anon;
 
 create or replace function public.record_visible_for(p_user uuid, r public.records) returns boolean
-language sql stable security definer set search_path = public as $$
-  select exists (select 1 from public.profiles p where p.id = p_user and not p.disabled
-    and (p.role in ('owner', 'admin') or exists (select 1 from public.section_access a where a.role = p.role and a.section = r.section))
-    and (not r.controlled or p.us_person)
-    and (p.role not in ('partner', 'vendor', 'investor', 'pending') or r.company = '*' or r.company = p.company))
-    and public.extra_visible(p_user, r)
-$$;
+language plpgsql stable security definer set search_path = public as $$
+declare p record;
+begin
+  select pp.role, pp.us_person, pp.company into p from public.profiles pp where pp.id = p_user and not pp.disabled;
+  if not found then return false; end if;
+  if coalesce(p.role not in ('owner', 'admin'), true) and not exists (select 1 from public.section_access a where a.role = p.role and a.section = r.section) then return false; end if;
+  -- NULL-safe: an unknown flag or company counts as the stricter case, exactly as the SQL version did
+  if r.controlled is distinct from false and not coalesce(p.us_person, false) then return false; end if;
+  if coalesce(p.role in ('partner', 'vendor', 'investor', 'pending'), true) and not coalesce(r.company = '*' or r.company = p.company, false) then return false; end if;
+  if r.section in ('company.announcements', 'company.documents', 'company.wiki', 'company.decisions') then return coalesce(public.extra_visible(p_user, r), false); end if;
+  return true;
+end $$;
 revoke execute on function public.record_visible_for(uuid, public.records) from public, anon, authenticated;
 
 -- announcements: the audience now also matches departments by id, code or name (Phase 3 matched the key only)
@@ -295,14 +319,14 @@ revoke execute on function public.announcement_audience(public.records) from pub
 create or replace function public.file_visible(path text) returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.records r
-    where r.id::text = split_part(path, '/', 2) and r.section = split_part(path, '/', 1) and public.record_visible(r)
+    where r.id = public.as_uuid(split_part(path, '/', 2)) and r.section = split_part(path, '/', 1) and public.record_visible(r)
       and not (r.section = 'company.documents' and (r.controlled or coalesce((public.class_meta(r.data->>'classification')->>'restricted')::boolean, false))))
 $$;
 -- a stored version is never replaced or removed through Storage
 create or replace function public.file_writable(path text) returns boolean
 language sql stable security definer set search_path = public as $$
   select not public.is_external() and exists (select 1 from public.records r
-    where r.id::text = split_part(path, '/', 2) and r.section = split_part(path, '/', 1)
+    where r.id = public.as_uuid(split_part(path, '/', 2)) and r.section = split_part(path, '/', 1)
       and public.record_visible(r) and public.can_write(r.section))
 $$;
 
@@ -417,7 +441,7 @@ begin
   insert into public.activity(record_id, section, actor, action, detail) values (r.id, r.section, p_actor, 'version_added',
     jsonb_build_object('version', lbl, 'version_id', v.id, 'sha256', v.sha256, 'size', v.size, 'previous', prev.label));
   for u in select distinct x from (select nullif(r.data->>'owner_id', '')::uuid x union select r.created_by union select nullif(r.data->>'reviewer_id', '')::uuid
-      union select nullif(p.data->>'manager_id', '')::uuid from public.records p where p.id::text = r.data->>'project_ref') s where x is not null loop
+      union select nullif(p.data->>'manager_id', '')::uuid from public.records p where p.id = public.as_uuid(r.data->>'project_ref')) s where x is not null loop
     perform public.notify_user(u, 'doc_version', r.id, 'ver:' || v.id || ':' || u, r.title, 'Version ' || lbl, p_actor);
   end loop;
   return to_jsonb(v);
@@ -506,7 +530,7 @@ begin
     raise exception 'Only the reviewer of this document can give the review' using errcode = '42501';
   end if;
   if p_decision = 'changes_requested' and length(trim(coalesce(p_note, ''))) = 0 then raise exception 'Say what needs to change' using errcode = '23514'; end if;
-  select * into v from public.document_versions where id::text = r.data->>'current_version_id';
+  select * into v from public.document_versions where id = public.as_uuid(r.data->>'current_version_id');
   if v.id is null then raise exception 'Upload a version first' using errcode = '23514'; end if;
   update public.document_versions set review_state = p_decision where id = v.id;
   perform set_config('agron.doc_service', 'on', true);
@@ -611,7 +635,7 @@ begin
         end if;
         if not (lead or me = old.created_by or coalesce(od->>'owner_id', '') = me::text) then raise exception 'Only the owner or management can make a document effective' using errcode = '42501'; end if;
         if coalesce(d->>'effective_date', '') = '' then d := d || jsonb_build_object('effective_date', to_char(now() at time zone 'utc', 'YYYY-MM-DD')); end if;
-        update public.document_versions set effective_date = (d->>'effective_date')::date where id::text = d->>'current_version_id' and effective_date is null;
+        update public.document_versions set effective_date = (d->>'effective_date')::date where id = public.as_uuid(d->>'current_version_id') and effective_date is null;
         update public.document_versions set superseded_at = now() where record_id = new.id and id::text <> d->>'current_version_id' and superseded_at is null and approval_state = 'approved';
       end if;
       if new.status in ('Superseded', 'Archived') and not (lead or me = old.created_by or coalesce(od->>'owner_id', '') = me::text) then
@@ -771,7 +795,7 @@ begin
         else r.status is distinct from 'Archived' end
   ), filt as (
     select b.*, case when p_approval is null then null else coalesce((select a.status from public.approvals a where a.record_id = b.id and a.status in ('pending', 'queued') order by a.created_at desc limit 1),
-           (select dv.approval_state from public.document_versions dv where dv.id::text = b.data->>'current_version_id'), 'none') end ap
+           (select dv.approval_state from public.document_versions dv where dv.id = public.as_uuid(b.data->>'current_version_id')), 'none') end ap
     from base b
   ), sel as (select f.* from filt f where p_approval is null or f.ap = p_approval),
   page as (select s.* from sel s
@@ -782,7 +806,7 @@ begin
         'project_ref', v.data->>'project_ref', 'project', v.data->>'project_ref_title', 'department', v.data->>'department', 'owner_id', v.data->>'owner_id', 'owner', v.data->>'owner',
         'version', v.data->>'version', 'approved_version', v.data->>'approved_version', 'status', v.status, 'classification', v.data->>'classification', 'controlled', v.controlled,
         'updated_at', v.updated_at, 'approval', coalesce(v.ap, (select a.status from public.approvals a where a.record_id = v.id and a.status in ('pending', 'queued') order by a.created_at desc limit 1),
-           (select dv.approval_state from public.document_versions dv where dv.id::text = v.data->>'current_version_id'), 'none'))
+           (select dv.approval_state from public.document_versions dv where dv.id = public.as_uuid(v.data->>'current_version_id')), 'none'))
         order by case when p_sort = 'number' then v.data->>'doc_number' when p_sort = 'title' then lower(v.title) end nulls last, case when p_sort in ('number', 'title') then null else v.updated_at end desc nulls last)
       from page v), '[]'::jsonb)) into res;
   return res;
@@ -792,6 +816,43 @@ grant execute on function public.document_center(text, text, uuid, text, uuid, t
 
 -- one search over authorized information: register entries, knowledge, projects, tasks, meetings, decisions,
 -- announcements, text inside stored documents, discussions and people
+create or replace function public.search_messages(p_q text, p_project uuid default null, p_author uuid default null, p_from date default null, p_to date default null,
+  p_kind text default null, p_mentions_me boolean default false, p_decisions boolean default false, p_limit integer default 30)
+returns table (id uuid, record_id uuid, section text, title text, project_ref text, author uuid, created_at timestamptz, excerpt text, flag text, kind text)
+language plpgsql stable security definer set search_path = public as $$
+-- v21: messages first (trigram index on the text), then the reading rules only for the records those messages belong
+-- to — the same rules as reading a discussion (p_comments_read, p_comments_internal, p_session_*). v20 checked every
+-- record of the company first, which grew with the number of documents.
+declare me uuid := auth.uid(); ext boolean; w1 text;
+begin
+  if me is null or not public.session_ok() or length(trim(coalesce(p_q, ''))) < 2 then return; end if;
+  ext := public.is_external();
+  w1 := replace(replace(replace(lower(split_part(trim(p_q), ' ', 1)), '\', '\\'), '%', '\%'), '_', '\_');
+  return query
+  with cand as materialized (
+    select c.* from public.comments c
+    where c.deleted_at is null and not (c.internal and ext) and lower(c.body) like '%' || w1 || '%'
+      and (p_author is null or c.author = p_author)
+      and (p_from is null or c.created_at >= p_from) and (p_to is null or c.created_at < p_to + 1)
+      and (not p_mentions_me or me = any(c.mentions))
+      and (not p_decisions or c.flag = 'decision')
+    order by c.created_at desc limit 5000
+  ), vis as materialized (
+    select r.id, r.section, r.title, r.data from public.records r
+    where r.id in (select distinct cand.record_id from cand)
+      and (p_project is null or r.id = p_project or r.data->>'project_ref' = p_project::text)
+      and public.record_visible(r) and public.announcement_visible(r))
+  select c.id, c.record_id, v.section, v.title, coalesce(case when v.section = 'company.projects' then v.id::text end, v.data->>'project_ref'), c.author, c.created_at,
+    left(regexp_replace(substr(c.body, greatest(1, strpos(lower(c.body), lower(split_part(trim(p_q), ' ', 1))) - 60), 220), '@\[([^\]]+)\]\([0-9a-fA-F-]{36}\)', '@\1', 'g'), 220),
+    c.flag, c.kind
+  from cand c join vis v on v.id = c.record_id
+  where not exists (select 1 from unnest(string_to_array(lower(trim(p_q)), ' ')) w where w <> '' and position(w in lower(c.body || ' ' || v.title)) = 0)
+    and (p_kind is null or v.section = p_kind or c.kind = p_kind)
+  order by c.created_at desc limit least(greatest(coalesce(p_limit, 30), 1), 100);
+end $$;
+revoke execute on function public.search_messages(text, uuid, uuid, date, date, text, boolean, boolean, integer) from public, anon;
+grant execute on function public.search_messages(text, uuid, uuid, date, date, text, boolean, boolean, integer) to authenticated;
+
 create or replace function public.corp_search(p_q text, p_types text[] default null, p_project uuid default null, p_department text default null, p_person uuid default null,
   p_doc_type text default null, p_from date default null, p_to date default null, p_classification text default null, p_status text default null, p_limit integer default 40)
 returns table (kind text, id uuid, record_id uuid, section text, title text, excerpt text, project_ref text, version text, owner_id text, updated_at timestamptz, link text, rank real)
@@ -823,13 +884,18 @@ begin
   ), recv as (select x.* from rec x join public.records rr on rr.id = x.id where public.record_visible(rr)
       and not exists (select 1 from unnest(string_to_array(q, ' ')) w where w <> '' and position(w in lower(x.title || ' ' || coalesce(x.data::text, ''))) = 0)
     limit lim),
-  pages as (
-    select p.record_id, p.path, p.page, p.content, ts_rank(p.tsv, tsq) rk, r2.title rtitle, r2.section rsection, r2.data rdata, r2.updated_at rupd
-    from public.doc_pages p join public.records r2 on r2.id = p.record_id
+  pcand as materialized (
+    -- the best-ranked matching pages first (full-text index), the reading rules only for those
+    select p.record_id, p.path, p.page, p.content, ts_rank(p.tsv, tsq) rk
+    from public.doc_pages p
     where tsq is not null and (p_types is null or 'document_text' = any(p_types) or 'document' = any(p_types)) and p.tsv @@ tsq
-      and (p_project is null or r2.data->>'project_ref' = p_project::text) and (p_doc_type is null or r2.data->>'doc_type' = p_doc_type)
+    order by rk desc limit 1000
+  ), pages as (
+    select p.record_id, p.path, p.page, p.content, p.rk, r2.title rtitle, r2.section rsection, r2.data rdata, r2.updated_at rupd
+    from pcand p join public.records r2 on r2.id = p.record_id
+    where (p_project is null or r2.data->>'project_ref' = p_project::text) and (p_doc_type is null or r2.data->>'doc_type' = p_doc_type)
       and (p_classification is null or r2.data->>'classification' = p_classification) and public.record_visible(r2)
-    order by rk desc limit lim
+    order by p.rk desc limit lim
   )
   select coalesce(x.k, 'record'), x.id, x.id, x.section, x.title,
          left(coalesce(nullif(x.data->>'summary', ''), nullif(x.data->>'description', ''), nullif(left(regexp_replace(coalesce(x.data->>'body', x.data->>'decision', x.data->>'notes', ''), '[#*_>`]', '', 'g'), 220), ''), x.data->>'doc_type', x.status, ''), 220),
@@ -919,16 +985,17 @@ begin
   return coalesce((select jsonb_agg(x order by x->>'date' desc nulls last) from (
     select jsonb_build_object('id', d.id, 'number', d.data->>'doc_number', 'title', d.title, 'decision', d.data->>'decision', 'date', coalesce(d.data->>'date', to_char(d.created_at, 'YYYY-MM-DD')),
       'status', d.status, 'made_by', coalesce(d.data->>'made_by_id', d.created_by::text), 'responsible', d.data->>'responsible_id', 'due', d.data->>'due',
-      'project', (select jsonb_build_object('id', p.id, 'title', p.title) from public.records p where p.id::text = d.data->>'project_ref' and public.record_visible(p)),
-      'source', (select jsonb_build_object('id', s.id, 'title', s.title, 'section', s.section) from public.records s where s.id::text = d.data->>'source_ref' and public.record_visible(s)),
-      'document', (select jsonb_build_object('id', s.id, 'title', s.title, 'number', s.data->>'doc_number') from public.records s where s.id::text = d.data->>'document_ref' and public.record_visible(s)),
-      'task', (select jsonb_build_object('id', s.id, 'title', s.title, 'status', s.status) from public.records s where s.id::text = coalesce(d.data->>'task_ref', d.data->>'task_id') and public.record_visible(s)),
+      'project', (select jsonb_build_object('id', p.id, 'title', p.title) from public.records p where p.id = public.as_uuid(d.data->>'project_ref') and public.record_visible(p)),
+      'source', (select jsonb_build_object('id', s.id, 'title', s.title, 'section', s.section) from public.records s where s.id = public.as_uuid(d.data->>'source_ref') and public.record_visible(s)),
+      'document', (select jsonb_build_object('id', s.id, 'title', s.title, 'number', s.data->>'doc_number') from public.records s where s.id = public.as_uuid(d.data->>'document_ref') and public.record_visible(s)),
+      'task', (select jsonb_build_object('id', s.id, 'title', s.title, 'status', s.status) from public.records s where s.id = public.as_uuid(coalesce(d.data->>'task_ref', d.data->>'task_id')) and public.record_visible(s)),
       'source_kind', coalesce(d.data->>'source_section', case when d.data->>'_idem' like 'approval:%' then 'approval' when d.data->>'_idem' like 'decision:comment:%' then 'discussion' end, 'management')) x
-    from public.records d
-    where d.section = 'company.decisions' and public.record_visible(d)
-      and (p_project is null or d.data->>'project_ref' = p_project::text) and (p_status is null or d.status = p_status)
-      and (q = '' or lower(d.title || ' ' || coalesce(d.data->>'decision', '') || ' ' || coalesce(d.data->>'doc_number', '')) like '%' || q || '%')
-    order by d.created_at desc limit least(greatest(coalesce(p_limit, 100), 1), 500)) s), '[]'::jsonb);
+    from (select dd.* from public.records dd
+      where dd.section = 'company.decisions'
+        and (p_project is null or dd.data->>'project_ref' = p_project::text) and (p_status is null or dd.status = p_status)
+        and (q = '' or lower(dd.title || ' ' || coalesce(dd.data->>'decision', '') || ' ' || coalesce(dd.data->>'doc_number', '')) like '%' || q || '%')
+        and public.record_visible(dd)
+      order by dd.created_at desc limit least(greatest(coalesce(p_limit, 100), 1), 500)) d) s), '[]'::jsonb);
 end $$;
 revoke execute on function public.decision_log(text, uuid, text, integer) from public, anon;
 grant execute on function public.decision_log(text, uuid, text, integer) to authenticated;
