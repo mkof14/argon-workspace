@@ -110,7 +110,7 @@ export function financeFindings(all: R[], today: string, th: Th): Finding[] {
 /* ---------------- Sales ---------------- */
 const SITE = "https://workspace.agron1.com";
 const link = (r: R) => `${SITE}/${r.section.replace(".", "/")}?r=${r.id}`;
-const openTask = (all: R[], title: string) => all.some((t) => t.section === "company.tasks" && t.status !== "Done" && t.title.trim().toLowerCase() === title.trim().toLowerCase());
+const openTask = (all: R[], title: string) => all.some((t) => t.section === "company.tasks" && !["Done", "Completed", "Cancelled"].includes(t.status || "") && t.title.trim().toLowerCase() === title.trim().toLowerCase());
 
 export function salesFindings(all: R[], today: string, th: Th): Finding[] {
   const out: Finding[] = [];
@@ -120,7 +120,7 @@ export function salesFindings(all: R[], today: string, th: Th): Finding[] {
     const idle = age(d, today); if (idle < th.stalled_deal) continue;
     const title = `Follow up — ${d.title}`;
     out.push({ rec: d, level: idle >= th.stalled_deal * 2 ? "bad" : "warn", who: ["owner"], key: `sal-stall|${d.id}`, text: `Deal “${d.title}” (${d.status}) has had no movement for ${idle} days.`,
-      action: openTask(all, title) ? undefined : { type: "create", section: "company.tasks", title, status: "Open", fields: { assignee: "{owner}", due: addDays(today, 2), priority: "High", related: link(d), notes: "Call or write to the client and record the next step in the deal." } }, why: `${idle} days without movement` });
+      action: openTask(all, title) ? undefined : { type: "create", section: "company.tasks", title, status: "New", fields: { assignee: "{owner}", due: addDays(today, 2), priority: "High", related: link(d), notes: "Call or write to the client and record the next step in the deal." } }, why: `${idle} days without movement` });
   }
   // Qualified leads become deals; new leads must be contacted within two days
   for (const l of of(all, "marketing.leads")) {
@@ -157,7 +157,7 @@ export function salesFindings(all: R[], today: string, th: Th): Finding[] {
     if (a.status === "Done" && next && days(String(a.updated_at || today), today) <= 14) {
       const title = `Next step: ${next.slice(0, 80)} — ${a.data?.client || a.title}`;
       if (!openTask(all, title) && !all.some((t) => t.section === "company.tasks" && t.title === title))
-        out.push({ rec: a, level: "info", who: ["owner"], key: `sal-next|${a.id}`, repeat: 365, text: `Next step after “${a.title}”: ${next}. A task is prepared.`, action: { type: "create", section: "company.tasks", title, status: "Open", fields: { assignee: "{owner}", due: addDays(today, 3), priority: "Medium", related: link(a) } }, why: "Next step recorded" });
+        out.push({ rec: a, level: "info", who: ["owner"], key: `sal-next|${a.id}`, repeat: 365, text: `Next step after “${a.title}”: ${next}. A task is prepared.`, action: { type: "create", section: "company.tasks", title, status: "New", fields: { assignee: "{owner}", due: addDays(today, 3), priority: "Normal", related: link(a) } }, why: "Next step recorded" });
     }
   }
   // Lost deals without a reason make the loss analysis blind
@@ -263,7 +263,7 @@ export function hrFindings(all: R[], today: string, _th: Th): Finding[] {
       out.push({ rec: p, level: "info", who: ["role:hr"], key: `hr-onb|${p.id}`, text: `${n} is onboarding without a checklist — one is prepared.`, action: { type: "create", section: "hr.onboarding", title: "Onboarding — {title}", status: "To do", fields: { person: "{title}", due: isDate(p.data?.start) ? addDays(p.data.start, 5) : addDays(today, 5) } }, why: "Status Onboarding" });
     if (live && isDate(p.data?.probation)) {
       const d = days(today, p.data.probation); const title = `Probation review — ${n}`;
-      if (d >= 0 && d <= 14 && !has("company.tasks", title)) out.push({ rec: p, level: "info", who: ["role:hr"], key: `hr-prob|${p.id}`, text: `Probation of ${n} ends on ${p.data.probation} — a review task for ${p.data?.manager || "the manager"} is prepared.`, action: { type: "create", section: "company.tasks", title, status: "Open", fields: { assignee: "{manager}", due: p.data.probation, priority: "High", notes: "Decide: confirm, extend or end. Record the result in the team card." } }, why: "Probation ends soon" });
+      if (d >= 0 && d <= 14 && !has("company.tasks", title)) out.push({ rec: p, level: "info", who: ["role:hr"], key: `hr-prob|${p.id}`, text: `Probation of ${n} ends on ${p.data.probation} — a review task for ${p.data?.manager || "the manager"} is prepared.`, action: { type: "create", section: "company.tasks", title, status: "New", fields: { assignee: "{manager}", due: p.data.probation, priority: "High", notes: "Decide: confirm, extend or end. Record the result in the team card." } }, why: "Probation ends soon" });
     }
     if (live && isDate(p.data?.expires)) {
       const st = stepFor(days(today, p.data.expires), [90, 30, 7]);

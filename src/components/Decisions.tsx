@@ -75,13 +75,14 @@ export default function Decisions() {
   const titles = useTr((items || []).map((d) => d.title), lang);
   const tmap: Record<string, string> = Object.fromEntries((items || []).map((d, i) => [d.id, titles[i]]));
   const drop = (id: string) => setItems((xs) => (xs || []).filter((x) => x.id !== id));
-  const act = async (d: Decision, yes: boolean) => {
+  const act = async (d: Decision, yes: boolean, changes = false) => {
+    if (changes && !(note[d.id] || "").trim()) { toast(T(L("Write what needs to change", "Напишите, что нужно изменить", "Напишіть, що потрібно змінити", "اكتب ما يجب تغييره")), true); return; }
     setBusy(d.id);
     try {
       if (d.kind === "approval") {
         const rule = APPROVALS[d.section!];
         if (d.id.startsWith("demo:")) { const r = (await store.listMany([d.section!])).find((x) => x.id === d.recordId); const to = yes ? rule.ok : rule.no; if (r && to) await store.save({ ...store.original(r), status: to }); }
-        else { const r = await fetch("/api/approvals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "decide", id: d.id, decision: yes ? "approved" : "rejected", comment: note[d.id] || "" }) }); if (!r.ok) throw new Error(await r.text()); }
+        else { const r = await fetch("/api/approvals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "decide", id: d.id, decision: yes ? "approved" : changes ? "changes_requested" : "rejected", comment: note[d.id] || "" }) }); if (!r.ok) throw new Error(await r.text()); }
       } else if (d.kind === "agent") {
         const r = await fetch("/api/automation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "decide", id: d.id, approve: yes }) }); if (!r.ok) throw new Error(await r.text());
       } else if (d.kind === "invoice" && yes) {
@@ -104,6 +105,7 @@ export default function Decisions() {
   const sum = (items || []).filter((d) => d.kind === "approval").reduce((a, d) => a + d.usd, 0);
   if (!items) return <div className="card" style={{ padding: 24 }}>…</div>;
   return <div style={{ display: "grid", gap: 14 }}>
+    <SubmitPanel />
     <div className="card dc-top">
       <div><b className="dc-n">{items.length}</b><small className="faint">{T(L("waiting for your answer", "ждут вашего ответа", "чекають вашої відповіді", "بانتظار ردك"))}</small></div>
       {sum > 0 && <div><b className="dc-n">{money(sum)}</b><small className="faint">{T(L("in approvals", "на согласовании", "на погодженні", "قيد الموافقة"))}</small></div>}
@@ -129,7 +131,7 @@ export default function Decisions() {
         {d.kind === "project" && <><div className="toolbar" style={{ gap: 6 }}>{(d.data?._reasons || []).map((r: any) => <span key={r.k} className="chip">{T(reason(r))}</span>)}</div>
           {d.data?._next && <small className="faint">{T(L("Next step", "Следующий шаг", "Наступний крок", "الخطوة التالية"))}: {d.data._nextDate} · {d.data._next}</small>}</>}
         <div className="toolbar">
-          {d.kind === "approval" && <><button className={`btn sm ${warnsOf(d).some((w) => w.level === "bad") ? "" : "primary"}`} disabled={busy === d.id} onClick={() => act(d, true)}><Icon n="check" />{warnsOf(d).some((w) => w.level === "bad") ? T(L("Approve anyway", "Одобрить всё равно", "Схвалити все одно", "وافق رغم ذلك")) : T(L("Approve", "Одобрить", "Схвалити", "موافقة"))}</button><button className="btn sm" disabled={busy === d.id} onClick={() => act(d, false)}>{T(L("Return", "Вернуть", "Повернути", "إعادة"))}</button></>}
+          {d.kind === "approval" && <><button className={`btn sm ${warnsOf(d).some((w) => w.level === "bad") ? "" : "primary"}`} disabled={busy === d.id} onClick={() => act(d, true)}><Icon n="check" />{warnsOf(d).some((w) => w.level === "bad") ? T(L("Approve anyway", "Одобрить всё равно", "Схвалити все одно", "وافق رغم ذلك")) : T(L("Approve", "Одобрить", "Схвалити", "موافقة"))}</button><button className="btn sm" disabled={busy === d.id} onClick={() => act(d, false, true)}><Icon n="edit" />{T(L("Request changes", "Запросить изменения", "Запросити зміни", "طلب تعديلات"))}</button><button className="btn sm" disabled={busy === d.id} onClick={() => act(d, false)}>{T(L("Return", "Вернуть", "Повернути", "إعادة"))}</button></>}
           {d.kind === "agent" && !d.data?._hidden && <><button className="btn primary sm" disabled={busy === d.id} onClick={() => act(d, true)}><Icon n="check" />{a?.type === "email" ? T(L("Send", "Отправить", "Надіслати", "إرسال")) : T(L("Do it", "Выполнить", "Виконати", "نفّذ"))}</button><button className="btn sm" disabled={busy === d.id} onClick={() => act(d, false)}>{T(L("Decline", "Отклонить", "Відхилити", "رفض"))}</button>
             {a?.type === "email" && <Link className="btn ghost sm" href="/admin/system?tab=auto">{T(L("Edit first", "Сначала поправить", "Спершу виправити", "عدّل أولاً"))}</Link>}</>}
           {d.kind === "invoice" && <><Link className="btn sm" href={href(d.section, d.recordId)}><Icon n="file" />{T(L("Open invoice", "Открыть счёт", "Відкрити рахунок", "افتح الفاتورة"))}</Link><button className="btn primary sm" disabled={busy === d.id} onClick={() => act(d, true)}><Icon n="send" />{T(L("Mark as sent", "Отметить отправленным", "Позначити надісланим", "علّمها كمرسلة"))}</button></>}
@@ -137,4 +139,27 @@ export default function Decisions() {
         </div>
       </div>; })}
   </div>;
+}
+
+/** "Submit for approval": my records that can be sent now (status allows it and nothing is pending), plus a new request. */
+function SubmitPanel() {
+  const { lang, me, access, tick } = useApp(); const T = (x: T4) => tx(x, lang as Lang);
+  const secs = Object.keys(APPROVALS).filter((s) => access.write.has(s));
+  const [recs, setRecs] = useState<Rec[] | null>(null); const [pend, setPend] = useState<Set<string>>(new Set());
+  const [open, setOpen] = useState(() => typeof window !== "undefined" && new URLSearchParams(location.search).get("submit") === "1");
+  useEffect(() => { if (!open || !secs.length) return; store.listMany(secs).then(async (l) => {
+    const mine = l.filter((r) => APPROVALS[r.section]?.wait.includes(r.status || "") && (r.created_by === me.id || Object.keys(r.data || {}).some((k) => k.endsWith("_id") && r.data[k] === me.id)));
+    setRecs(mine);
+    if (!DEMO && mine.length) { const { data } = await sb().from("approvals").select("record_id").in("record_id", mine.map((r) => r.id).slice(0, 200)).eq("status", "pending"); setPend(new Set((data || []).map((x: any) => x.record_id))); }
+  }).catch(() => setRecs([])); }, [open, tick]); // eslint-disable-line
+  const NEW: [string, T4][] = [["company.documents", L("Document", "Документ", "Документ", "مستند")], ["finance.expenses", L("Expense", "Расход", "Витрата", "مصروف")], ["operations.procurement", L("Purchase", "Закупка", "Закупівля", "شراء")], ["legal.contracts", L("Contract", "Договор", "Договір", "عقد")], ["company.decisions", L("Management decision", "Решение руководства", "Рішення керівництва", "قرار إداري")], ["technical.changes", L("Engineering change", "Инженерное изменение", "Інженерна зміна", "تغيير هندسي")]];
+  if (!secs.length) return null;
+  return <section className="card"><div className="card-h toolbar"><h2><Icon n="send" />{T(L("Submit for approval", "Отправить на согласование", "Надіслати на погодження", "إرسال للموافقة"))}</h2>
+    <button className="btn ghost sm" style={{ marginInlineStart: "auto" }} aria-expanded={open} onClick={() => setOpen(!open)}>{open ? T(L("Hide", "Скрыть", "Сховати", "إخفاء")) : T(L("Show", "Показать", "Показати", "إظهار"))}</button></div>
+    {open && <div style={{ display: "grid", gap: 10, padding: "0 16px 16px" }}>
+      <small className="faint">{T(L("Open a record and press “Send for approval” in it — choose who decides and add a note. Ready to send now:", "Откройте запись и нажмите в ней «Отправить на согласование» — выберите, кто решает, и добавьте комментарий. Можно отправить сейчас:", "Відкрийте запис і натисніть у ньому «Надіслати на погодження» — виберіть, хто вирішує, і додайте коментар. Можна надіслати зараз:", "افتح سجلاً واضغط فيه «إرسال للموافقة» — اختر من يقرر وأضف ملاحظة. جاهز للإرسال الآن:"))}</small>
+      <div className="feed">{recs === null ? <div className="empty">…</div> : recs.filter((r) => !pend.has(r.id)).slice(0, 15).map((r) => <Link key={r.id} href={href(r.section, r.id)} className="hub-row"><span><b>{r.title}</b><small>{tx(SECTIONS.find((x) => x.id === r.section)?.label, lang as Lang)} · {r.status}</small></span><span className="chip c-info">{T(L("Send", "Отправить", "Надіслати", "إرسال"))} →</span></Link>)}
+        {recs && !recs.filter((r) => !pend.has(r.id)).length && <div className="faint" style={{ padding: 8 }}>{T(L("Nothing of yours is waiting to be sent.", "Ваших записей к отправке нет.", "Ваших записів до надсилання немає.", "لا شيء من سجلاتك ينتظر الإرسال."))}</div>}</div>
+      <div className="toolbar"><small className="faint">{T(L("Or start a new request:", "Или начните новый запрос:", "Або почніть новий запит:", "أو ابدأ طلباً جديداً:"))}</small>{NEW.filter(([s]) => access.write.has(s)).map(([s, l]) => <Link key={s} className="chip" href={`/${s.replace(".", "/")}?new=1`}>+ {T(l)}</Link>)}</div>
+    </div>}</section>;
 }

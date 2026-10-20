@@ -1,7 +1,7 @@
 // One-click approvals: which sections can be sent for approval, from which statuses, and who may approve.
 // ok/no = the status set on Approve / Reject (no `no` → the status stays and the decision is recorded).
 // need = a field value required before the request can be sent (marketing: the compliance check).
-export type ApprovalRule = { wait: string[]; ok: string; no?: string; approvers: string[]; key: string[]; need?: { field: string; in: string[] } };
+export type ApprovalRule = { wait: string[]; ok: string; no?: string; changes?: string; approvers: string[]; key: string[]; need?: { field: string; in: string[] } };
 const LEAD = ["owner", "admin", "management"];
 const CHECKED = { field: "check", in: ["Passed (AI check)", "Cleared by legal"] };
 export const APPROVALS: Record<string, ApprovalRule> = {
@@ -24,6 +24,8 @@ export const APPROVALS: Record<string, ApprovalRule> = {
   "sales.proposals": { wait: ["Draft"], ok: "Approved", no: "Draft", approvers: LEAD, key: ["number", "client", "config", "qty", "unit_price", "discount", "value", "currency", "payment_terms", "valid_until"] },
   "legal.contracts": { wait: ["Drafting", "Counsel review"], ok: "Negotiation", approvers: LEAD, key: ["type", "counterparty", "amount", "currency", "schedule_days", "scope", "jurisdiction", "due"] },
   "marketing.brand": { wait: ["Draft"], ok: "Approved", approvers: LEAD, key: ["kind", "language", "text"] },
+  // Phase 2: documents in the register; "request changes" sends the document back to Draft
+  "company.documents": { wait: ["Draft", "In review"], ok: "Approved", no: "Draft", changes: "Draft", approvers: LEAD, key: ["doc_type", "project_ref", "owner", "version", "description"] },
 };
 export const canSendForApproval = (section: string, status: string | null) => !!APPROVALS[section]?.wait.includes(status || "");
 /** Missing precondition (e.g. the compliance check) → the field key, otherwise null. */

@@ -1,4 +1,5 @@
 import { Lang, tx } from "./i18n";
+import { ORG_DEPTS } from "@/config/workspace.config.mjs";
 import type { Rec } from "./store";
 
 const GOOD = /^(done|granted|awarded|implemented|pass|actual|taken|issued|returned|settled|exceeds|meets|analyzed|passed|approved|cleared|installed|commissioned|won|paid|signed|active|released|published|registered|received|resolved|certified|delivered|live|hired|counsel approved|integrated|filed|closed|verified)/i;
@@ -21,6 +22,8 @@ export function fmt(field: any, v: any, lang: Lang, data?: Record<string, any>):
     return n.toLocaleString(lang === "ar" ? "ar-AE" : lang === "ru" ? "ru-RU" : lang === "uk" ? "uk-UA" : "en-US");
   }
   if (field?.type === "check") return v ? "✓" : "";
+  if (field?.type === "dept") { const d = (ORG_DEPTS as any[]).find((x) => x.key === v); return d ? d.label[lang] || d.label.en : String(v); }
+  if (field?.type === "rich") return String(v).replace(/[*_#>`]/g, "").replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
   if (field?.type === "checklist") { const n = typeof v === "object" ? Object.values(v).filter(Boolean).length : 0; return `${n} ✓`; }
   if (field?.type === "date") { try { return new Date(v).toLocaleDateString(lang === "ar" ? "ar-AE" : lang); } catch { return String(v); } }
   return String(v);

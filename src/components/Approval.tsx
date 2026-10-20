@@ -37,10 +37,11 @@ export default function Approval({ rec, canWrite, onChanged }: { rec: Rec; canWr
     const j = await r.json(); toast(j.mail_error ? `${t("appr_sent_nomail", lang)} ${j.mail_error}` : t("appr_sent", lang).replace("{n}", j.approver), !!j.mail_error);
     setForm(false); setNote(""); load();
   };
-  const decide = async (decision: "approved" | "rejected") => {
+  const decide = async (decision: "approved" | "rejected" | "changes_requested") => {
+    if (decision === "changes_requested" && !comment.trim()) { toast(t("appr_changes_need", lang), true); return; }
     setBusy(true); const r = await api({ action: "decide", id: a!.id, decision, comment }); setBusy(false);
     if (!r.ok) { toast(await r.text(), true); return; }
-    toast(decision === "approved" ? t("appr_done_ok", lang) : t("appr_done_no", lang)); onChanged();
+    toast(decision === "approved" ? t("appr_done_ok", lang) : decision === "changes_requested" ? t("appr_done_ch", lang) : t("appr_done_no", lang)); onChanged();
   };
   const cancel = async () => { await api({ action: "cancel", id: a!.id }); load(); };
   const date = (s: string | null) => (s || "").slice(0, 10);
@@ -50,12 +51,13 @@ export default function Approval({ rec, canWrite, onChanged }: { rec: Rec; canWr
   return (
     <section className="appr">
       <div className="appr-h"><Icon n="check" /><b>{t("appr_t", lang)}</b>
-        {a && <span className={`chip ${a.status === "approved" ? "c-ok" : a.status === "rejected" ? "c-bad" : a.status === "pending" ? "c-warn" : ""}`}>{t(`appr_${a.status}`, lang)}</span>}</div>
+        {a && <span className={`chip ${a.status === "approved" ? "c-ok" : a.status === "rejected" ? "c-bad" : a.status === "pending" || a.status === "changes_requested" ? "c-warn" : ""}`}>{t(`appr_${a.status}`, lang)}</span>}</div>
       {pending && <p className="appr-p">{t("appr_waiting", lang).replace("{n}", name(a!.approver_id)).replace("{d}", date(a!.created_at))}{a!.note ? ` — «${a!.note}»` : ""}</p>}
-      {a && ["approved", "rejected"].includes(a.status) && <p className="appr-p">{name(a.approver_id)} · {date(a.decided_at)}{a.comment ? ` — «${a.comment}»` : ""}</p>}
+      {a && ["approved", "rejected", "changes_requested"].includes(a.status) && <p className="appr-p">{name((a as any).decided_by || a.approver_id)} · {date(a.decided_at)}{a.comment ? ` — «${a.comment}»` : ""}</p>}
       {pending && a!.approver_id === me.id && <div style={{ display: "grid", gap: 8 }}>
         <textarea className="input" rows={2} placeholder={t("appr_comment", lang)} value={comment} onChange={(e) => setComment(e.target.value)} />
         <div className="toolbar"><button className="btn primary sm" disabled={busy} onClick={() => decide("approved")}><Icon n="check" />{t("appr_approve", lang)}</button>
+          <button className="btn sm" disabled={busy} onClick={() => decide("changes_requested")}><Icon n="edit" />{t("appr_changes", lang)}</button>
           <button className="btn sm danger" disabled={busy} onClick={() => decide("rejected")}>{t("appr_reject", lang)}</button></div></div>}
       {pending && a!.requested_by === me.id && a!.approver_id !== me.id && <button className="linkbtn" onClick={cancel}>{t("appr_cancel", lang)}</button>}
       {canSend && !form && approvalNeeds(rec.section, rec.data) && <p className="appr-p faint">{t("mk_need_check", lang)}</p>}

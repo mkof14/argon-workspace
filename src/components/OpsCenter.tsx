@@ -10,6 +10,8 @@ const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk,
 const when = (s?: string | null) => (s ? s.slice(0, 16).replace("T", " ") : "—");
 const api = async (b: any) => { const r = await fetch("/api/ops", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) }); if (!r.ok) throw new Error(await r.text()); return r.json(); };
 const JOB: Record<string, T4> = {
+  notify: L("Notifications by e-mail and phone", "Уведомления на почту и телефон", "Сповіщення поштою й на телефон", "الإشعارات بالبريد والهاتف"),
+  due: L("Deadline reminders", "Напоминания о сроках", "Нагадування про терміни", "تذكيرات المواعيد"),
   retry: L("Automation retries and delivery checks", "Повторы автоматизации и проверка доставки", "Повтори автоматизації та перевірка доставки", "إعادة محاولات الأتمتة وفحص التسليم"),
   intake: L("E-mail intake", "Приём почты", "Приймання пошти", "استلام البريد"),
   sla: L("Service SLA alerts", "Сигналы SLA сервиса", "Сигнали SLA сервісу", "تنبيهات SLA"),

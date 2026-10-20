@@ -11,6 +11,9 @@ import { projectMoney } from "@/lib/margin";
 import { shortages } from "@/lib/parts";
 import { shipMissing } from "@/lib/shipgate";
 import WhatIf from "./WhatIf";
+import { useWork } from "./useWork";
+import { projectStats } from "@/lib/work";
+import { deptLabel, personName } from "./PeopleFields";
 
 type T4 = { en: string; ru: string; uk: string; ar: string };
 const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk, ar });
@@ -31,24 +34,25 @@ const REASON: Record<Reason["k"], (n: any) => T4> = {
 /** Projects: the portfolio of won deals with a traffic light, and the team's workload by week. */
 export default function Projects() {
   const { lang, access, people } = useApp(); const T = (x: T4) => tx(x, lang as Lang);
-  const [tab, setTab] = useState<"pf" | "wl" | "wi">("pf"); const [all, setAll] = useState<Rec[] | null>(null); const [only, setOnly] = useState<Health | "">(""); const [open, setOpen] = useState<{ who: string; i: number } | null>(null);
-  useEffect(() => { const q = new URLSearchParams(window.location.search).get("tab"); if (q === "wl" || q === "wi") setTab(q);
+  const [tab, setTab] = useState<"cp" | "pf" | "wl" | "wi">("cp"); const [all, setAll] = useState<Rec[] | null>(null); const [only, setOnly] = useState<Health | "">(""); const [open, setOpen] = useState<{ who: string; i: number } | null>(null);
+  useEffect(() => { const q = new URLSearchParams(window.location.search).get("tab"); if (q === "wl" || q === "wi" || q === "pf") setTab(q);
     const secs = SECTIONS.map((s) => s.id).filter((id: string) => access.read.has(id) && (!id.endsWith(".metrics") || id === "finance.metrics"));
     store.listMany(secs).then((r) => setAll(r.map((x) => ({ ...store.original(x), controlled: x.controlled }) as Rec))).catch(() => setAll([])); }, []); // eslint-disable-line
   const today = new Date().toISOString().slice(0, 10);
   const rows = useMemo(() => all ? portfolio(all as any, today, { money: projectMoney as any, parts: shortages as any, ship: (b: any) => shipMissing("operations.builds", "Shipping", b.data, null, all as any) }) : [], [all, today]);
   const wl = useMemo(() => all ? workload(all as any, people, today) : null, [all, people, today]);
-  const go = (k: "pf" | "wl" | "wi") => { setTab(k); try { const u = new URL(window.location.href); u.searchParams.set("tab", k); window.history.replaceState(window.history.state, "", u.toString()); } catch {} };
+  const go = (k: "cp" | "pf" | "wl" | "wi") => { setTab(k); try { const u = new URL(window.location.href); u.searchParams.set("tab", k); window.history.replaceState(window.history.state, "", u.toString()); } catch {} };
   const fmt = (d: string) => d ? new Date(d + "T00:00:00Z").toLocaleDateString(lang === "en" ? "en-US" : lang, { day: "numeric", month: "short", timeZone: "UTC" }) : "—";
   const count = (h: Health) => rows.filter((r) => r.health === h).length;
   const href = (r: { section: string; id: string }) => `/${r.section.replace(".", "/")}?r=${r.id}`;
 
   return <div style={{ display: "grid", gap: 16 }}>
     <div className="tabs card" role="tablist" style={{ ["--dc" as any]: "#0E9F6E" }}>
-      <button role="tab" aria-selected={tab === "pf"} className={tab === "pf" ? "on" : ""} onClick={() => go("pf")}><Icon n="layers" />{T(L("Portfolio", "Портфель", "Портфель", "المحفظة"))}</button>
+      <button role="tab" aria-selected={tab === "cp"} className={tab === "cp" ? "on" : ""} onClick={() => go("cp")}><Icon n="layers" />{T(L("Company projects", "Проекты компании", "Проєкти компанії", "مشاريع الشركة"))}</button>
+      <button role="tab" aria-selected={tab === "pf"} className={tab === "pf" ? "on" : ""} onClick={() => go("pf")}><Icon n="handshake" />{T(L("Client deliveries", "Поставки клиентам", "Поставки клієнтам", "تسليمات العملاء"))}</button>
       <button role="tab" aria-selected={tab === "wl"} className={tab === "wl" ? "on" : ""} onClick={() => go("wl")}><Icon n="users" />{T(L("Team workload", "Загрузка команды", "Завантаження команди", "عبء عمل الفريق"))}</button>
       <button role="tab" aria-selected={tab === "wi"} className={tab === "wi" ? "on" : ""} onClick={() => go("wi")}><Icon n="trend" />{T(L("What if", "Что если", "Що якщо", "ماذا لو"))}</button></div>
-    {!all ? <div className="card" style={{ padding: 24 }}>…</div> : tab === "wi" ? <WhatIf all={all} /> : tab === "pf" ? <>
+    {tab === "cp" ? <ProjectList /> : !all ? <div className="card" style={{ padding: 24 }}>…</div> : tab === "wi" ? <WhatIf all={all} /> : tab === "pf" ? <>
       <div className="toolbar">{(["red", "amber", "green"] as Health[]).map((h) => <button key={h} className={`chip ${HEALTH[h].cls} ${only === h ? "on" : ""}`} style={{ cursor: "pointer", outline: only === h ? "2px solid currentColor" : "none" }} onClick={() => setOnly(only === h ? "" : h)}>{T(HEALTH[h].t)} · {count(h)}</button>)}</div>
       {!rows.length ? <div className="card" style={{ padding: 24 }}><small className="faint">{T(L("No projects yet. Unfold a project in a won deal (Project plan) and it appears here.", "Проектов пока нет. Разверните проект в выигранной сделке («План проекта») — он появится здесь.", "Проєктів поки немає. Розгорніть проєкт у виграній угоді («План проєкту») — він з'явиться тут.", "لا مشاريع بعد. أنشئ مشروعاً في صفقة رابحة (خطة المشروع) وسيظهر هنا."))}</small></div>
         : <div className="pf">{rows.filter((r) => !only || r.health === only).map((r) => <div key={r.deal.id} className={`card pf-row h-${r.health}`}>
@@ -74,4 +78,32 @@ export default function Projects() {
       <small className="faint">{T(L(`Counted: open tasks, project steps, requests, purchases and any record with a person (assignee or owner) and a date. More than ${LIMIT} items in a week is an overload — move dates or share the work.`, `Учитываются открытые задачи, шаги проектов, заявки, закупки и любые записи с ответственным и датой. Больше ${LIMIT} дел в неделю — перегруз: перенесите сроки или распределите работу.`, `Враховуються відкриті завдання, кроки проєктів, заявки, закупівлі та будь-які записи з відповідальним і датою. Понад ${LIMIT} справ на тиждень — перевантаження: перенесіть строки або розподіліть роботу.`, `تُحتسب المهام المفتوحة وخطوات المشاريع والطلبات والمشتريات وأي سجل له مسؤول وتاريخ. أكثر من ${LIMIT} مهام في الأسبوع حمل زائد — غيّر المواعيد أو وزّع العمل.`))}</small>
     </>}
   </div>;
+}
+
+/** Company projects (AGRON 1, StarDome lines, R&D, certification, UAE operations, exhibitions …): progress, risk, next milestone. */
+function ProjectList() {
+  const { lang, access, people, me } = useApp(); const T = (x: T4) => tx(x, lang as Lang);
+  const w = useWork(); const [st, setSt] = useState("active"); const [q, setQ] = useState(""); const [mine, setMine] = useState(false);
+  const today = new Date().toISOString().slice(0, 10);
+  const list = w.projects.filter((p) => (st === "all" || (st === "active" ? !["Completed", "Cancelled"].includes(p.status || "") : p.status === st)) && (!q || `${p.title} ${p.data?.description || ""}`.toLowerCase().includes(q.toLowerCase()))
+    && (!mine || p.data?.manager_id === me.id || (p.data?.members_ids || []).includes(me.id))).map((p) => ({ p, s: projectStats(p, w.all || [], today) }))
+    .sort((a, b) => ({ late: 0, risk: 1, ok: 2 }[a.s.health] - { late: 0, risk: 1, ok: 2 }[b.s.health]) || a.p.title.localeCompare(b.p.title));
+  const HC = { late: ["c-bad", L("Delayed", "Задержка", "Затримка", "متأخر")], risk: ["c-warn", L("Overdue tasks", "Есть просрочки", "Є прострочення", "مهام متأخرة")], ok: ["c-ok", L("On track", "По плану", "За планом", "وفق الخطة")] } as const;
+  if (!access.read.has("company.projects")) return <div className="card empty">{T(L("No access to company projects.", "Нет доступа к проектам компании.", "Немає доступу до проєктів компанії.", "لا وصول إلى مشاريع الشركة."))}</div>;
+  return <>
+    <div className="toolbar">{access.write.has("company.projects") && <Link className="btn primary" href="/company/projects?new=1"><Icon n="plus" />{T(L("New project", "Новый проект", "Новий проєкт", "مشروع جديد"))}</Link>}
+      <div className="seg">{([["active", L("Active", "Активные", "Активні", "نشطة")], ["Planned", L("Planned", "Запланированы", "Заплановані", "مخططة")], ["On hold", L("On hold", "На паузе", "На паузі", "متوقفة")], ["Completed", L("Completed", "Завершены", "Завершені", "مكتملة")], ["all", L("All", "Все", "Усі", "الكل")]] as [string, T4][]).map(([k, l]) => <button key={k} className={st === k ? "on" : ""} onClick={() => setSt(k)}>{T(l)}</button>)}</div>
+      <label className="check" style={{ fontSize: 13.5 }}><input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} />{T(L("Only mine", "Только мои", "Лише мої", "مشاريعي فقط"))}</label>
+      <div className="search" style={{ flex: "1 1 200px" }}><Icon n="search" /><input className="input" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={T(L("Find a project", "Найти проект", "Знайти проєкт", "ابحث عن مشروع"))} aria-label={T(L("Find a project", "Найти проект", "Знайти проєкт", "ابحث عن مشروع"))} /></div></div>
+    {w.loading ? <div className="card" style={{ padding: 24 }}>…</div> : !list.length ? <div className="card empty">{w.projects.length ? T(L("No project matches.", "Подходящих проектов нет.", "Відповідних проєктів немає.", "لا مشروع مطابق.")) : T(L("No projects yet. Create the first one — for example AGRON 1, StarDome C40 or UAE Operations.", "Проектов пока нет. Создайте первый — например AGRON 1, StarDome C40 или UAE Operations.", "Проєктів ще немає. Створіть перший — наприклад AGRON 1, StarDome C40 або UAE Operations.", "لا مشاريع بعد. أنشئ الأول — مثل AGRON 1 أو StarDome C40 أو UAE Operations."))}</div>
+      : <div className="pf">{list.map(({ p, s }) => <Link key={p.id} href={`/projects/${p.id}`} className={`card pf-row proj-card h-${s.health === "late" ? "red" : s.health === "risk" ? "amber" : "green"}`} style={{ color: "inherit", textDecoration: "none" }} data-project={p.id}>
+        <div className="pf-h"><span className={`chip ${HC[s.health][0]}`}>{T(HC[s.health][1])}</span><b className="pf-t">{p.controlled && <Icon n="lock" className="lockico" />} {p.title}</b><small className="faint">{p.status}{p.data?.department ? ` · ${deptLabel(p.data.department, lang as Lang)}` : ""}</small></div>
+        <div className="pf-bar" title={`${s.done}/${s.tasks}`}><i style={{ width: `${s.progress}%` }} /></div>
+        <div className="pf-g">
+          <div><small className="faint">{T(L("Project manager", "Руководитель", "Керівник", "مدير المشروع"))}</small><span>{personName(people.find((x) => x.id === p.data?.manager_id)) || p.data?.manager || "—"}</span></div>
+          <div><small className="faint">{T(L("Tasks", "Задачи", "Задачі", "المهام"))}</small><span>{s.done}/{s.tasks}{s.overdue ? <b className="neg"> · {s.overdue} {T(L("overdue", "просрочено", "прострочено", "متأخرة"))}</b> : null}</span></div>
+          <div><small className="faint">{T(L("Next milestone", "Следующая веха", "Наступна віха", "المرحلة التالية"))}</small><span>{s.nextMilestone ? `${s.nextMilestone.data?.due || ""} · ${s.nextMilestone.title}` : "—"}</span></div>
+          <div><small className="faint">{T(L("Target", "Срок", "Термін", "الموعد المستهدف"))}</small><span className={s.late ? "neg" : ""}>{p.data?.target || "—"}</span></div>
+        </div></Link>)}</div>}
+  </>;
 }

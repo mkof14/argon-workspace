@@ -3,7 +3,7 @@ import type { Rec, Profile } from "./store";
 
 export const DUE_KEYS = ["due", "deadline", "expires", "renewal", "next_service", "valid_until", "eta", "warranty_end", "next_review", "publish", "session", "starts", "book_by"];
 export const PEOPLE_KEYS = ["owner", "assignee", "person", "requester", "engineer", "pm_name", "secretary", "holder", "manager", "reviewer"];
-export const DONE = /^(done|paid|closed|resolved|installed|signed|filed|delivered|received|cancelled|passed|approved|granted|retired|won|lost|awarded|commissioned|taken|returned|settled|released|registered|minutes signed|revoked|former|answered|not applicable|superseded|rejected|published|adopted|training done|counsel approved|hired|implemented|accepted|declined|archived|reference)$/i;
+export const DONE = /^(done|completed|paid|closed|resolved|installed|signed|filed|delivered|received|cancelled|passed|approved|granted|retired|won|lost|awarded|commissioned|taken|returned|settled|released|registered|minutes signed|revoked|former|answered|not applicable|superseded|rejected|published|adopted|training done|counsel approved|hired|implemented|accepted|declined|archived|reference)$/i;
 
 const today = () => new Date().toISOString().slice(0, 10);
 export const dayDiff = (d: string) => Math.round((new Date(String(d).slice(0, 10)).getTime() - new Date(today()).getTime()) / 86400000);

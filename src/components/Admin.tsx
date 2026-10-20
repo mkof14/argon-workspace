@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import Icon from "./Icon";
 import { useApp } from "./App";
-import { ROLES, ROLE_COLORS } from "@/config/workspace.config.mjs";
+import { ORG_DEPTS, ROLES, ROLE_COLORS } from "@/config/workspace.config.mjs";
 import { t, tx } from "@/lib/i18n";
 import { DEMO, Profile, isExternal, store } from "@/lib/store";
 import AccountSecurity from "./AccountSecurity";
@@ -11,7 +11,7 @@ import AccountSecurity from "./AccountSecurity";
 export default function Admin() {
   const { lang, toast, me } = useApp();
   const [list, setList] = useState<Profile[]>([]);
-  const [emails, setEmails] = useState(""); const [role, setRole] = useState("engineering"); const [company, setCompany] = useState("");
+  const [emails, setEmails] = useState(""); const [role, setRole] = useState("engineering"); const [company, setCompany] = useState(""); const [dept, setDept] = useState("");
   const [q, setQ] = useState(""); const [rf, setRf] = useState("");
   const [sel, setSel] = useState<Record<string, boolean>>({}); const [bulk, setBulk] = useState("engineering");
   const [busy, setBusy] = useState(false);
@@ -29,7 +29,7 @@ export default function Admin() {
     if (DEMO) { toast(t("ai_demo", lang), true); return; }
     setBusy(true); let ok = 0;
     for (const email of all) {
-      const r = await fetch("/api/admin/invite", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, role, company: company.trim() || null }) });
+      const r = await fetch("/api/admin/invite", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, role, company: company.trim() || null, department: dept || null }) });
       if (r.ok) ok++; else toast(`${email}: ${await r.text()}`, true);
     }
     setBusy(false); if (ok) { toast(`${t("invited", lang)}: ${ok}`); setEmails(""); setCompany(""); load(); }
@@ -57,6 +57,7 @@ export default function Admin() {
         <div className="card-b toolbar" style={{ alignItems: "flex-end", gap: 12 }}>
           <div className="field" style={{ flex: "3 1 300px" }}><label htmlFor="inv-email">{t("email", lang)}</label><textarea id="inv-email" className="input" rows={2} style={{ minHeight: 48 }} value={emails} onChange={(e) => setEmails(e.target.value)} placeholder="anna@agron1.com, oleg@agron1.com" /><span className="hint">{t("invite_hint", lang)}</span></div>
           <div className="field" style={{ flex: "1 1 180px" }}><label htmlFor="inv-role">{t("role", lang)}</label><select id="inv-role" className="input" value={role} onChange={(e) => setRole(e.target.value)}>{roleOpts}</select></div>
+          <div className="field" style={{ flex: "1 1 180px" }}><label htmlFor="inv-dept">{tx({ en: "Department", ru: "Отдел", uk: "Відділ", ar: "القسم" }, lang)}</label><select id="inv-dept" className="input" value={dept} onChange={(e) => setDept(e.target.value)}><option value="">—</option>{(ORG_DEPTS as any[]).map((d) => <option key={d.key} value={d.key}>{tx(d.label, lang)}</option>)}</select></div>
           <div className="field" style={{ flex: "1 1 180px" }}><label htmlFor="inv-co">{t("company", lang)}</label><input id="inv-co" className="input" value={company} onChange={(e) => setCompany(e.target.value)} placeholder={isExternal(role) ? "Partner Co." : ""} /></div>
           <button className="btn primary" disabled={busy} onClick={invite}><Icon n="send" />{busy ? "…" : t("invite", lang)}</button>
         </div></section>
@@ -73,13 +74,15 @@ export default function Admin() {
           <select className="input" style={{ width: "auto" }} value={bulk} onChange={(e) => setBulk(e.target.value)}>{roleOpts}</select>
           <button className="btn primary sm" onClick={applyBulk}>{t("apply", lang)}</button><button className="btn ghost sm" onClick={() => setSel({})}>{t("cancel", lang)}</button></div>}
         <div className="tablewrap"><table className="tb"><thead><tr><th style={{ width: 36 }}><input type="checkbox" aria-label="all" checked={shown.length > 0 && shown.every((p) => sel[p.id])} onChange={(e) => setSel(Object.fromEntries(shown.map((p) => [p.id, e.target.checked])))} /></th>
-          <th>{t("name", lang)}</th><th>{t("email", lang)}</th><th>{t("job_title", lang)}</th><th>{t("role", lang)}</th><th>{t("company", lang)}</th><th>{t("us_person", lang)}</th><th>{t("ai_limit_col", lang)}</th></tr></thead>
+          <th>{t("name", lang)}</th><th>{t("email", lang)}</th><th>{t("job_title", lang)}</th><th>{tx({ en: "Department", ru: "Отдел", uk: "Відділ", ar: "القسم" }, lang)}</th><th>{tx({ en: "Manager", ru: "Руководитель", uk: "Керівник", ar: "المدير" }, lang)}</th><th>{t("role", lang)}</th><th>{t("company", lang)}</th><th>{t("us_person", lang)}</th><th>{t("ai_limit_col", lang)}</th></tr></thead>
           <tbody>{shown.map((p) => { const c = (ROLE_COLORS as any)[p.role]; return (
             <tr key={p.id} style={p.role === "pending" ? { background: "color-mix(in srgb,var(--warn) 7%,transparent)" } : undefined}>
               <td><input type="checkbox" checked={!!sel[p.id]} onChange={(e) => setSel({ ...sel, [p.id]: e.target.checked })} aria-label={p.email} /></td>
               <td><span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}><span className="avatar" style={{ background: `color-mix(in srgb,${c} 18%,var(--surface))`, color: c, borderColor: "transparent", width: 34, height: 34, fontSize: 14 }}>{(p.full_name || p.email || "?").slice(0, 1).toUpperCase()}</span><b style={{ fontWeight: 600 }}>{p.full_name}</b>{p.super && <span className="chip c-ok" title={t("protected_owner", lang)}><Icon n="lock" className="lockico" />{t("protected_owner", lang)}</span>}</span></td>
               <td className="faint">{p.email}</td>
-              <td className="faint">{p.title || ""}</td>
+              <td><input className="input" style={{ width: 150 }} defaultValue={p.title || ""} onBlur={(e) => e.target.value !== (p.title || "") && upd(p, { title: e.target.value || null })} aria-label={t("job_title", lang)} /></td>
+              <td><select className="input" style={{ width: "auto" }} value={p.department || ""} onChange={(e) => upd(p, { department: e.target.value || null })} aria-label={tx({ en: "Department", ru: "Отдел", uk: "Відділ", ar: "القسم" }, lang)}><option value="">—</option>{(ORG_DEPTS as any[]).map((d) => <option key={d.key} value={d.key}>{tx(d.label, lang)}</option>)}</select></td>
+              <td><select className="input" style={{ width: "auto" }} value={p.manager_id || ""} onChange={(e) => upd(p, { manager_id: e.target.value || null })} aria-label={tx({ en: "Manager", ru: "Руководитель", uk: "Керівник", ar: "المدير" }, lang)}><option value="">—</option>{list.filter((x) => x.id !== p.id && !isExternal(x.role) && x.role !== "pending" && !x.disabled).map((x) => <option key={x.id} value={x.id}>{x.full_name || x.email}</option>)}</select></td>
               <td><select className="input" style={{ width: "auto", color: c, fontWeight: 600, borderColor: `color-mix(in srgb,${c} 45%,var(--line))` }} value={p.role} disabled={!!p.super || (p.id === me.id && p.role === "owner" && owners <= 1)} onChange={(e) => upd(p, { role: e.target.value })} aria-label={t("role", lang)}>{roleOpts}</select></td>
               <td><input className="input" style={{ width: 170 }} defaultValue={p.company || ""} onBlur={(e) => e.target.value !== (p.company || "") && upd(p, { company: e.target.value || null })} aria-label={t("company", lang)} /></td>
               <td style={{ textAlign: "center" }}><input type="checkbox" style={{ width: 18, height: 18 }} disabled={!!p.super} checked={p.us_person} onChange={(e) => upd(p, { us_person: e.target.checked })} aria-label={t("us_person", lang)} /></td>

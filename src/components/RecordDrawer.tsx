@@ -26,6 +26,7 @@ import { trFields, trPending, trText } from "@/lib/tr";
 import { Activity, Comment, DEMO, Rec, isConflict, isExternal, store, textSim } from "@/lib/store";
 import { merge3, resolve, type Conflict } from "@/lib/merge";
 import ConflictDialog from "./ConflictDialog";
+import { CommentBody, DeptField, MentionInput, PeopleField, PersonField, RichField, isEmployee, personName } from "./PeopleFields";
 import { fmt, printHtml, recordMarkdown, saveBlob, slug, spendMsg, tone } from "@/lib/format";
 import { shipMsg } from "@/lib/shipgate";
 import { marked } from "marked";
@@ -52,11 +53,19 @@ const APPLY: Record<string, string> = { "legal.matrix": "ai_review", "legal.requ
 // fields that name a person (shared with "My day" and notifications): a chosen name also links the account
 
 export default function RecordDrawer({ section, rec, onClose, onSaved, onReload }: { section: any; rec: Rec | null; onClose: () => void; onSaved: () => void; onReload?: () => void }) {
-  const { lang, me, access, toast, openAi, openMail, people } = useApp();
+  const { lang, me, access, toast, openAi, openMail, people, rules } = useApp();
   const canWrite = access.write.has(section.id) && !isExternal(me.role);
   const [title, setTitle] = useState(rec?.title || "");
   const [status, setStatus] = useState(rec?.status || section.statuses[0]);
-  const [data, setData] = useState<Record<string, any>>({ ...(rec?.data || {}) });
+  // a new record can start with values from the link (e.g. a task created from a project page: ?new=1&project_ref=…)
+  const [data, setData] = useState<Record<string, any>>(() => {
+    if (rec) return { ...(rec.data || {}) };
+    const init: Record<string, any> = {}; if (typeof window === "undefined") return init;
+    const q = new URLSearchParams(window.location.search); const keys = new Set(section.fields.flatMap((f: any) => [f.key, `${f.key}_id`, `${f.key}_title`]));
+    q.forEach((v, k) => { if (keys.has(k) && v.length < 300) init[k] = v; });
+    if (init.assignee_id && !init.assignee) { const p = people.find((x) => x.id === init.assignee_id); if (p) init.assignee = p.full_name || p.email; }
+    return init;
+  });
   const [company, setCompany] = useState(rec?.company || "");
   const [controlled, setControlled] = useState(!!rec?.controlled);
   const [comments, setComments] = useState<Comment[]>([]);
@@ -81,12 +90,15 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
     if (!rec) return;
     store.comments(rec.id).then((cs) => {
       setComments(cs);
+      // opened from a notification or Messages: show that comment
+      const h = typeof location !== "undefined" ? location.hash : ""; if (h.startsWith("#c-")) setTimeout(() => document.getElementById(h.slice(1))?.scrollIntoView({ block: "center", behavior: "smooth" }), 250);
       // Written by an agent, by e-mail intake or before translation was on: translate it now (in the background)
       if (DEMO) return; const o = store.original(rec);
       const need = Object.keys(trPending(trFields(section.fields, o.title, o.data || {}), o.data?._tr)).length || cs.some((c) => o.data?._tr?.c?.[c.id] === undefined && /\p{L}{2,}/u.test(c.body));
       if (need) fetch("/api/translate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rec.id }) }).catch(() => {});
     }).catch(() => {});
-    store.activity({ recordId: rec.id, limit: 15 }).then(setHist).catch(() => {});
+    store.activity({ recordId: rec.id, limit: 40 }).then(setHist).catch(() => {});
+    store.markRead(rec.id).catch(() => {});
   }, [rec]);
   useEffect(() => { const k = (e: KeyboardEvent) => e.key === "Escape" && onClose(); window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
 
@@ -141,7 +153,13 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
     catch (e: any) { toast(e.message || "Error", true); }
   };
   const del = async () => { if (!rec) return; try { await store.remove(rec.id); toast(t("deleted", lang)); onSaved(); } catch (e: any) { toast(e.message || "Error", true); } };
-  const addCmt = async () => { if (!rec || !cmt.trim()) return; try { await store.addComment(rec.id, cmt.trim()); setCmt(""); setComments(await store.comments(rec.id)); } catch (e: any) { toast(e.message || "Error", true); } };
+  const shared = !!section.external?.length && !isExternal(me.role);
+  const [internal, setInternal] = useState(true);
+  const addCmt = async () => { if (!rec || !cmt.trim()) return; try { await store.addComment(rec.id, cmt.trim(), { internal: shared && internal }); setCmt(""); setComments(await store.comments(rec.id)); } catch (e: any) { toast(e.message || "Error", true); } };
+  // who can be mentioned: colleagues who may read this record (the database checks it again before telling anyone)
+  const canRead = (p: any) => ["owner", "admin"].includes(p.role) || (rules || []).some((x) => x.role === p.role && x.section === section.id);
+  const mentionable = people.filter((p) => isEmployee(p) && p.id !== me.id && canRead(p) && (!controlled || p.us_person));
+  const who = (id?: string | null) => { const p = people.find((x) => x.id === id); return p ? personName(p) : ""; };
 
   const current: Rec = { ...(rec as Rec), title, status, data, controlled };
   const md = () => recordMarkdown(section, current, lang);
@@ -167,11 +185,16 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
         <div className="cl-grid">{items.map((it, i) => <label key={i} className="check"><input type="checkbox" disabled={ro} checked={!!val[i]} onChange={(e) => set({ ...val, [i]: e.target.checked })} /><span className="mono faint" style={{ minWidth: 22 }}>{i + 1}.</span>{it}</label>)}</div></details>;
     }
     if (f.type === "ref") return <RefField key={f.key} f={f} data={data} setData={setData} ro={ro} />;
+    if (f.type === "person") return <PersonField key={f.key} f={f} data={data} setData={setData} ro={ro} id={id} />;
+    if (f.type === "people") return <PeopleField key={f.key} f={f} data={data} setData={setData} ro={ro} />;
+    if (f.type === "dept") return <DeptField key={f.key} f={f} value={v} set={set} ro={ro} id={id} />;
+    if (f.type === "rich") return <RichField key={f.key} f={f} value={v} set={set} ro={ro} id={id} />;
+    if (f.auto) return v ? <div key={f.key} className="field"><label>{tx(f.label, lang)}</label><div className="input ro mono" id={id}>{String(v)}</div></div> : null;
     if (f.type === "html") return v ? <div key={f.key} className="field wide"><label>{tx(f.label, lang)}</label><iframe title={tx(f.label, lang)} className="mailframe" style={{ height: 560 }} srcDoc={String(v)} sandbox="" /></div> : null;
     if (f.type === "select") ctl = <select id={id} className="input" value={v} disabled={ro} onChange={(e) => set(e.target.value)}><option value="" />{f.options.map((o: string) => <option key={o}>{o}</option>)}</select>;
     else if (f.type === "long") ctl = <textarea id={id} className="input" value={v} readOnly={ro} rows={3} onChange={(e) => set(e.target.value)} />;
     else if (f.type === "check") return <label key={f.key} className="check wide"><input id={id} type="checkbox" checked={!!v} disabled={ro} onChange={(e) => set(e.target.checked)} />{tx(f.label, lang)}</label>;
-    else ctl = <input id={id} className={`input ${f.type === "money" || f.type === "number" ? "mono" : ""}`} readOnly={ro} list={PEOPLE_KEYS.includes(f.key) ? "people-list" : undefined} type={f.type === "date" ? "date" : f.type === "url" ? "url" : f.type === "money" || f.type === "number" ? "number" : "text"} value={v} onChange={(e) => set(f.type === "money" || f.type === "number" ? (e.target.value === "" ? "" : Number(e.target.value)) : e.target.value)} />;
+    else ctl = <input id={id} className={`input ${f.type === "money" || f.type === "number" ? "mono" : ""}`} readOnly={ro} list={PEOPLE_KEYS.includes(f.key) ? "people-list" : undefined} type={f.type === "date" ? "date" : f.type === "time" ? "time" : f.type === "url" ? "url" : f.type === "money" || f.type === "number" ? "number" : "text"} value={v} onChange={(e) => set(f.type === "money" || f.type === "number" ? (e.target.value === "" ? "" : Number(e.target.value)) : e.target.value)} />;
     return <div key={f.key} className={`field ${f.type === "long" ? "wide" : ""}`}><label htmlFor={id}>{tx(f.label, lang)}</label>{ctl}{f.type === "url" && v ? <a href={v} target="_blank" rel="noopener" className="hint">{v}</a> : null}</div>;
   };
 
@@ -222,6 +245,7 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
               </span></summary>
             <div className="md tpl-paper" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(data.document) as string) }} />
           </details>}
+          {rec && section.id === "company.projects" && <a className="btn primary sm" href={`/projects/${rec.id}`} style={{ justifySelf: "start" }}><Icon n="layers" />{tx({ en: "Open the project page", ru: "Открыть страницу проекта", uk: "Відкрити сторінку проєкту", ar: "افتح صفحة المشروع" }, lang)}</a>}
           {rec && <ChainPanel rec={current} />}
           <RecordTools section={section} data={data} setData={setData} canWrite={canWrite} />
           {rec && section.id === "sales.pipeline" && !isExternal(me.role) && <ProposalBuilder deal={rec} onDone={onReload || onSaved} />}
@@ -242,12 +266,14 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
           {section.id !== "mail.outbox" && <Attachments section={section} rec={rec} canWrite={canWrite} title={title} />}
           {rec && <div className="thread">
             <div className="eyebrow">{t("comments", lang)}</div>
-            {comments.map((c) => <div key={c.id} className="cmt"><small>{(c.created_at || "").slice(0, 16).replace("T", " ")}</small><div style={{ whiteSpace: "pre-wrap" }}>{cmtText(c)}</div>{!orig && cmtText(c) !== c.body && <small className="faint"><Icon n="globe" className="lockico" /> {t("tr_auto", lang)}</small>}</div>)}
-            <div className="toolbar" style={{ flexWrap: "nowrap" }}><input className="input" value={cmt} placeholder={t("add_comment_at", lang)} onChange={(e) => setCmt(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addCmt()} aria-label={t("add_comment", lang)} /><button className="btn" onClick={addCmt}>{t("send", lang)}</button></div>
+            {comments.map((c) => <div key={c.id} id={`c-${c.id}`} className={`cmt ${(c as any).internal ? "internal" : ""} ${(c as any).mentions?.includes(me.id) ? "mentioned" : ""}`}><small><b>{who(c.author) || "—"}</b> · {(c.created_at || "").slice(0, 16).replace("T", " ")}{(c as any).internal && <> · <Icon n="lock" className="lockico" />{tx({ en: "internal", ru: "внутренний", uk: "внутрішній", ar: "داخلي" }, lang)}</>}</small><CommentBody body={cmtText(c)} />{!orig && cmtText(c) !== c.body && <small className="faint"><Icon n="globe" className="lockico" /> {t("tr_auto", lang)}</small>}</div>)}
+            {!comments.length && <div className="faint" style={{ fontSize: 13.5 }}>{tx({ en: "No comments yet. Type @ to mention a colleague.", ru: "Комментариев пока нет. Наберите @, чтобы упомянуть коллегу.", uk: "Коментарів ще немає. Наберіть @, щоб згадати колегу.", ar: "لا تعليقات بعد. اكتب @ لذكر زميل." }, lang)}</div>}
+            <div className="toolbar" style={{ flexWrap: "nowrap", alignItems: "flex-start" }}><MentionInput value={cmt} onChange={setCmt} onSubmit={addCmt} placeholder={t("add_comment_at", lang)} label={t("add_comment", lang)} candidates={isExternal(me.role) ? [] : mentionable} /><button className="btn" onClick={addCmt}>{t("send", lang)}</button></div>
+            {shared && <label className="check" style={{ fontSize: 13 }}><input type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} /><Icon n="lock" className="lockico" />{tx({ en: "Internal — not visible to partners and vendors", ru: "Внутренний — не виден партнёрам и поставщикам", uk: "Внутрішній — не видно партнерам і постачальникам", ar: "داخلي — لا يراه الشركاء والموردون" }, lang)}</label>}
           </div>}
           {rec && hist.length > 0 && <div className="thread">
             <div className="eyebrow">{t("history", lang)}</div>
-            {hist.map((h) => <div key={h.id} className="faint" style={{ fontSize: 12.5 }}><span className="mono">{(h.created_at || "").slice(0, 16).replace("T", " ")}</span> · {h.action}{h.action === "status" && h.detail ? `: ${h.detail.from || "—"} → ${h.detail.to}` : ""}</div>)}
+            {hist.map((h) => <div key={h.id} className="faint" style={{ fontSize: 12.5 }}><span className="mono">{(h.created_at || "").slice(0, 16).replace("T", " ")}</span>{who(h.actor) ? ` · ${who(h.actor)}` : ""} · {h.action}{h.action === "status" && h.detail ? `: ${h.detail.from || "—"} → ${h.detail.to}` : ""}</div>)}
           </div>}
         </div>
         <div className="drawer-f">

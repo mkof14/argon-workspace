@@ -12,11 +12,11 @@ const S = (o: Record<string, any>) => ({ ...o, sample: true });
 const fut = (d: number) => new Date(Date.now() + d * 86400000).toISOString().slice(0, 10);
 
 export const DEMO_PEOPLE: Profile[] = [
-  { id: "p1", email: "owner@agron1.com", full_name: "AGRON Owner", role: "owner", company: null, us_person: true, lang: "ru", ai_monthly_tokens: 1000000 },
-  { id: "p2", email: "engineer@agron1.com", full_name: "Sample Engineer", role: "engineering", company: null, us_person: true, lang: "en", ai_monthly_tokens: 300000 },
-  { id: "p3", email: "ops.uae@agron1.com", full_name: "Sample UAE Operations", role: "operations", company: null, us_person: false, lang: "ar", ai_monthly_tokens: 300000 },
-  { id: "p4", email: "finance@agron1.com", full_name: "Sample Finance", role: "finance", company: null, us_person: true, lang: "en", ai_monthly_tokens: 300000 },
-  { id: "p5", email: "sales@agron1.com", full_name: "Sample Sales", role: "sales", company: null, us_person: false, lang: "en", ai_monthly_tokens: 300000 },
+  { id: "p1", email: "owner@agron1.com", full_name: "AGRON Owner", role: "owner", department: "management", title: "Chief Executive Officer", company: null, us_person: true, lang: "ru", ai_monthly_tokens: 1000000 },
+  { id: "p2", email: "engineer@agron1.com", full_name: "Sample Engineer", role: "engineering", department: "engineering", title: "Systems engineer", manager_id: "p1", company: null, us_person: true, lang: "en", ai_monthly_tokens: 300000 },
+  { id: "p3", email: "ops.uae@agron1.com", full_name: "Sample UAE Operations", role: "operations", department: "operations", title: "Operations lead, UAE", manager_id: "p1", company: null, us_person: false, lang: "ar", ai_monthly_tokens: 300000 },
+  { id: "p4", email: "finance@agron1.com", full_name: "Sample Finance", role: "finance", department: "finance", title: "Finance manager", manager_id: "p1", company: null, us_person: true, lang: "en", ai_monthly_tokens: 300000 },
+  { id: "p5", email: "sales@agron1.com", full_name: "Sample Sales", role: "sales", department: "sales", title: "Business development", manager_id: "p1", company: null, us_person: false, lang: "en", ai_monthly_tokens: 300000 },
   { id: "p6", email: "partner@example.com", full_name: "Sample Partner", role: "partner", company: "Gulf Marine Partners (sample)", us_person: false, lang: "ar", ai_monthly_tokens: 50000 },
   { id: "p7", email: "vendor@example.com", full_name: "Sample Vendor", role: "vendor", company: "Radar Vendor (sample)", us_person: false, lang: "en", ai_monthly_tokens: 50000 },
 ];
@@ -91,5 +91,32 @@ export function demoSeed(): Rec[] {
     r("finance.costing", "C20 Enhanced · cost model (sample)", "Draft", S({ config: "C20 Enhanced" })),
     r("company.wiki", "How we work: where things live", "Published", S({ topic: "Onboarding", body: "Workspace = records, approvals, status. Teams = chat and calls. SharePoint = files. Xero = accounting." }), { company: "*" }),
   );
+  // ---- SAMPLE daily work: projects with tasks, milestones, documents and meetings (marked) ----
+  const P = (title: string, status: string, d: Record<string, any>, age = 6) => { const x = r("company.projects", title, status, S(d), {}, age); out.push(x); return x; };
+  const a1 = P("AGRON 1 software — release 1.0 (sample)", "Active", { manager: "Sample Engineer", manager_id: "p2", department: "software", priority: "High", start: fut(-40), target: fut(45), members: "Sample Engineer, AGRON Owner", members_ids: ["p2", "p1"], description: "First release of **AGRON 1**: sensor fusion, alerts and the operator console.\n\n- radar + camera fusion\n- alert rules\n- operator training kit" });
+  const c40 = P("StarDome C40 Advanced — first unit (sample)", "Active", { manager: "Sample UAE Operations", manager_id: "p3", department: "operations", priority: "Critical", start: fut(-20), target: fut(-2), members: "Sample UAE Operations, Sample Engineer", members_ids: ["p3", "p2"], description: "Build, test and deliver the first C40 Advanced container." });
+  const uae = P("UAE Operations setup (sample)", "Planned", { manager: "AGRON Owner", manager_id: "p1", department: "management", priority: "Normal", start: fut(10), target: fut(120), members: "AGRON Owner, Sample Finance", members_ids: ["p1", "p4"] }, 3);
+  const exh = P("Exhibitions 2026 (sample)", "Active", { manager: "Sample Sales", manager_id: "p5", department: "sales", priority: "Normal", start: fut(-10), target: fut(60), members_ids: ["p5"] }, 4);
+  const T = (title: string, status: string, pr: Rec, who: string, name: string, due: number | null, pri = "Normal", age = 3) => out.push(r("company.tasks", title, status, S({ project_ref: pr.id, project_ref_title: pr.title, assignee: name, assignee_id: who, ...(due === null ? {} : { due: fut(due) }), priority: pri, ...(status === "Completed" ? { completed_at: fut(-1) } : {}) }), {}, age));
+  T("Sensor fusion: radar + PTZ track handover", "In progress", a1, "p2", "Sample Engineer", 3, "High");
+  T("Alert rules editor — review UI copy", "Review", a1, "p2", "Sample Engineer", 0, "Normal");
+  T("Operator training kit outline", "New", a1, "p1", "AGRON Owner", 12, "Low");
+  T("Release notes 1.0", "New", a1, "p1", "AGRON Owner", null, "Normal");
+  T("Factory acceptance test plan", "In progress", c40, "p3", "Sample UAE Operations", -3, "Critical");
+  T("Long-lead items: thermal camera", "Waiting", c40, "p3", "Sample UAE Operations", -1, "High");
+  T("Container wiring diagram sign-off", "Completed", c40, "p2", "Sample Engineer", -6, "High");
+  T("Shortlist UAE free zones", "New", uae, "p1", "AGRON Owner", 20, "Normal");
+  T("Bank account options for the UAE entity", "New", uae, "p4", "Sample Finance", 30, "Normal");
+  T("Book the stand for the Dubai exhibition", "In progress", exh, "p5", "Sample Sales", 1, "High");
+  T("Prepare the demo video", "New", exh, "p5", "Sample Sales", 9, "Normal");
+  const M = (title: string, status: string, pr: Rec, due: number) => out.push(r("company.milestones", title, status, S({ project_ref: pr.id, project_ref_title: pr.title, due: fut(due) }), {}, 5));
+  M("Release candidate", "In progress", a1, 21); M("Release 1.0", "Planned", a1, 45); M("FAT passed", "Planned", c40, -2); M("Shipped to the client", "Planned", c40, 14); M("Entity licence", "Planned", uae, 90); M("Dubai exhibition", "Planned", exh, 25);
+  const D = (title: string, type: string, status: string, pr: Rec | null, dept: string, owner: string, ownerId: string, ver: string) => out.push(r("company.documents", title, status, S({ doc_type: type, ...(pr ? { project_ref: pr.id, project_ref_title: pr.title } : {}), department: dept, owner, owner_id: ownerId, version: ver }), {}, 4));
+  D("AGRON 1 — system specification (sample)", "Technical specification", "In review", a1, "software", "Sample Engineer", "p2", "0.9");
+  D("C40 FAT procedure (sample)", "Engineering documentation", "Draft", c40, "operations", "Sample UAE Operations", "p3", "0.3");
+  D("Mutual NDA template (sample)", "NDA", "Approved", null, "legal", "AGRON Owner", "p1", "2.0");
+  D("Exhibition budget 2026 (sample)", "Budget", "Draft", exh, "sales", "Sample Sales", "p5", "1.0");
+  out.push(r("company.meetings", "AGRON 1 weekly (sample)", "Scheduled", S({ date: fut(0), time: "10:00", duration: 30, place: "Teams", project_ref: a1.id, project_ref_title: a1.title, participants: "Sample Engineer, AGRON Owner", participants_ids: ["p2", "p1"], agenda: "Fusion status, review queue" }), {}, 2));
+  out.push(r("company.meetings", "C40 FAT readiness (sample)", "Scheduled", S({ date: fut(2), time: "14:00", duration: 45, place: "Workshop", project_ref: c40.id, project_ref_title: c40.title, participants: "Sample UAE Operations, Sample Engineer, AGRON Owner", participants_ids: ["p3", "p2", "p1"] }), {}, 2));
   return out;
 }

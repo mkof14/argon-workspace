@@ -3,7 +3,7 @@
 
 export type OutItem =
   | { id: string; kind: "save"; at: string; user: string; rec: Record<string, any>; error?: string; base?: Record<string, any> | null; conflict?: { theirs: Record<string, any>; fields: string[] } }
-  | { id: string; kind: "comment"; at: string; user: string; record_id: string; body: string; error?: string }
+  | { id: string; kind: "comment"; at: string; user: string; record_id: string; body: string; internal?: boolean; error?: string }
   | { id: string; kind: "upload"; at: string; user: string; prefix: string; name: string; type: string; file: Blob; error?: string };
 
 export const isTemp = (id: any) => typeof id === "string" && id.startsWith("off-");

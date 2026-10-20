@@ -13,6 +13,7 @@ import { poStamps } from "./vendors";
 import { changeOrderEffects } from "./margin";
 import { ConflictError, enqueueSave, isConflict, isNetworkError, isTemp, remap, type OutItem } from "./outboxlogic";
 import { merge3 } from "./merge";
+import { PEOPLE_KEYS } from "./insights";
 export { ConflictError, isConflict };
 import { offline, readQ, writeQ } from "./outbox";
 /** Lists loaded in this session (memory only, never stored on the device) — shown when the connection drops. */
@@ -29,7 +30,7 @@ export type Rec = {
   id: string; section: string; title: string; status: string | null; data: Record<string, any>;
   company: string | null; controlled: boolean; created_by?: string | null; created_at?: string; updated_at?: string; version?: number;
 };
-export type Profile = { id: string; email: string; full_name: string; role: string; company: string | null; us_person: boolean; lang: string; ai_monthly_tokens: number; title?: string | null; phone?: string | null; created_at?: string; super?: boolean; timezone?: string | null; prefs?: Record<string, any> };
+export type Profile = { id: string; email: string; full_name: string; role: string; company: string | null; us_person: boolean; lang: string; ai_monthly_tokens: number; title?: string | null; phone?: string | null; department?: string | null; manager_id?: string | null; notify_prefs?: Record<string, any>; disabled?: boolean; sessions_revoked_at?: string | null; created_at?: string; super?: boolean; timezone?: string | null; prefs?: Record<string, any> };
 export type Rule = { section: string; role: string; can_write: boolean; external: boolean };
 export type FileItem = { name: string; path: string; size: number; type: string; created_at?: string };
 export const BUCKET = "files";
@@ -37,6 +38,7 @@ export type Faq = { id: string; question: string; answer: string; lang: string; 
 export type Comment = { id: string; record_id: string; author: string | null; body: string; created_at: string };
 export type Activity = { id: number; record_id: string | null; section: string; actor: string | null; action: string; detail: any; created_at: string };
 export type Access = { read: Set<string>; write: Set<string> };
+export type Notice = { id: number; kind: string; record_id: string | null; section: string | null; title: string | null; body: string | null; actor: string | null; link: string | null; created_at: string; read_at: string | null };
 
 import { DEMO, SUPA_KEY, SUPA_URL, sb } from "./sb";
 export { DEMO, SUPA_KEY, SUPA_URL, sb };
@@ -59,7 +61,7 @@ export function accessFor(role: string, rules?: Rule[] | null): Access {
 /* ---------------- Demo store (browser only; its data loads only in demo mode) ---------------- */
 let demo: typeof DemoMod | null = null;
 export async function ensureDemo() { if (DEMO && !demo) demo = await import("./demo"); }
-const DKEY = "agronws.demo.v1";
+const DKEY = "agronws.demo.v2"; // v2: Phase 2 sample projects, tasks, documents and meetings
 export type TrashItem = { id: string; section: string; title: string; controlled: boolean; deleted_by: string | null; deleted_at: string; comments: number };
 type DemoDB = { trash?: (TrashItem & { record: Rec; cmts: Comment[] })[]; records: Rec[]; comments: Comment[]; activity: Activity[]; role: string; profiles: Profile[]; rules?: Rule[]; files?: (FileItem & { data: string })[]; faq?: Faq[] };
 function demoLoad(): DemoDB {
@@ -109,6 +111,25 @@ function translateLater(body: Record<string, string>) {
   try { fetch("/api/translate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), keepalive: true }).catch(() => {}); } catch {}
 }
 
+/* ---------------- People named in records are linked to their accounts ---------------- */
+let PEOPLE: Profile[] = [];
+const EXTERNAL_ROLES = ["partner", "vendor", "investor", "pending"];
+const findPerson = (v: string) => { const x = v.trim().toLowerCase(); return x ? PEOPLE.find((p) => !EXTERNAL_ROLES.includes(p.role) && !p.disabled && (p.email?.toLowerCase() === x || (p.full_name || "").trim().toLowerCase() === x)) : undefined; };
+/** A name or email typed into a person field becomes a link to that account (<key>_id); several names → <key>_ids. */
+export function linkPeople(data: Record<string, any>): Record<string, any> {
+  if (!PEOPLE.length || !data) return data;
+  const out = { ...data };
+  for (const k of [...PEOPLE_KEYS, "approver"]) {
+    if (typeof out[k] !== "string" || !out[k].trim() || out[`${k}_id`]) continue;
+    const p = findPerson(out[k]); if (p) out[`${k}_id`] = p.id;
+  }
+  for (const k of ["members", "watchers"]) {
+    if (typeof out[k] !== "string" || Array.isArray(out[`${k}_ids`])) continue;
+    const ids = out[k].split(/[,;\n]/).map((x: string) => findPerson(x)?.id).filter(Boolean); if (ids.length) out[`${k}_ids`] = [...new Set(ids)];
+  }
+  return out;
+}
+
 /* ---------------- Public API ---------------- */
 export const store = {
   async me(): Promise<Profile | null> {
@@ -119,6 +140,7 @@ export const store = {
     return data as Profile;
   },
   setLang(l: string) { LANG = l || "en"; },
+  setPeople(p: Profile[]) { PEOPLE = p || []; },
   lang() { return LANG; },
   /** The record exactly as written (no translation). */
   original<T extends Rec>(r: T): T { const m = (r as any)._o || SHOWN.get(r.id)?.o; return m ? { ...r, title: m.title, data: m.data, _o: undefined, _l: undefined } : r; },
@@ -156,6 +178,7 @@ export const store = {
     const { _o, _l, _src, ...clean } = r0 as any;
     const back = meta ? unlocalize(clean.title, clean.data || {}, meta.o, meta.l) : null;
     const r: Partial<Rec> & { section: string; title: string } = back ? { ...clean, title: back.title, data: back.data } : clean;
+    if (r.data) r.data = linkPeople(r.data);
     if (DEMO) {
       const db = demoLoad(); const me = demoMe(db);
       if (r.id ? db.records.find((x) => x.id === r.id)?.status !== r.status : true) { const m = await this.shipCheck(r.section, r.status, r.data || {}); if (m.length) throw new Error(shipMsg(m, "en")); }
@@ -259,7 +282,7 @@ export const store = {
             }
             if (isTemp(id)) q = remap(q, id, saved.id);
           }
-          else if (x.kind === "comment") await this.addComment(x.record_id, x.body);
+          else if (x.kind === "comment") await this.addComment(x.record_id, x.body, { internal: (x as any).internal });
           else await this.upload(x.prefix, new File([x.file], x.name, { type: x.type }));
           q = q.filter((y) => y.id !== x.id); sent++; await writeQ(q);
         } catch (e: any) {
@@ -309,13 +332,43 @@ export const store = {
     if (DEMO) return demoLoad().comments.filter((c) => c.record_id === recordId);
     const { data } = await sb().from("comments").select("*").eq("record_id", recordId).order("created_at"); return (data || []) as Comment[];
   },
-  async addComment(recordId: string, body: string) {
-    if (DEMO) { const db = demoLoad(); db.comments.push({ id: uid(), record_id: recordId, author: demoMe(db).id, body, created_at: new Date().toISOString() }); demoSave(db); return; }
-    if ((offline() || isTemp(recordId)) && !FLUSHING) { await this.queue({ kind: "comment", record_id: recordId, body }); return; }
+  async addComment(recordId: string, body: string, o: { internal?: boolean } = {}) {
+    const internal = !!o.internal;
+    if (DEMO) { const db = demoLoad(); const mentions = [...body.matchAll(/@\[[^\]]{1,120}\]\(([0-9a-fA-F-]{36})\)/g)].map((m) => m[1]); db.comments.push({ id: uid(), record_id: recordId, author: demoMe(db).id, body, created_at: new Date().toISOString(), internal, mentions } as any); demoSave(db); return; }
+    if ((offline() || isTemp(recordId)) && !FLUSHING) { await this.queue({ kind: "comment", record_id: recordId, body, internal }); return; }
     const { data: u } = await sb().auth.getUser();
-    const { error } = await sb().from("comments").insert({ record_id: recordId, body, author: u?.user?.id }); if (error) { if (!FLUSHING && isNetworkError(error)) { await this.queue({ kind: "comment", record_id: recordId, body }); return; } throw error; }
+    const { error } = await sb().from("comments").insert({ record_id: recordId, body, author: u?.user?.id, ...(internal ? { internal } : {}) }); if (error) { if (!FLUSHING && isNetworkError(error)) { await this.queue({ kind: "comment", record_id: recordId, body, internal }); return; } throw error; }
     translateLater({ id: recordId });
     if (/@\p{L}/u.test(body)) try { fetch("/api/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "mention", record_id: recordId }), keepalive: true }).catch(() => {}); } catch {}
+  },
+  /** Recent discussions I can see (comments on records I may read), newest first. */
+  async discussions(n = 400): Promise<(Comment & { section?: string; title?: string; internal?: boolean; mentions?: string[] })[]> {
+    if (DEMO) { const db = demoLoad(); return db.comments.slice(-n).reverse().map((c) => { const r = db.records.find((x) => x.id === c.record_id); return { ...c, section: r?.section, title: r?.title }; }).filter((c) => c.section && demoVisible(db, db.records.find((x) => x.id === c.record_id)!)); }
+    const { data } = await sb().from("comments").select("*, records(section,title)").order("created_at", { ascending: false }).limit(n);
+    return (data || []).filter((c: any) => c.records).map((c: any) => ({ ...c, section: c.records?.section, title: c.records?.title }));
+  },
+  /** Marks a record's discussion as read by me (Messages shows what is new since). */
+  async markRead(recordId: string) {
+    if (DEMO || isTemp(recordId) || offline()) return;
+    const { data: u } = await sb().auth.getUser(); if (!u?.user) return;
+    await sb().from("record_reads").upsert({ user_id: u.user.id, record_id: recordId, read_at: new Date().toISOString() });
+  },
+  async reads(): Promise<Record<string, string>> {
+    if (DEMO) return {};
+    const { data } = await sb().from("record_reads").select("record_id,read_at").limit(5000);
+    return Object.fromEntries((data || []).map((x: any) => [x.record_id, x.read_at]));
+  },
+  /** My notifications, newest first (the database only returns mine, and only for records I can still open). */
+  async notifications(n = 100): Promise<Notice[]> {
+    if (DEMO) return [];
+    const { data, error } = await sb().from("notifications").select("id,kind,record_id,section,title,body,actor,link,created_at,read_at").order("created_at", { ascending: false }).limit(n);
+    if (error) return []; return (data || []) as Notice[];
+  },
+  async markNotices(ids: number[] | "all") {
+    if (DEMO) return;
+    let q = sb().from("notifications").update({ read_at: new Date().toISOString() }).is("read_at", null);
+    if (ids !== "all") { if (!ids.length) return; q = q.in("id", ids); }
+    const { error } = await q; if (error) throw error;
   },
   async activity(opts: { recordId?: string; limit?: number; log?: boolean; since?: string } = {}): Promise<Activity[]> {
     if (DEMO) { const db = demoLoad(); const acc = accessFor(demoMe(db).role, db.rules); return db.activity.filter((a) => (!opts.recordId || a.record_id === opts.recordId) && (!opts.since || a.created_at > opts.since) && acc.read.has(a.section)).slice(0, opts.limit || 20); }
@@ -324,6 +377,12 @@ export const store = {
     if (opts.recordId) q = q.eq("record_id", opts.recordId);
     q = opts.log ? q.eq("section", "security.log") : q.neq("section", "security.log"); // the access log is shown only on the Security overview
     const { data } = await q; return (data || []) as Activity[];
+  },
+  /** History of several records at once (a project with its tasks, milestones and documents). */
+  async activityFor(ids: string[], limit = 80): Promise<Activity[]> {
+    const u = [...new Set(ids)].filter((x) => !isTemp(x)).slice(0, 300); if (!u.length) return [];
+    if (DEMO) return demoLoad().activity.filter((a) => a.record_id && u.includes(a.record_id)).slice(0, limit);
+    const { data } = await sb().from("activity").select("*").in("record_id", u).order("created_at", { ascending: false }).limit(limit); return (data || []) as Activity[];
   },
   /** Status changes of deals (for sales analytics). */
   async dealHistory(): Promise<{ record_id: string | null; action: string; detail: any; created_at: string }[]> {
@@ -358,6 +417,13 @@ export const store = {
     const { data, error } = await sb().rpc("search_records", { q, n });
     if (!error) return ((data || []) as Rec[]).map(loc);
     const { data: d2 } = await sb().from("records").select("*").ilike("title", `%${q}%`).limit(n); return ((d2 || []) as Rec[]).map(loc);
+  },
+  /** Comments containing the words (only discussions I may read). */
+  async searchComments(q: string, n = 15): Promise<(Comment & { section?: string; title?: string })[]> {
+    const s = q.trim(); if (s.length < 2) return [];
+    if (DEMO) { const db = demoLoad(); return db.comments.filter((c) => c.body.toLowerCase().includes(s.toLowerCase())).slice(0, n).map((c) => { const r = db.records.find((x) => x.id === c.record_id); return { ...c, section: r?.section, title: r?.title }; }).filter((c) => c.section); }
+    const { data } = await sb().from("comments").select("*, records(section,title)").ilike("body", `%${s.replace(/[%_\\]/g, (m) => "\\" + m)}%`).order("created_at", { ascending: false }).limit(n);
+    return (data || []).filter((c: any) => c.records).map((c: any) => ({ ...c, section: c.records?.section, title: c.records?.title }));
   },
   async profiles(): Promise<Profile[]> {
     if (DEMO) return demoLoad().profiles;

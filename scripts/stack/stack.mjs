@@ -75,7 +75,7 @@ export async function up() {
   // fresh database every time: tests start from a known state
   try { asPg(path.join(bin, "pg_ctl"), ["-D", PGDATA, "-m", "immediate", "stop"], { stdio: "ignore" }); } catch {}
   fs.rmSync(PGDATA, { recursive: true, force: true }); fs.mkdirSync(PGDATA, { recursive: true }); if (ROOTUSER) execFileSync("chown", ["postgres", PGDATA]);
-  asPg(path.join(bin, "initdb"), ["-D", PGDATA, "-U", "postgres", "-A", "trust", "-E", "UTF8", "--no-instructions"], { stdio: "ignore" });
+  asPg(path.join(bin, "initdb"), ["-D", PGDATA, "-U", "postgres", "-A", "trust", "-E", "UTF8", "--locale=C.UTF-8", "--no-instructions"], { stdio: "ignore" });
   fs.appendFileSync(path.join(PGDATA, "postgresql.conf"), `\nport = ${P.pg}\nlisten_addresses = '127.0.0.1'\nunix_socket_directories = '${PGDATA}'\nmax_connections = 100\nfsync = off\nsynchronous_commit = off\n`);
   asPg(path.join(bin, "pg_ctl"), ["-D", PGDATA, "-l", path.join(PGDATA, "server.log"), "-w", "start"], { stdio: "ignore" });
   psql(path.join(ROOT, "scripts/stack/bootstrap.sql"));

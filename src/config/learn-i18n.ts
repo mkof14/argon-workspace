@@ -1,6 +1,18 @@
 // Ukrainian and Arabic for the Learning Center and document templates, keyed by the English text.
 // Generated from learn.ts / templates.ts; when an English string changes, its translation falls back to English until updated.
 export const UK: Record<string, string> = {
+"How do I find my tasks?": "Як знайти мої задачі?",
+"Today shows your tasks first — the three most urgent at the top. For the full list open Company → Tasks → My tasks; switch to the board to drag tasks between statuses.": "«Сьогодні» показує ваші задачі першими — три найтерміновіші вгорі. Повний список: «Компанія» → «Задачі» → «Мої задачі»; на дошці задачі можна перетягувати між статусами.",
+"How do I give a task to a colleague?": "Як доручити задачу колезі?",
+"+ New → New task, choose the person in “Assigned to” (only active employees are listed), set the project and the deadline, Save. They get a notification at once; to reassign, choose another person.": "«+ Створити» → «Нова задача», виберіть людину в полі «Виконавець» (у списку лише активні співробітники), вкажіть проєкт і термін, «Зберегти». Вона одразу отримає сповіщення; щоб перепризначити, виберіть іншу.",
+"How do I upload a new version of a document?": "Як завантажити нову версію документа?",
+"Open the document, press the circular arrow next to its file and choose the new file. The earlier versions stay under “Version … earlier” and can still be opened.": "Відкрийте документ, натисніть кругову стрілку біля файлу й виберіть новий файл. Попередні версії лишаються в розділі «Версія … раніше» й так само відкриваються.",
+"What does “Request changes” do?": "Що робить «Запросити зміни»?",
+"The approver writes what must change; the record goes back (a document to Draft), the requester is notified, and after the fix they send it for approval again. The decision and the comment stay in the history.": "Той, хто погоджує, пише, що треба змінити; запис повертається (документ — у чернетку), автор отримує сповіщення й після виправлення знову надсилає на погодження. Рішення й коментар лишаються в історії.",
+"How do I mention a colleague?": "Як згадати колегу?",
+"Type @ in a comment and pick the person from the list. They get a notification that opens exactly that comment. Only colleagues who may read the record are offered.": "Наберіть @ у коментарі й виберіть людину зі списку. Вона отримає сповіщення, яке відкриє саме цей коментар. У списку лише колеги, яким доступний запис.",
+"Why do I not see the management dashboard?": "Чому я не бачу панель керівництва?",
+"It is for owners, administrators and management. Your own work is in Today, your projects and the task views; your manager sees the company overview.": "Вона для власників, адміністраторів і керівництва. Ваша робота — у «Сьогодні», ваших проєктах і видах задач; загальну картину бачить керівництво.",
 "Someone saved the record while I was editing — what happens?": "Хтось зберіг запис, поки я його редагував, — що буде?",
 "Nothing is lost. Changes to different fields are combined by themselves; for a field you both changed a window shows both versions and you pick one per field. The history keeps who changed what.": "Нічого не втрачається. Зміни різних полів об'єднуються самі; для поля, яке змінили обидва, вікно покаже обидві версії, і ви виберете варіант для кожного поля. Історія зберігає, хто що змінив.",
 "How do I turn on two-step sign-in?": "Як увімкнути двоетапний вхід?",
@@ -1047,6 +1059,18 @@ export const UK: Record<string, string> = {
 "Needed by": "Потрібно до"
 };
 export const AR: Record<string, string> = {
+"How do I find my tasks?": "كيف أجد مهامي؟",
+"Today shows your tasks first — the three most urgent at the top. For the full list open Company → Tasks → My tasks; switch to the board to drag tasks between statuses.": "تعرض «اليوم» مهامك أولاً — أكثرها إلحاحاً في الأعلى. للقائمة الكاملة افتح الشركة ← المهام ← مهامي؛ وانتقل إلى اللوحة لسحب المهام بين الحالات.",
+"How do I give a task to a colleague?": "كيف أُسند مهمة إلى زميل؟",
+"+ New → New task, choose the person in “Assigned to” (only active employees are listed), set the project and the deadline, Save. They get a notification at once; to reassign, choose another person.": "+ جديد ← مهمة جديدة، اختر الشخص في «المكلّف» (تظهر الأسماء النشطة فقط)، وحدد المشروع والموعد، ثم احفظ. يصله إشعار فوراً؛ ولإعادة الإسناد اختر شخصاً آخر.",
+"How do I upload a new version of a document?": "كيف أرفع إصداراً جديداً من مستند؟",
+"Open the document, press the circular arrow next to its file and choose the new file. The earlier versions stay under “Version … earlier” and can still be opened.": "افتح المستند واضغط السهم الدائري بجانب ملفه واختر الملف الجديد. تبقى الإصدارات السابقة تحت «الإصدار … سابقة» ويمكن فتحها.",
+"What does “Request changes” do?": "ماذا يفعل «طلب تعديلات»؟",
+"The approver writes what must change; the record goes back (a document to Draft), the requester is notified, and after the fix they send it for approval again. The decision and the comment stay in the history.": "يكتب الموافِق ما يجب تغييره؛ يعود السجل (المستند إلى مسودة)، ويُبلَّغ مقدم الطلب، وبعد التصحيح يرسله للموافقة مجدداً. يبقى القرار والتعليق في السجل التاريخي.",
+"How do I mention a colleague?": "كيف أذكر زميلاً؟",
+"Type @ in a comment and pick the person from the list. They get a notification that opens exactly that comment. Only colleagues who may read the record are offered.": "اكتب @ في تعليق واختر الشخص من القائمة. يصله إشعار يفتح ذلك التعليق بالضبط. لا تظهر إلا أسماء الزملاء الذين يمكنهم قراءة السجل.",
+"Why do I not see the management dashboard?": "لماذا لا أرى لوحة الإدارة؟",
+"It is for owners, administrators and management. Your own work is in Today, your projects and the task views; your manager sees the company overview.": "إنها للمالكين والمسؤولين والإدارة. عملك في «اليوم» ومشاريعك وعروض المهام؛ وترى الإدارة الصورة العامة.",
 "Someone saved the record while I was editing — what happens?": "حفظ أحدهم السجل أثناء تحريري — ماذا يحدث؟",
 "Nothing is lost. Changes to different fields are combined by themselves; for a field you both changed a window shows both versions and you pick one per field. The history keeps who changed what.": "لا يضيع شيء. تُدمج تغييرات الحقول المختلفة تلقائياً؛ وللحقل الذي غيّره كلاكما تعرض نافذة النسختين وتختار لكل حقل. يحفظ السجل التاريخي من غيّر ماذا.",
 "How do I turn on two-step sign-in?": "كيف أفعّل الدخول بخطوتين؟",

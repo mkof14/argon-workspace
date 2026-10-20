@@ -23,7 +23,7 @@ test("plan: only allowed sections, real statuses, fields, options and found reco
   ] };
   const { ops, dropped } = validatePlan(raw, { sections, writable, candidates: cands });
   assert.equal(ops.length, 4);
-  assert.deepEqual(ops[0], { op: "create", section: "company.tasks", title: "Call Aurora", status: "Open", data: { assignee: "Ivan Petrov", due: "2026-10-16" } });
+  assert.deepEqual(ops[0], { op: "create", section: "company.tasks", title: "Call Aurora", status: "New", data: { assignee: "Ivan Petrov", due: "2026-10-16" } });
   assert.deepEqual((ops[1] as any).data, { deal_ref: "D1", deal_ref_title: "Aurora superyacht", amount: 120000, currency: "USD", direction: "Receivable" });
   assert.deepEqual(ops[2], { op: "update", id: "D1", section: "sales.pipeline", title: "Aurora superyacht", status: "Negotiation", data: {} });
   assert.equal(ops[3].op, "comment");

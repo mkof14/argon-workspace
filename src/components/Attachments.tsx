@@ -64,14 +64,23 @@ export default function Attachments({ section, rec, canWrite, title }: { section
   };
   const del = async (f: FileItem) => { try { await store.removeFile(f.path); if (!DEMO) fetch("/api/docs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "remove", path: f.path }) }).catch(() => {}); load(); } catch (e: any) { toast(e.message, true); } };
 
+  // Versions: a file uploaded again under the same name is a new version; earlier versions stay and can be opened
+  const verInput = useRef<HTMLInputElement>(null); const [verOf, setVerOf] = useState<FileItem | null>(null);
+  const groups = (() => { const m = new Map<string, FileItem[]>(); for (const f of files || []) { const k = f.name.toLowerCase(); m.set(k, [...(m.get(k) || []), f]); }
+    return [...m.values()].map((l) => l.sort((a, b) => String(b.created_at || b.path).localeCompare(String(a.created_at || a.path)))); })();
+  const newVersion = async (fl: FileList | null) => {
+    const f0 = fl?.[0]; if (!f0 || !verOf || !prefix) return; if (f0.size > MAX) { toast(t("file_too_big", lang), true); return; }
+    setBusy(true); try { await store.upload(prefix, new File([f0], verOf.name, { type: f0.type || verOf.type })); toast(t("uploaded", lang)); load(); } catch (e: any) { toast(e.message || "Upload failed", true); } finally { setBusy(false); setVerOf(null); }
+  };
+  const V = (en: string, ru: string, uk: string, ar: string) => ({ en, ru, uk, ar } as any)[lang] || en;
   return (
     <div className="thread">
       <div className="toolbar"><div className="eyebrow" style={{ flex: 1 }}><Icon n="clip" className="lockico" /> {t("attachments", lang)} {files?.length ? `· ${files.length}` : ""}</div>
         {!!files?.length && <button className="btn ghost sm" onClick={() => mail(files)}><Icon n="send" />{t("email_btn", lang)}</button>}</div>
       {!rec ? <div className="faint" style={{ fontSize: 14 }}>{t("save_first", lang)}</div> : (
         <div className="att">
-          {files?.map((f) => (
-            <div key={f.path} className="att-row">
+          {groups.map(([f, ...older]) => (<div key={f.path} className="att-group">
+            <div className="att-row">
               <Icon n={fileIcon(f.type, f.name)} />
               <button className="nm" style={{ all: "unset", cursor: "pointer", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} onClick={() => open(f)} title={f.name}>{f.name}</button>
               <span className="faint mono" style={{ fontSize: 12.5 }}>{size(f.size)}</span>
@@ -79,8 +88,14 @@ export default function Attachments({ section, rec, canWrite, title }: { section
               <button className="btn ghost sm" onClick={() => dl(f)} title={t("download", lang)}><Icon n="download" /></button>
               <button className="btn ghost sm" onClick={() => share(f)} title={t("share_link", lang)}><Icon n="link" /></button>
               <button className="btn ghost sm" onClick={() => mail([f])} title={t("email_btn", lang)}><Icon n="mail" /></button>
-              {canWrite && <button className="btn ghost sm danger" onClick={() => del(f)} title={t("delete", lang)}><Icon n="trash" /></button>}
-            </div>))}
+              {canWrite && <button className="btn ghost sm" onClick={() => { setVerOf(f); verInput.current?.click(); }} title={V("Upload a new version", "Загрузить новую версию", "Завантажити нову версію", "رفع إصدار جديد")} aria-label={V("Upload a new version", "Загрузить новую версию", "Завантажити нову версію", "رفع إصدار جديد")}><Icon n="refresh" /></button>}
+              {canWrite && !older.length && <button className="btn ghost sm danger" onClick={() => del(f)} title={t("delete", lang)}><Icon n="trash" /></button>}
+            </div>
+            {older.length > 0 && <details className="att-vers"><summary>{V(`Version ${older.length + 1} (current) · ${older.length} earlier`, `Версия ${older.length + 1} (текущая) · ранее: ${older.length}`, `Версія ${older.length + 1} (поточна) · раніше: ${older.length}`, `الإصدار ${older.length + 1} (الحالي) · سابقة: ${older.length}`)}</summary>
+              {older.map((o, i) => <div key={o.path} className="att-row old"><span className="mono faint">v{older.length - i}</span><span className="faint" style={{ flex: 1 }}>{(o.created_at || "").slice(0, 16).replace("T", " ")}</span><span className="faint mono" style={{ fontSize: 12.5 }}>{size(o.size)}</span>
+                <button className="btn ghost sm" onClick={() => open(o)} title={t("preview", lang)}><Icon n="eye" /></button><button className="btn ghost sm" onClick={() => dl(o)} title={t("download", lang)}><Icon n="download" /></button></div>)}</details>}
+          </div>))}
+          <input ref={verInput} type="file" hidden onChange={(e) => { newVersion(e.target.files); e.target.value = ""; }} />
           {canWrite && <div className={`dropzone ${over ? "on" : ""}`} role="button" tabIndex={0}
             onClick={() => input.current?.click()} onKeyDown={(e) => e.key === "Enter" && input.current?.click()}
             onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)}

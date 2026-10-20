@@ -108,12 +108,15 @@ test("'already done' keys: of 25 parallel claims exactly one wins; repeat interv
 });
 
 test("workflow A: a new task tells the person it is assigned to, once", async () => {
+  // since v19 the database writes the personal notification; the old automatic e-mail rule is off (no double message)
   clearMail();
-  const { data: t } = await db.from("records").insert({ section: "company.tasks", title: `Prepare FAT checklist ${run}`, status: "Open", data: { assignee: sales.email, assignee_id: sales.id, due: "2026-12-01" }, created_by: owner.id }).select("*").single();
+  const { data: t } = await db.from("records").insert({ section: "company.tasks", title: `Prepare FAT checklist ${run}`, status: "New", data: { assignee: sales.email, assignee_id: sales.id, due: "2026-12-01" }, created_by: owner.id }).select("*").single();
   const a = await onRecordEvent(db, t, { kind: "created" }); const b = await onRecordEvent(db, t, { kind: "created" });
-  assert.equal(a.matched, 1); assert.equal(b.matched, 0, "a second event for the same creation does nothing");
-  const got = mailsTo(sales.email); assert.equal(got.length, 1); assert.match(got[0].raw, /Prepare FAT checklist/);
-  const log = await sql("select kind, text from automation_log where record_id = $1", [t.id]); assert.ok(log.some((l: any) => l.kind === "action" && /notified 1/.test(l.text)));
+  assert.equal(a.matched, 0); assert.equal(b.matched, 0, "the old e-mail rule no longer fires");
+  await db.from("records").update({ data: { ...t.data, notes: "more detail" } }).eq("id", t.id); // an edit that does not change the assignment
+  const n = await sql("select kind, title from notifications where user_id = $1 and record_id = $2", [sales.id, t.id]);
+  assert.deepEqual(n.map((x: any) => x.kind), ["assigned"]); assert.match(n[0].title, /Prepare FAT checklist/);
+  assert.equal(mailsTo(sales.email).length, 0, "no e-mail from the automation engine; delivery is the notification job");
 });
 
 test("state kept by the earlier version (files in Storage) moves into the tables once", async () => {

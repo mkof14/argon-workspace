@@ -11,7 +11,8 @@
   ],
   "git": {
     "deploymentEnabled": {
-      "phase1-reliability": false
+      "phase1-reliability": false,
+      "phase2-daily-operations": false
     }
   }
 }

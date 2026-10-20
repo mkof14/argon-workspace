@@ -11,6 +11,7 @@ import { DEMO, Profile, Rule, accessFor, isExternal, store, Access } from "@/lib
 import dynamic from "next/dynamic";
 import Dashboard from "./Dashboard";
 import { MfaGate } from "./MfaSetup";
+import { ProfileMenu, UnreadDot } from "./NavBits";
 import SectionView from "./SectionView";
 import type { AiContext } from "./AiPanel";
 import type { MailInit } from "./Mail";
@@ -29,7 +30,7 @@ const DeptHub = dynamic(() => import("./DeptHub"), { ssr: false });
 const Today = dynamic(() => import("./Today"), { ssr: false });
 const Search = dynamic(() => import("./Search"), { ssr: false });
 const Footer = dynamic(() => import("./Footer"), { ssr: false });
-const Bell = dynamic(() => import("./Inbox").then((m) => m.Bell), { ssr: false });
+const Bell = dynamic(() => import("./Notices").then((m) => m.Bell), { ssr: false });
 const Intake = dynamic(() => import("./Intake"), { ssr: false });
 const DocsAsk = dynamic(() => import("./DocsAsk"), { ssr: false });
 const StarDome = dynamic(() => import("./StarDome"), { ssr: false });
@@ -38,7 +39,18 @@ const Decisions = dynamic(() => import("./Decisions"), { ssr: false });
 const PhotoCapture = dynamic(() => import("./PhotoCapture"), { ssr: false });
 const OfflineBar = dynamic(() => import("./OfflineBar"), { ssr: false });
 const Guide = dynamic(() => import("./Guide"), { ssr: false });
-export const VERSION = "2.34";
+const Messages = dynamic(() => import("./Messages"), { ssr: false });
+const Documents = dynamic(() => import("./Documents"), { ssr: false });
+const CalendarPage = dynamic(() => import("./CalendarPage"), { ssr: false });
+const Assistant = dynamic(() => import("./Assistant"), { ssr: false });
+const People = dynamic(() => import("./People"), { ssr: false });
+const ProjectHome = dynamic(() => import("./ProjectHome"), { ssr: false });
+const Management = dynamic(() => import("./Management"), { ssr: false });
+const Notices = dynamic(() => import("./Notices"), { ssr: false });
+const QuickCreate = dynamic(() => import("./QuickCreate"), { ssr: false });
+export const VERSION = "2.35";
+/** Roles that see the management dashboard (also checked on the server for the export). */
+export const MANAGERS = ["owner", "admin", "management"];
 
 type Ctx = {
   lang: Lang; me: Profile; access: Access; toast: (m: string, err?: boolean) => void;
@@ -101,7 +113,7 @@ export default function App({ slug }: { slug: string[] }) {
   const route = slug.join("/");
   const HUBS = ["technical", "operations", "finance", "sales", "marketing", "security", "legal", "hr", "company"];
   const hubDept = slug.length === 2 && slug[1] === "overview" && HUBS.includes(slug[0]) ? slug[0] : "";
-  const sectionId = slug.length === 2 && !hubDept ? `${slug[0]}.${slug[1]}` : "";
+  const sectionId = slug.length === 2 && !hubDept && slug[0] !== "projects" ? `${slug[0]}.${slug[1]}` : "";
   const section = sectionId ? findSection(sectionId) : null;
 
   // language & theme
@@ -132,7 +144,7 @@ export default function App({ slug }: { slug: string[] }) {
       if (s0 && (p as any).sessions_revoked_at && s0.iat && s0.iat <= Math.floor(Date.parse((p as any).sessions_revoked_at) / 1000)) { await store.signOut(); router.replace("/login?ended=1"); return; } }
     setMe(p); setLoaded(true); setTick((x) => x + 1);
     if (!p && !DEMO) router.replace("/login");
-    if (p && !isExternal(p.role)) store.profiles().then(setPeople).catch(() => {});
+    if (p && !isExternal(p.role)) store.profiles().then((l) => { store.setPeople(l); setPeople(l); }).catch(() => {});
     if (p && ["owner", "admin", "management", "legal"].includes(p.role)) setTimeout(() => store.faqList().catch(() => {}), 8000); // tops up the starter FAQ after the page is ready
   }, [router]);
   useEffect(() => { reload(); }, [reload]);
@@ -180,10 +192,26 @@ export default function App({ slug }: { slug: string[] }) {
   const depts = DEPARTMENTS.map((d: any) => ({ ...d, secs: SECTIONS.filter((s) => s.dept === d.key && access.read.has(s.id)) })).filter((d: any) => d.secs.length);
   const isAdmin = me.role === "owner" || me.role === "admin";
   const dept = section ? DEPARTMENTS.find((d: any) => d.key === section.dept) : null;
-  const special: Record<string, [string, string]> = { trash: [t("workspace", lang), t("trash", lang)], today: [t("workspace", lang), tx({ en: "My day", ru: "Мой день", uk: "Мій день", ar: "يومي" }, lang)], stardome: [t("workspace", lang), t("sd_title", lang)], projects: [t("workspace", lang), tx({ en: "Projects", ru: "Проекты", uk: "Проєкти", ar: "المشاريع" }, lang)], decide: [t("workspace", lang), tx({ en: "Decisions", ru: "Решения", uk: "Рішення", ar: "القرارات" }, lang)], "admin/users": [t("admin", lang), t("users", lang)], "admin/roles": [t("admin", lang), t("roles", lang)], "admin/system": [t("admin", lang), t("sys_title", lang)], me: [t("workspace", lang), t("my_profile", lang)], learn: [t("workspace", lang), t("learn", lang)], guide: [t("workspace", lang), tx({ en: "User guide", ru: "Руководство", uk: "Посібник", ar: "دليل المستخدم" }, lang)], reports: [t("workspace", lang), t("reports", lang)], templates: [t("workspace", lang), t("templates", lang)], ask: [t("workspace", lang), t("ask_docs", lang)] };
+  const N = {
+    today: tx({ en: "Today", ru: "Сегодня", uk: "Сьогодні", ar: "اليوم" }, lang), messages: tx({ en: "Messages", ru: "Сообщения", uk: "Повідомлення", ar: "الرسائل" }, lang),
+    projects: tx({ en: "Projects", ru: "Проекты", uk: "Проєкти", ar: "المشاريع" }, lang), documents: tx({ en: "Documents", ru: "Документы", uk: "Документи", ar: "المستندات" }, lang),
+    calendar: tx({ en: "Calendar", ru: "Календарь", uk: "Календар", ar: "التقويم" }, lang), assistant: tx({ en: "Assistant", ru: "Ассистент", uk: "Асистент", ar: "المساعد" }, lang),
+    company: tx({ en: "Company", ru: "Компания", uk: "Компанія", ar: "الشركة" }, lang), people: tx({ en: "People", ru: "Сотрудники", uk: "Співробітники", ar: "الموظفون" }, lang),
+    management: tx({ en: "Management dashboard", ru: "Панель руководства", uk: "Панель керівництва", ar: "لوحة الإدارة" }, lang), tasks: tx({ en: "Tasks", ru: "Задачи", uk: "Задачі", ar: "المهام" }, lang),
+    decide: tx({ en: "Approvals & decisions", ru: "Согласования и решения", uk: "Погодження та рішення", ar: "الموافقات والقرارات" }, lang), help: tx({ en: "Help", ru: "Помощь", uk: "Допомога", ar: "المساعدة" }, lang),
+    more: tx({ en: "More", ru: "Ещё", uk: "Ще", ar: "المزيد" }, lang),
+  };
+  const ext = isExternal(me.role);
+  const PRIMARY: [string, string, string, string][] = ext ? [["/", "", "grid", t("overview", lang)], ["/messages", "messages", "send", N.messages], ["/reports", "reports", "pie", t("reports", lang)]]
+    : [["/", "", "sun", N.today], ["/messages", "messages", "send", N.messages], ["/projects", "projects", "layers", N.projects], ["/documents", "documents", "file", N.documents], ["/calendar", "calendar", "calendar", N.calendar], ["/assistant", "assistant", "spark", N.assistant]];
+  const isOn = (r: string) => (r === "" ? !route || route === "today" : route === r || route.startsWith(r + "/"));
+  const special: Record<string, [string, string]> = { trash: [t("workspace", lang), t("trash", lang)], today: [t("workspace", lang), tx({ en: "Today", ru: "Сегодня", uk: "Сьогодні", ar: "اليوم" }, lang)], stardome: [t("workspace", lang), t("sd_title", lang)], projects: [t("workspace", lang), tx({ en: "Projects", ru: "Проекты", uk: "Проєкти", ar: "المشاريع" }, lang)], decide: [t("workspace", lang), tx({ en: "Decisions", ru: "Решения", uk: "Рішення", ar: "القرارات" }, lang)], "admin/users": [t("admin", lang), t("users", lang)], "admin/roles": [t("admin", lang), t("roles", lang)], "admin/system": [t("admin", lang), t("sys_title", lang)], me: [t("workspace", lang), t("my_profile", lang)], learn: [t("workspace", lang), t("learn", lang)], guide: [t("workspace", lang), tx({ en: "User guide", ru: "Руководство", uk: "Посібник", ar: "دليل المستخدم" }, lang)], reports: [t("workspace", lang), t("reports", lang)], templates: [t("workspace", lang), t("templates", lang)], ask: [t("workspace", lang), t("ask_docs", lang)],
+    messages: [t("workspace", lang), N.messages], documents: [t("workspace", lang), N.documents], calendar: [t("workspace", lang), N.calendar], assistant: [t("workspace", lang), N.assistant],
+    people: [N.company, N.people], management: [N.company, N.management], "company-overview": [N.company, t("overview", lang)], notifications: [t("workspace", lang), t("notifications", lang)] };
+  if (route.startsWith("projects/")) special[route] = [tx({ en: "Projects", ru: "Проекты", uk: "Проєкти", ar: "المشاريع" }, lang), tx({ en: "Project", ru: "Проект", uk: "Проєкт", ar: "مشروع" }, lang)];
   const hubD = hubDept ? DEPARTMENTS.find((d: any) => d.key === hubDept) : null;
   const crumbGroup = hubD ? tx(hubD.label, lang) : section ? tx(dept.label, lang) : special[route]?.[0] || t("workspace", lang);
-  const crumbTitle = hubD ? t("dept_overview", lang) : section ? tx(section.label, lang) : special[route]?.[1] || t("overview", lang);
+  const crumbTitle = hubD ? t("dept_overview", lang) : section ? tx(section.label, lang) : special[route]?.[1] || (!route && !isExternal(me.role) ? tx({ en: "Today", ru: "Сегодня", uk: "Сьогодні", ar: "اليوم" }, lang) : t("overview", lang));
   const curLang = LANGS.find((l) => l.code === lang)!;
   if (typeof document !== "undefined") document.title = `${crumbTitle} · AGRON Workspace`;
   if (typeof window !== "undefined") { try { // remember recently visited pages for the footer
@@ -193,7 +221,16 @@ export default function App({ slug }: { slug: string[] }) {
   const goBack = () => { if (navStack.current.length > 1) router.back(); else router.push("/"); };
 
   let body: React.ReactNode;
-  if (!route) body = <Dashboard depts={depts} />;
+  if (!route) body = ext ? <Dashboard depts={depts} /> : <Today />;
+  else if (route === "company-overview" && !ext) body = <Dashboard depts={depts} />;
+  else if (route === "messages") body = <Messages />;
+  else if (route === "documents" && !ext) body = <Documents />;
+  else if (route === "calendar" && !ext) body = <CalendarPage />;
+  else if (route === "assistant" && !ext) body = <Assistant />;
+  else if (route === "people" && !ext) body = <People />;
+  else if (route === "notifications") body = <Notices />;
+  else if (route === "management") body = MANAGERS.includes(me.role) ? <Management /> : <div className="card empty">{t("no_access", lang)}</div>;
+  else if (route.startsWith("projects/") && slug.length === 2 && !ext) body = <ProjectHome id={slug[1]} />;
   else if ((route === "admin/users" || route === "admin/roles" || route === "admin/system") && isAdmin) body = <>
       <nav className="dtabs" style={{ ["--dc" as any]: "#5B6CF0" }}>
         <Link href="/admin/users" className={route === "admin/users" ? "on" : ""}><Icon n="users" />{t("users", lang)}</Link>
@@ -246,18 +283,16 @@ export default function App({ slug }: { slug: string[] }) {
           <div className="rail-brand"><img src="/logo-full.webp" alt="AGRON™ — Aerial-Ground Robotics Operations Network" width={1000} height={280} />
             <div className="prod"><i />{t("workspace", lang)}</div></div>
           <nav ref={navRef}>
-            <Link href="/" className={`nav-item top ${!route ? "active" : ""}`} style={{ ["--dc" as any]: "#FF6A2B" }}><Icon n="stardome" /><span>{t("overview", lang)}</span></Link>
-            {!isExternal(me.role) && <Link href="/today" className={`nav-item top ${route === "today" ? "active" : ""}`} style={{ ["--dc" as any]: "#F59E0B" }}><Icon n="sun" /><span>{tx({ en: "My day", ru: "Мой день", uk: "Мій день", ar: "يومي" }, lang)}</span></Link>}
-            {!isExternal(me.role) && <Link href="/decide" className={`nav-item top ${route === "decide" ? "active" : ""}`} style={{ ["--dc" as any]: "#D9480F" }}><Icon n="check" /><span>{tx({ en: "Decisions", ru: "Решения", uk: "Рішення", ar: "القرارات" }, lang)}</span></Link>}
-            {!isExternal(me.role) && <Link href="/stardome" className={`nav-item top ${route === "stardome" ? "active" : ""}`} style={{ ["--dc" as any]: "#FF6A2B" }}><Icon n="container" /><span>{t("sd_title", lang)}</span></Link>}
-            {!isExternal(me.role) && <Link href="/projects" className={`nav-item top ${route === "projects" ? "active" : ""}`} style={{ ["--dc" as any]: "#0E9F6E" }}><Icon n="layers" /><span>{tx({ en: "Projects", ru: "Проекты", uk: "Проєкти", ar: "المشاريع" }, lang)}</span></Link>}
-            {!isExternal(me.role) && <Link href="/ask" className={`nav-item top ${route === "ask" ? "active" : ""}`} style={{ ["--dc" as any]: "#7C5CFF" }}><Icon n="spark" /><span>{t("ask_docs", lang)}</span></Link>}
-            <Link href="/reports" className={`nav-item top ${route === "reports" ? "active" : ""}`} style={{ ["--dc" as any]: "#E5484D" }}><Icon n="pie" /><span>{t("reports", lang)}</span></Link>
-            <Link href="/templates" className={`nav-item top ${route === "templates" ? "active" : ""}`} style={{ ["--dc" as any]: "#C9971C" }}><Icon n="file" /><span>{t("templates", lang)}</span></Link>
-            {access.read.has("company.tasks") && <Link href="/company/tasks" className={`nav-item top ${route === "company/tasks" ? "active" : ""}`} style={{ ["--dc" as any]: "#5B6CF0" }}><Icon n="bell" /><span>{tx(findSection("company.tasks")?.label, lang)}</span></Link>}
-            {!isExternal(me.role) && <Link href="/guide" className={`nav-item top ${route === "guide" ? "active" : ""}`} style={{ ["--dc" as any]: "#0F766E" }}><Icon n="book" /><span>{tx({ en: "User guide", ru: "Руководство", uk: "Посібник", ar: "دليل المستخدم" }, lang)}</span></Link>}
-            <Link href="/learn" className={`nav-item top ${route === "learn" ? "active" : ""}`} style={{ ["--dc" as any]: "#14B8A6" }}><Icon n="lifebuoy" /><span>{t("learn", lang)}</span></Link>
-            {!isExternal(me.role) && <Link href="/trash" className={`nav-item top ${route === "trash" ? "active" : ""}`} style={{ ["--dc" as any]: "#94A3B8" }}><Icon n="trash" /><span>{t("trash", lang)}</span></Link>}
+            {PRIMARY.map(([h, k, ic, label]) => <Link key={h} href={h} className={`nav-item top primary ${isOn(k) ? "active" : ""}`} aria-current={isOn(k) ? "page" : undefined} style={{ ["--dc" as any]: "#FF6A2B" }}><Icon n={ic} /><span>{label}</span>{k === "messages" && <UnreadDot />}</Link>)}
+            {!ext && <><div className="nav-label"><span>{N.company}</span></div>
+              {access.read.has("company.tasks") && <Link href="/company/tasks" className={`nav-item top ${route === "company/tasks" ? "active" : ""}`} style={{ ["--dc" as any]: "#5B6CF0" }}><Icon n="bell" /><span>{N.tasks}</span></Link>}
+              <Link href="/decide" className={`nav-item top ${route === "decide" ? "active" : ""}`} style={{ ["--dc" as any]: "#D9480F" }}><Icon n="check" /><span>{N.decide}</span></Link>
+              <Link href="/people" className={`nav-item top ${route === "people" ? "active" : ""}`} style={{ ["--dc" as any]: "#0EA5E9" }}><Icon n="users" /><span>{N.people}</span></Link>
+              {MANAGERS.includes(me.role) && <Link href="/management" className={`nav-item top ${route === "management" ? "active" : ""}`} style={{ ["--dc" as any]: "#E5484D" }}><Icon n="target" /><span>{N.management}</span></Link>}
+              <Link href="/company-overview" className={`nav-item top ${route === "company-overview" ? "active" : ""}`} style={{ ["--dc" as any]: "#FF6A2B" }}><Icon n="stardome" /><span>{t("overview", lang)}</span></Link>
+              <Link href="/stardome" className={`nav-item top ${route === "stardome" ? "active" : ""}`} style={{ ["--dc" as any]: "#FF6A2B" }}><Icon n="container" /><span>{t("sd_title", lang)}</span></Link>
+              <Link href="/reports" className={`nav-item top ${route === "reports" ? "active" : ""}`} style={{ ["--dc" as any]: "#E5484D" }}><Icon n="pie" /><span>{t("reports", lang)}</span></Link>
+              <Link href="/templates" className={`nav-item top ${route === "templates" ? "active" : ""}`} style={{ ["--dc" as any]: "#C9971C" }}><Icon n="file" /><span>{t("templates", lang)}</span></Link></>}
             <div className="nav-label nav-depts"><Icon n="layers" /><span>{t("departments", lang)}</span><b>{depts.length}</b></div>
             {depts.map((d: any) => {
               const open = !!openDepts[d.key];
@@ -276,6 +311,10 @@ export default function App({ slug }: { slug: string[] }) {
               <Link href="/admin/users" className={`nav-item top ${route === "admin/users" ? "active" : ""}`} style={{ ["--dc" as any]: "#94A3B8" }}><Icon n="users" /><span>{t("users", lang)}</span></Link>
               <Link href="/admin/roles" className={`nav-item top ${route === "admin/roles" ? "active" : ""}`} style={{ ["--dc" as any]: "#94A3B8" }}><Icon n="key" /><span>{t("roles", lang)}</span></Link>
               <Link href="/admin/system" className={`nav-item top ${route === "admin/system" ? "active" : ""}`} style={{ ["--dc" as any]: "#94A3B8" }}><Icon n="pulse" /><span>{t("sys_title", lang)}</span></Link></>}
+            <div className="nav-label">{N.help}</div>
+            {!ext && <Link href="/guide" className={`nav-item top ${route === "guide" ? "active" : ""}`} style={{ ["--dc" as any]: "#0F766E" }}><Icon n="book" /><span>{tx({ en: "User guide", ru: "Руководство", uk: "Посібник", ar: "دليل المستخدم" }, lang)}</span></Link>}
+            <Link href="/learn" className={`nav-item top ${route === "learn" ? "active" : ""}`} style={{ ["--dc" as any]: "#14B8A6" }}><Icon n="lifebuoy" /><span>{t("learn", lang)}</span></Link>
+            {!ext && <Link href="/trash" className={`nav-item top ${route === "trash" ? "active" : ""}`} style={{ ["--dc" as any]: "#94A3B8" }}><Icon n="trash" /><span>{t("trash", lang)}</span></Link>}
           </nav>
           <div className="rail-foot">
             <Link href="/me" className="me" style={{ textDecoration: "none", color: "inherit" }}><span className="avatar">{(me.full_name || me.email || "?").slice(0, 1).toUpperCase()}</span>
@@ -302,6 +341,7 @@ export default function App({ slug }: { slug: string[] }) {
               <button className="iconbtn mic-top" onClick={() => setSearch({ voice: true })} title={t("voice", lang)} aria-label={t("voice", lang)}><Icon n="mic" /></button>
               {!isExternal(me.role) && <button className="iconbtn photo-btn" onClick={() => setPhoto(true)} title={tx({ en: "Photo → record", ru: "Фото → запись", uk: "Фото → запис", ar: "صورة ← سجل" }, lang)} aria-label={tx({ en: "Photo → record", ru: "Фото → запись", uk: "Фото → запис", ar: "صورة ← سجل" }, lang)}><Icon n="image" /></button>}
               {!isExternal(me.role) && <button className="btn sm intake-btn" onClick={() => setIntake({})} title={t("intake_t", lang)} aria-label={t("intake_t", lang)}><Icon n="upload" /><span>{t("intake_btn", lang)}</span></button>}
+              {!ext && <QuickCreate />}
               <Bell />
               <button className="btn sm askai" onClick={() => setAi({ title: crumbTitle, section: sectionId })} aria-label={t("ask_ai", lang)}><Icon n="spark" /><span>{t("ask_ai", lang)}</span></button>
               <div className="dd">
@@ -313,6 +353,7 @@ export default function App({ slug }: { slug: string[] }) {
                     <span className="code">{l.short}</span>{l.name}</button>))}</div>}
               </div>
               <button className="iconbtn theme-top" onClick={toggleTheme} title={dark ? t("theme_light", lang) : t("theme_dark", lang)} aria-label={dark ? t("theme_light", lang) : t("theme_dark", lang)}><Icon n={dark ? "sun" : "moon"} /></button>
+              <ProfileMenu name={me.full_name || me.email} role={tx((ROLES as any)[me.role]?.label, lang)} dark={dark} onTheme={toggleTheme} onSignOut={DEMO ? undefined : async () => { await store.signOut(); router.replace("/login"); }} />
             </div>
           </header>
           <div className="content">
@@ -331,6 +372,9 @@ export default function App({ slug }: { slug: string[] }) {
       {search && <Search voice={search.voice} onClose={() => setSearch(null)} />}
       {intake && <Intake initial={intake.files} onClose={() => setIntake(null)} />}
       {photo && <PhotoCapture onClose={() => setPhoto(false)} />}
+      <nav className="tabbar" aria-label={tx({ en: "Main sections", ru: "Основные разделы", uk: "Основні розділи", ar: "الأقسام الرئيسية" }, lang)}>
+        {PRIMARY.map(([h, k, ic, label]) => <Link key={h} href={h} className={isOn(k) ? "on" : ""} aria-current={isOn(k) ? "page" : undefined}><Icon n={ic} /><span>{label}</span></Link>)}
+      </nav>
       <OfflineBar />
       <div className="toasts" aria-live="polite">{toasts.map((x) => <div key={x.id} className={`toast ${x.err ? "err" : ""}`}>{x.m}</div>)}</div>
     </AppCtx.Provider>

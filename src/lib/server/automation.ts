@@ -145,6 +145,14 @@ function recipients(c: Ctx, to: string, rec: any): P[] {
   if (!list.length && to === "owner") list = c.profiles.filter((p) => c.settings.notify.escalate_roles.includes(p.role)); // nobody named → leaders
   return list.filter((p) => canRead(c, p, rec.section) && (!rec.controlled || p.us_person));
 }
+/** A person named by text (name or email) in a created record is linked to their account (<key>_id): assignments use accounts, not names. */
+function linkPeople(c: Ctx, data: Record<string, any>) {
+  for (const k of PEOPLE_KEYS) {
+    const v = String(data[k] || "").trim().toLowerCase(); if (!v || data[`${k}_id`]) continue;
+    const p = c.profiles.find((x) => !["partner", "vendor", "investor"].includes(x.role) && (x.email?.toLowerCase() === v || (x.full_name || "").toLowerCase() === v));
+    if (p) { data[`${k}_id`] = p.id; data[k] = p.full_name || p.email; }
+  }
+}
 function tell(c: Ctx, people: P[], line: string) { for (const p of people) { const e = c.mail.get(p.email) || { p, lines: [] }; if (!e.lines.includes(line)) e.lines.push(line); c.mail.set(p.email, e); } }
 /** A system e-mail in the reader's language (English stays as written; other languages are translated and cached). */
 async function inLang(c: Ctx, p: P, m: { subject: string; html: string; text: string }) {
@@ -196,6 +204,7 @@ async function execute(c: Ctx, agent: AgentId, a: Action, rec: any, o: { idem?: 
     const data: Record<string, any> = { _by: `agent:${agent}`, _from: rec.id, ...(o.idem ? { _idem: o.idem } : {}) };
     for (const [k, tpl] of Object.entries(a.fields || {})) { const v = render(tpl, rec, today()); if (v) data[k] = /^-?\d+(\.\d+)?$/.test(v) && /amount|value|qty/.test(k) ? Number(v) : v; }
     if (a.link) { data[a.link] = rec.id; data[`${a.link}_title`] = rec.title; }
+    linkPeople(c, data);
     const title = render(a.title, rec, today()) || rec.title;
     const { data: made, error } = await db.from("records").insert({ section: a.section, title, status: a.status || null, data, controlled: !!rec.controlled, company: null }).select("id,section,title").single();
     if (error) { if (error.code === "23505" && o.idem) return "already exists"; throw new Error(error.message); }

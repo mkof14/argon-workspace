@@ -20,6 +20,8 @@ import { t, tx } from "@/lib/i18n";
 import { Rec, store } from "@/lib/store";
 import { fmt, saveBlob, spendMsg, toCsv, tone } from "@/lib/format";
 import { shipMsg } from "@/lib/shipgate";
+import { byUrgency, daysTo, groupBy, isOpenTask, isMineTask, PRIORITY_RANK } from "@/lib/work";
+import { isEmployee, personName } from "./PeopleFields";
 
 export const DUE_KEYS = ["due", "deadline", "expires", "renewal", "next_service", "valid_until", "eta", "warranty_end", "publish", "session", "starts", "book_by"];
 export const KIND: Record<string, { icon: string; c: string }> = {
@@ -50,6 +52,11 @@ export default function SectionView({ section }: { section: any }) {
   const [views, setViews] = useState<{ name: string; q: string; st: string; sort?: string }[]>(() => (me?.prefs?.views?.[section.id] || []));
   const [naming, setNaming] = useState<string | null>(null);
   const canWrite = access.write.has(section.id);
+  // Tasks: ready-made views (mine, by project, by employee, overdue) and filters by project, person and priority
+  const tasksView = section.view === "tasks";
+  const [mode, setMode] = useState<"all" | "mine" | "project" | "person" | "overdue">(() => (typeof window !== "undefined" ? (new URLSearchParams(window.location.search).get("view") as any) : null) || "all");
+  const [fProj, setFProj] = useState(() => (typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("project") || "" : ""));
+  const [fWho, setFWho] = useState(""); const [fPri, setFPri] = useState(""); const [showDone, setShowDone] = useState(false);
   const fieldsByKey = useMemo(() => Object.fromEntries(section.fields.map((f: any) => [f.key, f])), [section]);
   const dept = DEPARTMENTS.find((d: any) => d.key === section.dept);
   const moneyKey = section.columns.find((k: string) => fieldsByKey[k]?.type === "money");
@@ -71,7 +78,12 @@ export default function SectionView({ section }: { section: any }) {
 
   if (section.view === "mail") return <div style={{ ["--dc" as any]: section.color, display: "grid", gap: 16 }}><MailCenter /></div>;
 
-  const filtered = (rows || []).filter((r) => (!st || r.status === st) && (!q || (r.title + " " + JSON.stringify(r.data)).toLowerCase().includes(q.toLowerCase())));
+  let filtered = (rows || []).filter((r) => (!st || r.status === st) && (!q || (r.title + " " + JSON.stringify(r.data)).toLowerCase().includes(q.toLowerCase())));
+  if (tasksView) {
+    filtered = filtered.filter((r) => (!fProj || (fProj === "-" ? !r.data?.project_ref : r.data?.project_ref === fProj)) && (!fWho || (fWho === "-" ? !r.data?.assignee_id : r.data?.assignee_id === fWho)) && (!fPri || r.data?.priority === fPri)
+      && (mode !== "mine" || isMineTask(r, me.id)) && (mode !== "overdue" || (isOpenTask(r) && (daysTo(r.data?.due) ?? 1) < 0)) && (showDone || st || view === "board" || isOpenTask(r)));
+    if (!sort) filtered.sort(byUrgency());
+  }
   if (sort) filtered.sort((a, b) => {
     const va = sort.k === "title" ? a.title : sort.k === "status" ? a.status || "" : sort.k === "updated" ? a.updated_at || "" : a.data?.[sort.k] ?? "";
     const vb = sort.k === "title" ? b.title : sort.k === "status" ? b.status || "" : sort.k === "updated" ? b.updated_at || "" : b.data?.[sort.k] ?? "";
@@ -96,7 +108,7 @@ export default function SectionView({ section }: { section: any }) {
   };
   const dueCls = (r: Rec, key: string) => {
     if (!DUE_KEYS.includes(key) || !r.data?.[key]) return "";
-    if (/(done|paid|closed|resolved|installed|signed|filed|delivered|received|cancelled|passed|approved|granted|retired)/i.test(r.status || "")) return "";
+    if (/(done|completed|paid|closed|resolved|installed|signed|filed|delivered|received|cancelled|passed|approved|granted|retired|reached)/i.test(r.status || "")) return "";
     const d = days(r.data[key]); return d < 0 ? "due-over" : d <= 14 ? "due-soon" : "";
   };
 
@@ -111,7 +123,7 @@ export default function SectionView({ section }: { section: any }) {
       for (const r of chosen) {
         if (bulk.del) { await store.remove(r.id); ok++; continue; }
         const status = bulk.status || r.status; const data = { ...r.data };
-        if (bulk.who !== undefined && bulk.who !== "" && ownerKey) data[ownerKey] = bulk.who;
+        if (bulk.who !== undefined && bulk.who !== "" && ownerKey) { if (fieldsByKey[ownerKey].type === "person") { const p = people.find((x) => x.id === bulk.who); if (p) { data[ownerKey] = personName(p); data[`${ownerKey}_id`] = p.id; } } else data[ownerKey] = bulk.who; }
         if (bulk.date && dateKey) data[dateKey] = bulk.date;
         if (status !== r.status && (gateBlocks(section.gate, status, data) || (await store.spendCheck(section.id, r.id, status, data)) || (await store.shipCheck(section.id, status, data)).length)) { blocked++; continue; }
         await store.save({ ...r, status, data }); ok++;
@@ -157,6 +169,9 @@ export default function SectionView({ section }: { section: any }) {
           <button className={view === "board" ? "on" : ""} onClick={() => setView("board")}><Icon n="cols" /> {t("board", lang)}</button>
           {section.view === "gallery" && <button className={view === "gallery" ? "on" : ""} onClick={() => setView("gallery")}><Icon n="grid" /> {t("gallery", lang)}</button>}
         </div>
+        {tasksView && <div className="seg" role="group" aria-label={tx({ en: "Task views", ru: "Виды задач", uk: "Види задач", ar: "عروض المهام" }, lang)}>
+          {([["all", { en: "All", ru: "Все", uk: "Усі", ar: "الكل" }], ["mine", { en: "My tasks", ru: "Мои задачи", uk: "Мої задачі", ar: "مهامي" }], ["project", { en: "By project", ru: "По проектам", uk: "За проєктами", ar: "حسب المشروع" }], ["person", { en: "By employee", ru: "По сотрудникам", uk: "За співробітниками", ar: "حسب الموظف" }], ["overdue", { en: "Overdue", ru: "Просрочено", uk: "Прострочено", ar: "متأخرة" }]] as [typeof mode, any][]).map(([k, l]) => <button key={k} className={mode === k ? "on" : ""} onClick={() => { setMode(k); if (k === "project" || k === "person") setView("table"); }} data-mode={k}>{tx(l, lang)}</button>)}
+        </div>}
         <span style={{ flex: 1 }} />
         <button className="btn ghost sm" onClick={() => openMail({ section: section.id })}><Icon n="mail" />{t("write_email", lang)}</button>
         <button className="btn ghost sm" onClick={() => openAi({ title: tx(section.label, lang), section: section.id, rows: filtered.slice(0, 60) })}><Icon n="spark" />{t("ask_ai", lang)}</button>
@@ -170,6 +185,14 @@ export default function SectionView({ section }: { section: any }) {
           <select className="input" value={st} onChange={(e) => setSt(e.target.value)} aria-label={t("all_status", lang)}>
             <option value="">{t("all_status", lang)}</option>{section.statuses.map((s: string) => <option key={s}>{s}</option>)}
           </select>
+          {tasksView && <>
+            <select className="input" value={fProj} onChange={(e) => setFProj(e.target.value)} aria-label={tx({ en: "Project", ru: "Проект", uk: "Проєкт", ar: "المشروع" }, lang)}><option value="">{tx({ en: "All projects", ru: "Все проекты", uk: "Усі проєкти", ar: "كل المشاريع" }, lang)}</option><option value="-">{tx({ en: "No project", ru: "Без проекта", uk: "Без проєкту", ar: "بلا مشروع" }, lang)}</option>
+              {[...new Map((rows || []).filter((r) => r.data?.project_ref).map((r) => [r.data.project_ref, r.data.project_ref_title || "—"])).entries()].map(([id, tt]) => <option key={id} value={id}>{tt}</option>)}</select>
+            <select className="input" value={fWho} onChange={(e) => setFWho(e.target.value)} aria-label={tx({ en: "Assigned to", ru: "Исполнитель", uk: "Виконавець", ar: "المكلّف" }, lang)}><option value="">{tx({ en: "Everyone", ru: "Все исполнители", uk: "Усі виконавці", ar: "الجميع" }, lang)}</option><option value="-">{tx({ en: "Not assigned", ru: "Не назначено", uk: "Не призначено", ar: "غير مسند" }, lang)}</option>
+              {people.filter(isEmployee).map((p) => <option key={p.id} value={p.id}>{personName(p)}</option>)}</select>
+            <select className="input" value={fPri} onChange={(e) => setFPri(e.target.value)} aria-label={tx({ en: "Priority", ru: "Приоритет", uk: "Пріоритет", ar: "الأولوية" }, lang)}><option value="">{tx({ en: "Any priority", ru: "Любой приоритет", uk: "Будь-який пріоритет", ar: "أي أولوية" }, lang)}</option>{Object.keys(PRIORITY_RANK).filter((k) => k !== "Medium").reverse().map((k) => <option key={k}>{k}</option>)}</select>
+            {view !== "board" && !st && <label className="check" style={{ fontSize: 13.5 }}><input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} />{tx({ en: "Show completed", ru: "Показать выполненные", uk: "Показати виконані", ar: "إظهار المكتملة" }, lang)}</label>}
+          </>}
           <div className="views">
             {views.map((v) => <span key={v.name} className={`chip view-chip ${v.q === q && v.st === st && (v.sort || "") === curSort ? "on" : ""}`}>
               <button onClick={() => { setQ(v.q); setSt(v.st); if (v.sort) { const [k, d] = v.sort.split(":"); setSort({ k, dir: d === "-1" ? -1 : 1 }); } else setSort(null); }}>{v.name}</button>
@@ -187,7 +210,9 @@ export default function SectionView({ section }: { section: any }) {
           <b>{tx({ en: "Selected", ru: "Выбрано", uk: "Вибрано", ar: "المحدد" }, lang)}: {chosen.length}</b>
           {canWrite && !bulk.del && <>
             <select className="input" value={bulk.status || ""} onChange={(e) => setBulk({ ...bulk, status: e.target.value || undefined })} aria-label={t("status", lang)}><option value="">{t("status", lang)} —</option>{section.statuses.map((s: string) => <option key={s}>{s}</option>)}</select>
-            {ownerKey && <input className="input" list="people-bulk" style={{ width: 170 }} value={bulk.who || ""} placeholder={tx(fieldsByKey[ownerKey].label, lang)} onChange={(e) => setBulk({ ...bulk, who: e.target.value })} />}
+            {ownerKey && (fieldsByKey[ownerKey].type === "person"
+              ? <select className="input" style={{ width: 190 }} value={bulk.who || ""} onChange={(e) => setBulk({ ...bulk, who: e.target.value })} aria-label={tx(fieldsByKey[ownerKey].label, lang)}><option value="">{tx(fieldsByKey[ownerKey].label, lang)} —</option>{people.filter(isEmployee).map((p) => <option key={p.id} value={p.id}>{personName(p)}</option>)}</select>
+              : <input className="input" list="people-bulk" style={{ width: 170 }} value={bulk.who || ""} placeholder={tx(fieldsByKey[ownerKey].label, lang)} onChange={(e) => setBulk({ ...bulk, who: e.target.value })} />)}
             <datalist id="people-bulk">{people.map((p) => <option key={p.id} value={p.full_name || p.email} />)}</datalist>
             {dateKey && <input className="input" type="date" style={{ width: 160 }} value={bulk.date || ""} onChange={(e) => setBulk({ ...bulk, date: e.target.value || undefined })} aria-label={tx(fieldsByKey[dateKey].label, lang)} title={tx(fieldsByKey[dateKey].label, lang)} />}
           </>}
@@ -213,14 +238,16 @@ export default function SectionView({ section }: { section: any }) {
               {th("title", t("title", lang))}{th("status", t("status", lang))}
               {section.columns.map((k: string) => th(k, tx(fieldsByKey[k]?.label, lang)))}<th className="col-upd"><button onClick={() => setSort((s) => (s?.k === "updated" ? { k: "updated", dir: s.dir === 1 ? -1 : 1 } : { k: "updated", dir: -1 }))}>{t("updated", lang)}<Icon n="sort" /></button></th>
             </tr></thead><tbody>
-              {filtered.map((r) => (
+              {(tasksView && (mode === "project" || mode === "person") ? [...groupBy(filtered, (r) => (mode === "project" ? r.data?.project_ref_title || "" : (personName(people.find((p) => p.id === r.data?.assignee_id)) || r.data?.assignee || ""))).entries()].sort((a, b) => (a[0] ? 0 : 1) - (b[0] ? 0 : 1) || a[0].localeCompare(b[0])) : [["", filtered] as [string, Rec[]]]).flatMap(([g, list]) => [
+                ...(tasksView && (mode === "project" || mode === "person") ? [<tr key={`g-${g}`} className="grp"><td colSpan={section.columns.length + 4}><b>{g || (mode === "project" ? tx({ en: "No project", ru: "Без проекта", uk: "Без проєкту", ar: "بلا مشروع" }, lang) : tx({ en: "Not assigned", ru: "Не назначено", uk: "Не призначено", ar: "غير مسند" }, lang))}</b> <span className="mono faint">{list.length}</span></td></tr>] : []),
+                ...list.map((r) => (
                 <tr key={r.id} className={`row ${sel.has(r.id) ? "picked" : ""}`} tabIndex={0} onClick={() => setOpen(r)} onKeyDown={(e) => e.key === "Enter" && setOpen(r)}>
                   <td className="col-sel" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={sel.has(r.id)} onChange={() => toggle(r.id)} aria-label={r.title} /></td>
                   <td style={{ fontWeight: 600 }}>{r.controlled && <Icon n="lock" className="lockico" />} {r.title} {r.data?.sample && <span className="chip c-vio" style={{ marginInlineStart: 6 }}>{t("sample", lang)}</span>}</td>
                   <td>{r.status && <span className={`chip dot ${tone(r.status)}`}>{r.status}</span>}</td>
                   {section.columns.map((k: string) => <td key={k} className={dueCls(r, k)}>{cell(r, k)}</td>)}
                   <td className="faint mono col-upd" style={{ fontSize: 13, whiteSpace: "nowrap" }}>{(r.updated_at || "").slice(0, 10)}</td>
-                </tr>))}
+                </tr>))])}
             </tbody></table></div>
             {!filtered.length && <div className="empty">{t("no_match", lang)}</div>}
             <div className="tfoot"><span><b className="mono">{filtered.length}</b> / {rows.length} {t("records", lang)}</span>{moneyKey && sum ? <span>{t("total", lang)}: <b className="mono">{fmt({ type: "money" }, sum, lang)}</b></span> : null}</div>

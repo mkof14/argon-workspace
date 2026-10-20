@@ -26,7 +26,8 @@ export const ROLES = {
 
 // ---------- Field helpers ----------
 const f = (key, type, label, extra = {}) => ({ key, type, label, ...extra });
-// types: text | long | select | number | money | date | url | check
+// types: text | long | rich (formatted text) | select | number | money | date | url | check | ref (link to a record)
+//        person (one employee: <key> = name, <key>_id = account) | people (several: <key>_ids) | dept (department)
 /** StarDome models: five containers and the mobile version on a Sprinter van. */
 export const PRODUCT_CONFIGS = ["C20 Base", "C20 Enhanced", "C40 Base", "C40 Advanced", "C40 HQ", "Sprinter"];
 const CONFIGS = [...PRODUCT_CONFIGS, "Custom"];
@@ -44,6 +45,24 @@ const contact = f("contact", "text", L("Contact", "Контакт", "Конта�
 const config = f("config", "select", L("StarDome configuration", "Конфигурация StarDome", "Конфігурація StarDome", "تهيئة StarDome"), { options: CONFIGS });
 const priority = f("priority", "select", L("Priority", "Приоритет", "Пріоритет", "الأولوية"), { options: PRIORITY });
 
+/** Tasks: one set of statuses and priorities for the whole company (v19 maps the earlier Open/Done and Medium). */
+export const TASK_STATUSES = ["New", "In progress", "Waiting", "Review", "Completed", "Cancelled"];
+export const TASK_PRIORITY = ["Low", "Normal", "High", "Critical"];
+/** Company departments (people, tasks, projects, documents); independent of the Workspace section groups. */
+export const ORG_DEPTS = [
+  { key: "management", label: L("Management", "Руководство", "Керівництво", "الإدارة") },
+  { key: "engineering", label: L("Engineering & R&D", "Инженерия и R&D", "Інженерія та R&D", "الهندسة والبحث والتطوير") },
+  { key: "software", label: L("Software development", "Разработка ПО", "Розробка ПЗ", "تطوير البرمجيات") },
+  { key: "operations", label: L("Operations & production", "Операции и производство", "Операції та виробництво", "العمليات والإنتاج") },
+  { key: "procurement", label: L("Procurement & logistics", "Закупки и логистика", "Закупівлі та логістика", "المشتريات والخدمات اللوجستية") },
+  { key: "finance", label: L("Finance", "Финансы", "Фінанси", "المالية") },
+  { key: "sales", label: L("Sales & business development", "Продажи и развитие бизнеса", "Продажі та розвиток бізнесу", "المبيعات وتطوير الأعمال") },
+  { key: "legal", label: L("Legal & compliance", "Юридический и комплаенс", "Юридичний і комплаєнс", "الشؤون القانونية والامتثال") },
+  { key: "marketing", label: L("Marketing", "Маркетинг", "Маркетинг", "التسويق") },
+  { key: "hr", label: L("Human resources", "Персонал", "Персонал", "الموارد البشرية") },
+  { key: "security", label: L("Security", "Безопасность", "Безпека", "الأمن") },
+];
+export const DOC_TYPES = ["Contract", "NDA", "Technical specification", "Engineering documentation", "Budget", "Invoice", "Purchase order", "Supplier quotation", "Certification", "Meeting minutes", "Report", "Presentation", "Other"];
 const INTERNAL = ["management", "engineering", "operations", "finance", "sales", "marketing", "hr", "legal", "security"];
 
 // ---------- Channels, statistics, systems ----------
@@ -642,10 +661,35 @@ export const DEPARTMENTS = [
     label: L("Knowledge base", "База знаний", "База знань", "قاعدة المعرفة"),
     read: [...INTERNAL], write: [...INTERNAL],
     sections: [
-      { key: "tasks", label: L("Tasks & reminders", "Задачи и напоминания", "Завдання та нагадування", "المهام والتذكيرات"), board: true,
-        statuses: ["Open", "In progress", "Waiting", "Done"],
-        fields: [f("assignee", "text", L("For (name or email)", "Для кого (имя или email)", "Для кого (ім'я або email)", "لمن")), f("due", "date", L("Remind on / due", "Напомнить / срок", "Нагадати / термін", "التذكير / الموعد")), priority, f("related", "url", L("Link to record or file", "Ссылка на запись или файл", "Посилання на запис або файл", "رابط")), notes],
-        columns: ["assignee", "due", "priority"] },
+      { key: "tasks", label: L("Tasks & reminders", "Задачи и напоминания", "Завдання та нагадування", "المهام والتذكيرات"), board: true, view: "tasks",
+        statuses: TASK_STATUSES,
+        fields: [f("assignee", "person", L("Assigned to", "Исполнитель", "Виконавець", "المكلّف")), f("due", "date", L("Deadline", "Срок", "Термін", "الموعد النهائي")),
+          f("priority", "select", L("Priority", "Приоритет", "Пріоритет", "الأولوية"), { options: TASK_PRIORITY }),
+          f("project_ref", "ref", L("Project", "Проект", "Проєкт", "المشروع"), { ref: "company.projects" }), f("department", "dept", L("Department", "Отдел", "Відділ", "القسم")),
+          f("start", "date", L("Start date", "Дата начала", "Дата початку", "تاريخ البدء")), f("description", "rich", L("Description", "Описание", "Опис", "الوصف")),
+          f("completed_at", "date", L("Completed on", "Выполнено", "Виконано", "أُنجز في"), { auto: true }),
+          f("related", "url", L("Link to record or file", "Ссылка на запись или файл", "Посилання на запис або файл", "رابط")), notes],
+        columns: ["assignee", "due", "priority", "project_ref"] },
+      { key: "projects", label: L("Projects", "Проекты", "Проєкти", "المشاريع"), view: "projects", controlled: true,
+        statuses: ["Planned", "Active", "On hold", "Completed", "Cancelled"],
+        fields: [f("manager", "person", L("Project manager", "Руководитель проекта", "Керівник проєкту", "مدير المشروع")), f("department", "dept", L("Department", "Отдел", "Відділ", "القسم")),
+          f("priority", "select", L("Priority", "Приоритет", "Пріоритет", "الأولوية"), { options: TASK_PRIORITY }),
+          f("start", "date", L("Start date", "Дата начала", "Дата початку", "تاريخ البدء")), f("target", "date", L("Target completion", "Плановое завершение", "Планове завершення", "الإنجاز المستهدف")),
+          f("members", "people", L("Team", "Команда", "Команда", "الفريق")), f("deal_ref", "ref", L("Deal (if for a client)", "Сделка (если для клиента)", "Угода (якщо для клієнта)", "الصفقة (إن كانت لعميل)"), { ref: "sales.pipeline" }),
+          f("description", "rich", L("Description", "Описание", "Опис", "الوصف"))],
+        columns: ["manager", "department", "target", "priority"] },
+      { key: "milestones", label: L("Milestones", "Вехи", "Віхи", "المراحل الرئيسية"),
+        statuses: ["Planned", "In progress", "Reached", "Missed"],
+        fields: [f("project_ref", "ref", L("Project", "Проект", "Проєкт", "المشروع"), { ref: "company.projects" }), f("due", "date", L("Date", "Дата", "Дата", "التاريخ")),
+          f("owner", "person", L("Responsible", "Ответственный", "Відповідальний", "المسؤول")), notes],
+        columns: ["project_ref", "due", "owner"] },
+      { key: "documents", label: L("Document register", "Реестр документов", "Реєстр документів", "سجل المستندات"), view: "documents", controlled: true,
+        statuses: ["Draft", "In review", "Approved", "Superseded", "Archived"],
+        fields: [f("doc_type", "select", L("Document type", "Тип документа", "Тип документа", "نوع المستند"), { options: DOC_TYPES }),
+          f("project_ref", "ref", L("Project", "Проект", "Проєкт", "المشروع"), { ref: "company.projects" }), f("department", "dept", L("Department", "Отдел", "Відділ", "القسم")),
+          f("owner", "person", L("Document owner", "Владелец документа", "Власник документа", "مالك المستند")), f("version", "text", L("Version", "Версия", "Версія", "الإصدار")),
+          f("description", "long", L("Description", "Описание", "Опис", "الوصف"))],
+        columns: ["doc_type", "project_ref", "owner", "version"] },
       { key: "wiki", label: L("Handbook & SOPs", "Регламенты и инструкции", "Регламенти та інструкції", "الدليل والإجراءات"),
         statuses: ["Draft", "Published"],
         fields: [f("topic", "text", L("Topic", "Тема", "Тема", "الموضوع")), f("body", "long", L("Content", "Содержание", "Зміст", "المحتوى")), link],
@@ -654,14 +698,19 @@ export const DEPARTMENTS = [
         statuses: ["Active", "Archived"],
         fields: [f("organization", "text", L("Organization", "Организация", "Організація", "الجهة")), f("role", "text", L("Role", "Роль", "Роль", "الدور")), f("email", "text", L("Email", "Email", "Email", "البريد")), f("phone", "text", L("Phone", "Телефон", "Телефон", "الهاتف")), country],
         columns: ["organization", "role", "email", "country"] },
-      { key: "meetings", label: L("Meeting notes", "Протоколы встреч", "Протоколи зустрічей", "محاضر الاجتماعات"),
-        statuses: ["Scheduled", "Done"],
-        fields: [f("date", "date", L("Date", "Дата", "Дата", "التاريخ")), f("participants", "text", L("Participants", "Участники", "Учасники", "المشاركون")), f("agenda", "long", L("Agenda", "Повестка", "Порядок денний", "جدول الأعمال")), f("decisions", "long", L("Decisions", "Решения", "Рішення", "القرارات")), f("actions", "long", L("Action items", "Задачи", "Завдання", "المهام")), owner],
-        columns: ["date", "participants", "owner"] },
+      { key: "meetings", label: L("Meetings", "Встречи", "Зустрічі", "الاجتماعات"),
+        statuses: ["Scheduled", "Done", "Cancelled"],
+        fields: [f("date", "date", L("Date", "Дата", "Дата", "التاريخ")), f("time", "time", L("Time", "Время", "Час", "الوقت")),
+          f("duration", "number", L("Duration, min", "Длительность, мин", "Тривалість, хв", "المدة، دقيقة")),
+          f("place", "text", L("Place or video link", "Место или ссылка на видео", "Місце або посилання на відео", "المكان أو رابط الفيديو")),
+          f("project_ref", "ref", L("Project", "Проект", "Проєкт", "المشروع"), { ref: "company.projects" }),
+          f("participants", "people", L("Participants", "Участники", "Учасники", "المشاركون")),
+          f("agenda", "long", L("Agenda", "Повестка", "Порядок денний", "جدول الأعمال")), f("decisions", "long", L("Decisions", "Решения", "Рішення", "القرارات")), f("actions", "long", L("Action items", "Задачи", "Завдання", "المهام")), owner],
+        columns: ["date", "time", "participants", "owner"] },
       { key: "decisions", label: L("Decision log", "Журнал решений", "Журнал рішень", "سجل القرارات"),
         read: [...INTERNAL], write: ["management"],
         statuses: ["Proposed", "Approved", "Rejected", "Superseded"],
-        fields: [f("date", "date", L("Date", "Дата", "Дата", "التاريخ")), f("area", "text", L("Area", "Область", "Область", "المجال")), f("decision", "long", L("Decision", "Решение", "Рішення", "القرار")), f("rationale", "long", L("Rationale", "Обоснование", "Обґрунтування", "المبررات")), owner],
+        fields: [f("date", "date", L("Date", "Дата", "Дата", "التاريخ")), f("area", "text", L("Area", "Область", "Область", "المجال")), f("decision", "long", L("Decision", "Решение", "Рішення", "القرار")), f("rationale", "long", L("Rationale", "Обоснование", "Обґрунтування", "المبررات")), f("project_ref", "ref", L("Project", "Проект", "Проєкт", "المشروع"), { ref: "company.projects" }), owner],
         columns: ["date", "area", "owner"] },
     ],
   },
@@ -709,7 +758,7 @@ export const SECTION_ICONS = {
   "legal.ip": "code", "legal.privacy": "eye", "legal.hse": "alert", "legal.board": "users", "legal.registers": "contact", "legal.authority": "stamp",
   "hr.team": "users", "hr.hiring": "userplus", "hr.onboarding": "rocket", "hr.training": "grad", "hr.policies": "book", "hr.leave": "sun",
   "hr.reviews": "target", "hr.assets": "laptop", "hr.candidates": "userplus", "hr.compensation": "coins", "hr.offboarding": "logout",
-  "company.tasks": "bell", "company.wiki": "book", "company.contacts": "contact", "company.meetings": "calendar", "company.decisions": "check",
+  "company.tasks": "bell", "company.projects": "layers", "company.milestones": "flag", "company.documents": "file", "company.wiki": "book", "company.contacts": "contact", "company.meetings": "calendar", "company.decisions": "check",
   "mail.templates": "mail", "mail.outbox": "send",
 };
 

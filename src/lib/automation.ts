@@ -160,17 +160,19 @@ export const DEFAULT_RULES: Rule[] = [
     actions: [{ type: "create", section: "security.screening", title: "{title}", status: "Pending", fields: { party: "{title}", party_type: "Vendor", country: "{country}", date: "{today}" } }] },
   { id: "build-installed", name: "Build installed → acceptance task", enabled: true, mode: "suggest", on: "status", section: "operations.builds", status: "Installed",
     actions: [
-      { type: "create", section: "company.tasks", title: "Client acceptance — {title}", status: "Open", fields: { assignee: "{owner}", priority: "High" } },
+      { type: "create", section: "company.tasks", title: "Client acceptance — {title}", status: "New", fields: { assignee: "{owner}", priority: "High" } },
       { type: "notify", to: "role:finance", message: "Build “{title}” is installed. Check the final invoice." },
     ] },
   { id: "hire-onboard", name: "New team member → onboarding", enabled: true, mode: "suggest", on: "created", section: "hr.team",
     actions: [{ type: "create", section: "hr.onboarding", title: "Onboarding — {title}", status: "To do", fields: { person: "{title}", due: "{start}" } }] },
   // Daily work: a task reaches the person it is assigned to, a reminder the day before the deadline, leaders hear when it is late
-  { id: "task-assigned", name: "New task → tell the person responsible", enabled: true, mode: "auto", on: "created", section: "company.tasks",
+  { id: "task-assigned", name: "New task → tell the person responsible", enabled: false, // v19: personal notifications do this
+    mode: "auto", on: "created", section: "company.tasks",
     actions: [{ type: "notify", to: "owner", message: "New task for you: {title} (due {due})." }] },
-  { id: "task-due", name: "Task due tomorrow → remind the person", enabled: true, mode: "auto", on: "date", section: "company.tasks", date_key: "due", offset: -1, when: [{ field: "status", op: "nin", value: "Done" }],
+  { id: "task-due", name: "Task due tomorrow → remind the person", enabled: false, // v19: personal notifications do this
+    mode: "auto", on: "date", section: "company.tasks", date_key: "due", offset: -1, when: [{ field: "status", op: "nin", value: "Done, Completed, Cancelled" }],
     actions: [{ type: "notify", to: "owner", message: "Reminder: “{title}” is due tomorrow ({due})." }] },
-  { id: "task-late", name: "Task overdue → tell the leaders", enabled: true, mode: "auto", on: "date", section: "company.tasks", date_key: "due", offset: 1, when: [{ field: "status", op: "nin", value: "Done" }],
+  { id: "task-late", name: "Task overdue → tell the leaders", enabled: true, mode: "auto", on: "date", section: "company.tasks", date_key: "due", offset: 1, when: [{ field: "status", op: "nin", value: "Done, Completed, Cancelled" }],
     actions: [{ type: "notify", to: "leads", message: "Task overdue: “{title}” — responsible: {assignee}, due {due}." }] },
   { id: "invoice-soon", name: "Invoice due in 3 days → remind finance", enabled: true, mode: "auto", on: "date", section: "finance.invoices", date_key: "due", offset: -3,
     when: [{ field: "status", op: "nin", value: "Paid, Draft" }], actions: [{ type: "notify", to: "role:finance", message: "Invoice “{title}” ({amount} {currency}) is due on {due}." }] },

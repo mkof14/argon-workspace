@@ -6,6 +6,7 @@ import { sweep } from "./translate";
 import { purgeOld } from "./trash";
 import { runDigest, cleanIntake } from "./digest";
 import { guarded } from "./errors";
+import { deliverNotifications, dueNotices } from "./notify";
 import type { JobFn } from "./jobs";
 
 /** What each scheduled job does (lib/jobs.ts says when). */
@@ -14,6 +15,8 @@ export const JOBS_FNS: Record<string, JobFn> = {
   intake: (db) => runAgents(db, { only: "intake", manual: true }),
   sla: (db) => slaJob(db),
   calendar: (db, c) => syncAll(db, Math.max(5000, c.deadline - Date.now() - 2000)),
+  notify: (db, c) => deliverNotifications(db, { deadline: c.deadline }),
+  due: (db) => dueNotices(db),
   digest: () => runDigest(null, true),
   translate: (db, c) => sweep(db, Math.max(5000, c.deadline - Date.now() - 2000)),
   backup: (db, c) => backupJob(db, { deadline: c.deadline }),

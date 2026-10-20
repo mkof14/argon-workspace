@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
  *  request   {record_id, approver_id, note} → creates the request and emails the approver
  *  cancel    {id}                    → the requester withdraws a pending request
  *  view      {token}                 → details for the confirm page (no sign-in needed: the email link is the key)
- *  decide    {token | id, decision, comment} → approve or reject; updates the record and emails the requester
+ *  decide    {token | id, decision, comment} → approve, request changes (comment required) or reject; updates the record and emails the requester
  */
 const SECS: any[] = allSections() as any[];
 const sec = (id: string) => SECS.find((s) => s.id === id);
@@ -29,7 +29,7 @@ const L = (lang: string, en: string, ru: string) => (lang === "ru" || lang === "
 
 function details(r: any) {
   const s = sec(r.section); const rule = APPROVALS[r.section];
-  return (rule?.key || []).map((k) => { const f = s?.fields.find((x: any) => x.key === k); const v = fmt(f, r.data?.[k]); return v ? { label: f?.label?.en || k, label_ru: f?.label?.ru || f?.label?.en || k, value: v } : null; }).filter(Boolean) as any[];
+  return (rule?.key || []).map((k) => { const f = s?.fields.find((x: any) => x.key === k); const v = f?.type === "ref" ? String(r.data?.[`${k}_title`] || "") : fmt(f, r.data?.[k]); return v ? { label: f?.label?.en || k, label_ru: f?.label?.ru || f?.label?.en || k, value: v } : null; }).filter(Boolean) as any[];
 }
 
 async function approversFor(db: any, r: any, exclude: string) {
@@ -40,7 +40,8 @@ async function approversFor(db: any, r: any, exclude: string) {
   return (data || []).filter((p: any) => !r.controlled || p.us_person);
 }
 
-async function decide(db: any, a: any, decision: "approved" | "rejected", comment: string, by: any) {
+type Decision = "approved" | "rejected" | "changes_requested";
+async function decide(db: any, a: any, decision: Decision, comment: string, by: any) {
   const { data: r } = await db.from("records").select("*").eq("id", a.record_id).single();
   if (!r) return "Record not found";
   const rule = APPROVALS[r.section];
@@ -49,18 +50,18 @@ async function decide(db: any, a: any, decision: "approved" | "rejected", commen
   const lim = rule ? limitRoles(r.section, r.data || {}, withLimits((await getSettings(db)).limits)) : null;
   if (!ap || ap.disabled || !rule || !(lim || rule.approvers).includes(ap.role) || (r.controlled && !ap.us_person)) return "The approver is no longer allowed to decide this request";
   const now = new Date().toISOString();
-  const { data: upd } = await db.from("approvals").update({ status: decision, comment: comment || null, decided_at: now }).eq("id", a.id).eq("status", "pending").select("id");
+  const { data: upd } = await db.from("approvals").update({ status: decision, comment: comment || null, decided_at: now, decided_by: by.id }).eq("id", a.id).eq("status", "pending").select("id");
   if (!upd?.length) return "This request was already decided";
-  const status = decision === "approved" ? rule?.ok : rule?.no;
+  const status = decision === "approved" ? rule?.ok : decision === "changes_requested" ? rule?.changes || rule?.no || rule?.wait[0] : rule?.no;
   if (status) await db.from("records").update({ status }).eq("id", r.id);
   const who = by.full_name || by.email;
-  await db.from("comments").insert({ record_id: r.id, author: by.id, body: `${decision === "approved" ? "✓ Approved" : "✗ Rejected"} by ${who}${comment ? `: ${comment}` : ""}` });
+  await db.from("comments").insert({ record_id: r.id, author: by.id, body: `${decision === "approved" ? "✓ Approved" : decision === "changes_requested" ? "↺ Changes requested" : "✗ Rejected"} by ${who}${comment ? `: ${comment}` : ""}` });
   const { data: req } = await db.from("profiles").select("email,full_name,lang").eq("id", a.requested_by).single();
   if (req?.email) {
     const lang = req.lang === "ru" ? "ru" : "en"; const s = sec(r.section);
-    const ok = decision === "approved";
-    const subject = `${ok ? L(lang, "Approved", "Согласовано") : L(lang, "Rejected", "Отклонено")}: ${r.title}`;
-    const body = `${L(lang, `${who} ${ok ? "approved" : "rejected"} your request.`, `${who} ${ok ? "согласовал(а)" : "отклонил(а)"} ваш запрос.`)}\n\n**${r.title}** · ${s?.label?.[lang] || s?.label?.en}${comment ? `\n\n${L(lang, "Comment", "Комментарий")}: ${comment}` : ""}`;
+    const ok = decision === "approved", ch = decision === "changes_requested";
+    const subject = `${ok ? L(lang, "Approved", "Согласовано") : ch ? L(lang, "Changes requested", "Нужны изменения") : L(lang, "Rejected", "Отклонено")}: ${r.title}`;
+    const body = `${L(lang, `${who} ${ok ? "approved" : ch ? "asked for changes to" : "rejected"} your request.`, `${who} ${ok ? "согласовал(а)" : ch ? "просит изменить" : "отклонил(а)"} ваш запрос.`)}\n\n**${r.title}** · ${s?.label?.[lang] || s?.label?.en}${comment ? `\n\n${L(lang, "Comment", "Комментарий")}: ${comment}` : ""}`;
     const cta = { label: L(lang, "Open in Workspace", "Открыть в Workspace"), url: `${SITE}/${r.section.replace(".", "/")}?r=${r.id}` };
     // Ukrainian and Arabic readers get the same letter translated
     const m = ["uk", "ar"].includes(req.lang) ? await localizeMail(db, req.lang, { subject, body, text: cta.label }) : { subject, body, text: cta.label };
@@ -91,8 +92,9 @@ export async function POST(req: Request) {
     if (!r) return new Response("Record not found", { status: 404 });
     if (b.action === "decide") {
       if (a.status !== "pending") return new Response(`Already ${a.status}`, { status: 409 });
-      const d = b.decision === "approved" ? "approved" : b.decision === "rejected" ? "rejected" : null;
-      if (!d) return new Response("Choose approve or reject", { status: 400 });
+      const d: Decision | null = b.decision === "approved" ? "approved" : b.decision === "rejected" ? "rejected" : b.decision === "changes_requested" ? "changes_requested" : null;
+      if (!d) return new Response("Choose approve, request changes or reject", { status: 400 });
+      if (d === "changes_requested" && !String(b.comment || "").trim()) return new Response("Say what needs to change", { status: 400 });
       const err = await decide(db, a, d, String(b.comment || "").slice(0, 2000), ap);
       if (err) return new Response(err, { status: 409 });
       return Response.json({ ok: true, status: d });
@@ -157,7 +159,8 @@ export async function POST(req: Request) {
     const { data: a } = await db.from("approvals").select("*").eq("id", b.id).maybeSingle();
     if (!a || a.approver_id !== me.id) return new Response("Not allowed", { status: 403 });
     if (a.status !== "pending") return new Response(`Already ${a.status}`, { status: 409 });
-    const d = b.decision === "approved" ? "approved" : "rejected";
+    const d: Decision = b.decision === "approved" ? "approved" : b.decision === "changes_requested" ? "changes_requested" : "rejected";
+    if (d === "changes_requested" && !String(b.comment || "").trim()) return new Response("Say what needs to change", { status: 400 });
     const err = await decide(db, a, d, String(b.comment || "").slice(0, 2000), me);
     if (err) return new Response(err, { status: 409 });
     return Response.json({ ok: true, status: d });

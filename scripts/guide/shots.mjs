@@ -5,8 +5,8 @@ const lang = process.argv[2] || "en", BASE = process.argv[3] || "http://localhos
 fs.mkdirSync(OUT, { recursive: true });
 const b = await chromium.launch(); const p = await b.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1.5 });
 const go = async (u, w = 1500) => { await p.goto(BASE + u, { waitUntil: "networkidle" }); await p.waitForTimeout(w); };
-await go("/"); await p.evaluate(() => { localStorage.setItem("agronws.lang", "en"); localStorage.setItem("agronws.theme", "light"); }); await go("/sales/pipeline"); await p.waitForFunction(() => localStorage.getItem("agronws.demo.v1"));
-await p.evaluate(() => { const db = JSON.parse(localStorage.getItem("agronws.demo.v1")); const now = new Date().toISOString(); const d = (n) => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
+await go("/"); await p.evaluate(() => { localStorage.setItem("agronws.lang", "en"); localStorage.setItem("agronws.theme", "light"); }); await go("/sales/pipeline"); await p.waitForFunction(() => localStorage.getItem("agronws.demo.v2"));
+await p.evaluate(() => { const db = JSON.parse(localStorage.getItem("agronws.demo.v2")); const now = new Date().toISOString(); const d = (n) => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
   const add = (r) => db.records.push({ company: null, controlled: false, created_at: now, updated_at: now, ...r });
   add({ id: "cl1", section: "sales.clients", title: "Skyline Marina (sample)", status: "Active", data: { country: "UAE", contact: "Ahmed — ahmed@skyline.example", lang: "English" } });
   add({ id: "d1", section: "sales.pipeline", title: "Skyline Marina — StarDome C40", status: "Won", created_at: "2026-06-01T00:00:00Z", data: { client: "Skyline Marina (sample)", client_ref: "cl1", config: "C40 Advanced", value: 1200000, currency: "USD", segment: "Marina", country: "UAE", screening: "Cleared" } });
@@ -19,11 +19,11 @@ await p.evaluate(() => { const db = JSON.parse(localStorage.getItem("agronws.dem
   add({ id: "e1", section: "finance.expenses", title: "Test range rental — radar trials", status: "Submitted", data: { requester: "Sample Engineer", category: "Services", amount: 12500, currency: "USD" } });
   add({ id: "po1", section: "operations.procurement", title: "Radar units ×2", status: "Draft", data: { vendor: "RadarCo (sample)", item: "Radar", qty: 2, amount: 84000, currency: "USD" } });
   add({ id: "vR", section: "operations.vendors", title: "RadarCo (sample)", status: "Approved", data: { screening: "In progress" } });
-  localStorage.setItem("agronws.demo.v1", JSON.stringify(db)); });
+  localStorage.setItem("agronws.demo.v2", JSON.stringify(db)); });
 await go("/sales/pipeline?r=d1"); await p.locator('button:has-text("Unfold the project")').click(); await p.waitForTimeout(600); await p.locator('button:has-text("Create the plan")').click(); await p.waitForTimeout(3500);
 await p.evaluate((l) => localStorage.setItem("agronws.lang", l), lang);
 const shot = async (u, name, act) => { await go(u, 1900); if (act) await act().catch(() => {}); await p.screenshot({ path: `${OUT}${name}.jpg`, type: "jpeg", quality: 74 }); };
-await shot("/", "overview"); await shot("/today", "today"); await shot("/decide", "decisions"); await shot("/projects", "portfolio");
+await shot("/company-overview", "overview"); await shot("/today", "today"); await shot("/decide", "decisions"); await shot("/projects?tab=pf", "portfolio");
 await shot("/projects?tab=wi", "whatif", async () => { await p.locator(".fgrid select").nth(1).selectOption("d1"); await p.locator(".fgrid input").fill("45"); await p.locator(".card .toolbar .btn.primary").first().click(); await p.waitForTimeout(500); await p.evaluate(() => window.scrollTo(0, 260)); });
 await shot("/sales/pipeline?r=d1", "deal", async () => { await p.locator(".tl").first().scrollIntoViewIfNeeded(); await p.waitForTimeout(400); });
 await shot("/sales/pipeline", "pipeline"); await shot("/finance/overview", "finance");

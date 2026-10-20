@@ -2,6 +2,7 @@
 import GcalCard from "./GcalCard";
 import { TIMEZONES, city, localTime } from "@/lib/tz";
 import { NotifyCard } from "./Notify";
+import { NotifyPrefs } from "./Notices";
 import { useState } from "react";
 import Icon from "./Icon";
 import { useApp } from "./App";
@@ -60,8 +61,9 @@ export default function MyProfile() {
           </form></div>
       </section>
       <InstallApp />
+      <NotifyPrefs />
       <NotifyCard />
-      <MfaSetup />
+      <div id="security"><MfaSetup /></div>
       {!["partner", "vendor", "investor"].includes(me.role) && <CalendarLink />}
       {!["partner", "vendor", "investor"].includes(me.role) && <GcalCard />}
     </div>
