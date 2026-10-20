@@ -36,7 +36,7 @@ export default function DecisionLog() {
           <td><b>{d.title}</b>{d.decision && <div className="faint" style={{ fontSize: 13, maxWidth: 420 }}>{String(d.decision).slice(0, 220)}</div>}</td><td className="mono">{d.date}</td><td>{who(d.made_by)}</td>
           <td>{d.project ? <Link href={`/projects/${d.project.id}`}>{d.project.title}</Link> : ""}</td>
           <td>{T(SRC[d.source?.section] || SRC[d.source_kind] || SRC.management)}{d.source ? <> · <Link href={link(d.source.section, d.source.id)}>{d.source.title}</Link></> : null}</td>
-          <td>{d.document && <div><Link href={`/documents?d=${d.document.id}`}>{d.document.number || d.document.title}</Link></div>}{d.task && <div><Link href={`/company/tasks?r=${d.task.id}`}>{d.task.title}</Link> <span className={`chip dot ${tone(d.task.status)}`}>{d.task.status}</span></div>}</td>
+          <td>{d.document && <div><Link href={`/documents?d=${d.document.id}`}>{d.document.number ? `${d.document.number} · ` : ""}{d.document.title}</Link></div>}{d.task && <div><Link href={`/company/tasks?r=${d.task.id}`}>{d.task.title}</Link> <span className={`chip dot ${tone(d.task.status)}`}>{d.task.status}</span></div>}</td>
           <td>{d.responsible ? who(d.responsible) : "—"}{d.due ? ` · ${d.due}` : ""}</td><td><span className={`chip dot ${tone(d.status)}`}>{d.status}</span></td></tr>)}</tbody></table></div>}
   </section>;
 }

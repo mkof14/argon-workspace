@@ -145,7 +145,7 @@ test("the daily workflow from a new account to the management dashboard", { skip
   // 16. the history holds the whole sequence
   const h = await sql("select r.section, a.action, a.actor, a.detail from activity a join records r on r.id = a.record_id where a.record_id = any($1) order by a.id", [[P.id, T0.id, D.id]]);
   const seq = h.map((x: any) => `${x.section.split(".")[1]}:${x.action}${x.action === "status" ? `:${x.detail.from}→${x.detail.to}` : ""}`);
-  for (const step of ["projects:created", "tasks:created", "documents:created", "documents:status:In review→Draft", "documents:status:Draft→In review", "documents:status:In review→Approved", "tasks:status:New→Completed"]) assert.ok(seq.includes(step), `history has ${step} (${seq.join(", ")})`);
+  for (const step of ["projects:created", "tasks:created", "documents:created", "documents:status:In review→Changes requested", "documents:version_approved", "documents:status:Draft→In review", "documents:status:In review→Approved", "tasks:status:New→Completed"]) assert.ok(seq.includes(step), `history has ${step} (${seq.join(", ")})`);
   const c = await sql("select body from comments where record_id = $1 order by created_at", [D.id]); assert.ok(c.some((x: any) => /Changes requested by Mia/.test(x.body)) && c.some((x: any) => /Approved by Mia/.test(x.body)), "decisions are in the document's discussion");
   evidence.workflow = { project: P.id, task: T0.id, document: D.id, history: seq };
 });

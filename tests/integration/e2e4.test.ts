@@ -33,7 +33,7 @@ before(async () => {
   U.nonus = await makeUser(`p4n-${run}@agron-stack.test`, "engineering", { us: false, name: `Nadia NonUS ${run}` });
   U.adm = await makeUser(`p4a-${run}@agron-stack.test`, "admin", { us: true, name: `Ada Admin ${run}` });
   const mk = async (k: string, cls: string, extra: Record<string, any> = {}) => (D[k] = (await sql(`insert into records(section, title, status, controlled, created_by, data) values ('company.documents', $1, 'Draft', $2, $3, $4) returning *`,
-    [`${k} ${tag}`, cls === "US Persons Only", U.eng.id, { doc_type: "Procedure", classification: cls, owner_id: U.eng.id, department: "engineering", description: `synthetic ${tag}`, ...extra }]))[0]);
+    [`${k} ${tag}`, cls === "US Persons Only", cls === "Restricted" ? U.mgmt.id : U.eng.id, { doc_type: "Procedure", classification: cls, owner_id: U.eng.id, department: "engineering", description: `synthetic ${tag}`, ...extra }]))[0]);
   await mk("Internal procedure", "Internal"); await mk("Confidential budget", "Confidential"); await mk("US-only drawing", "US Persons Only"); await mk("Restricted plan", "Restricted", { owner_id: U.mgmt.id });
   D.kb = (await sql(`insert into records(section, title, status, created_by, data) values ('company.wiki', $1, 'Published', $2, $3) returning *`, [`Receiving inspection ${tag}`, U.mgmt.id, { category: "Procedures", summary: `How to inspect parts ${tag}`, body: `1. Check the packing list ${tag}`, language: "en" }]))[0];
   const today = new Date().toISOString().slice(0, 10);
@@ -105,7 +105,8 @@ test("meeting record: generated as a draft, becomes the record only when the org
 
 test("information settings for administrators; Document Center and Knowledge fit a 390 px phone", { skip }, async () => {
   const a = await login(U.adm.email); await a.goto(`${APP}/admin/info`); await a.waitForSelector(":text('Departments')", { timeout: 15000 });
-  assert.match(await a.textContent("main"), /ENG/); assert.match(await a.textContent("main"), /Document numbers/); await shot(a, "info-settings"); await a.context().close();
+  const codes = await a.$$eval("main input", (els: any[]) => els.map((e) => e.value)); assert.ok(codes.includes("ENG") || /ENG/.test(await a.textContent("main")), "the department directory is listed");
+  assert.match(await a.textContent("main"), /Document numbers/); await shot(a, "info-settings"); await a.context().close();
   const p = await login(U.eng.email, { width: 390, height: 844 });
   for (const r of ["/documents", "/knowledge", "/calendar", "/decisions"]) {
     await p.goto(`${APP}${r}`); await p.waitForTimeout(1500);
