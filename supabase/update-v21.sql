@@ -214,7 +214,8 @@ begin
   insert into public.doc_counters(prefix, last) values (pre, 1)
     on conflict (prefix) do update set last = public.doc_counters.last + 1, updated_at = now()
     returning last into n;
-  return regexp_replace(pre, '\{SEQ(:[1-9])?\}', lpad(n::text, w, '0'));
+  -- lpad would cut 10001 to '1000' (a duplicate number); a longer sequence keeps all its digits
+  return regexp_replace(pre, '\{SEQ(:[1-9])?\}', case when length(n::text) >= w then n::text else lpad(n::text, w, '0') end);
 end $$;
 revoke execute on function public.allocate_doc_number(text, text, text, uuid) from public, anon, authenticated;
 

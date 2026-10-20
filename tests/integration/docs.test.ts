@@ -301,3 +301,12 @@ test("14. revoked session: search, Document Center, download, Assistant retrieva
   assert.ok(((await registerVersion(c2, { record_id: d.id, path: v.path })) as any).error);
   assert.ok((await sql("select count(*)::int n from document_access_log where user_id = $1 and ok = false", [U.sw.id]))[0].n >= 1, "the refused attempt is logged");
 });
+
+test("numbering past the format width keeps every digit: 9999 → 10000 → 10001, never a repeat", async () => {
+  // a format of its own (one project), so no shared counter is touched
+  const [p] = await sql(`insert into records(section, title, status, data) values ('company.projects', 'Width ${run}', 'Active', '{"code":"W${RUN}"}') returning id`);
+  await sql("insert into doc_number_formats(scope, project_id, company, pattern, active) values ('document', $1, 'AGR', '{CO}-{PROJ}-{SEQ:4}', true)", [p.id]);
+  await sql("insert into doc_counters(prefix, last) values ($1, 9998)", [`AGR-W${RUN}-{SEQ:4}`]);
+  const rows = await sql(`insert into records(section, title, status, data) select 'company.documents', 'Width ' || g || ' ${run}', 'Draft', jsonb_build_object('project_ref', $1::text) from generate_series(1, 3) g returning data->>'doc_number' n`, [p.id]);
+  assert.deepEqual(rows.map((r: any) => r.n), [`AGR-W${RUN}-9999`, `AGR-W${RUN}-10000`, `AGR-W${RUN}-10001`]);
+});
