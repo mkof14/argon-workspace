@@ -7,10 +7,12 @@ import { sendMailDetailed } from "./mailer";
 import { pushTo } from "./push";
 import { renderEmail, SITE } from "@/lib/mail";
 import { reportError } from "./errors";
+import { emailDecision, localTime, pushDecision } from "@/lib/notifyprefs";
 
 const OWN_CHANNEL = new Set(["approval_requested", "approval_done"]);
 const T: Record<string, Record<string, string>> = {
   subject: { en: "AGRON Workspace: {n} new for you", ru: "AGRON Workspace: новое для вас — {n}", uk: "AGRON Workspace: нове для вас — {n}", ar: "AGRON Workspace: {n} جديد لك" },
+  digest: { en: "AGRON Workspace: your daily summary ({n})", ru: "AGRON Workspace: сводка за день ({n})", uk: "AGRON Workspace: підсумок за день ({n})", ar: "AGRON Workspace: ملخصك اليومي ({n})" },
   open: { en: "Open in Workspace", ru: "Открыть в Workspace", uk: "Відкрити у Workspace", ar: "افتح في مساحة العمل" },
   settings: { en: "Choose what reaches you by e-mail in My profile → Notifications.", ru: "Что приходит на почту, можно выбрать в «Мой профиль» → «Уведомления».", uk: "Що надходить поштою, можна вибрати в «Мій профіль» → «Сповіщення».", ar: "اختر ما يصلك بالبريد من ملفي ← الإشعارات." },
 };
@@ -20,60 +22,97 @@ const K: Record<string, Record<string, string>> = {
   mention: { en: "Mentioned you", ru: "Вас упомянули", uk: "Вас згадали", ar: "ذُكرت" }, comment: { en: "New comment", ru: "Новый комментарий", uk: "Новий коментар", ar: "تعليق جديد" },
   due_soon: { en: "Deadline soon", ru: "Скоро срок", uk: "Скоро термін", ar: "موعد قريب" }, overdue: { en: "Overdue", ru: "Просрочено", uk: "Прострочено", ar: "متأخر" },
   milestone: { en: "Milestone changed", ru: "Изменилась веха", uk: "Змінилася віха", ar: "تغيّرت مرحلة" }, project_member: { en: "Project team", ru: "Команда проекта", uk: "Команда проєкту", ar: "فريق المشروع" },
-  announcement: { en: "Announcement", ru: "Объявление", uk: "Оголошення", ar: "إعلان" },
+  announcement: { en: "Announcement", ru: "Объявление", uk: "Оголошення", ar: "إعلان" }, announcement_critical: { en: "Critical announcement", ru: "Критическое объявление", uk: "Критичне оголошення", ar: "إعلان حرج" },
+  reply: { en: "Replied to you", ru: "Вам ответили", uk: "Вам відповіли", ar: "رد عليك" }, project_message: { en: "Project message", ru: "Сообщение в проекте", uk: "Повідомлення в проєкті", ar: "رسالة في المشروع" },
+  decision: { en: "Decision recorded", ru: "Записано решение", uk: "Записано рішення", ar: "سُجّل قرار" }, doc_version: { en: "New document version", ru: "Новая версия документа", uk: "Нова версія документа", ar: "نسخة جديدة من مستند" },
 };
 const tr = (m: Record<string, string> | undefined, l: string, fb = "") => (m ? m[l] || m.en : fb);
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 const plain = (s: unknown) => String(s ?? "").replace(/@\[([^\]]+)\]\([0-9a-fA-F-]{36}\)/g, "@$1");
 export const linkOf = (n: { link?: string | null; record_id?: string | null; section?: string | null }) => n.link || (n.record_id && n.section ? (n.section === "company.projects" ? `/projects/${n.record_id}` : `/${n.section.replace(".", "/")}?r=${n.record_id}`) : "/notifications");
 
-/** One delivery pass. Returns counts; never throws for a single bad row. */
-export async function deliverNotifications(db: any, o: { deadline?: number; batch?: number } = {}) {
-  const out = { claimed: 0, emails: 0, email_items: 0, pushed: 0, skipped: 0, failed: 0, uncertain: 0 };
+/** One delivery pass. Returns counts; never throws for a single bad row.
+ *  Per person: quiet hours and the e-mail mode (immediately / daily summary / off) from their own settings; critical
+ *  events go out regardless. Controlled records never put their title or text into an e-mail or a phone banner. */
+export async function deliverNotifications(db: any, o: { deadline?: number; batch?: number; now?: Date } = {}) {
+  const out = { claimed: 0, emails: 0, email_items: 0, digests: 0, held: 0, pushed: 0, skipped: 0, failed: 0, uncertain: 0 };
   const until = o.deadline || Date.now() + 40_000;
+  const seen = new Set<number>();
   while (Date.now() < until - 3000) {
-    const { data: rows, error } = await db.rpc("notifications_claim", { p_limit: o.batch || 50 });
+    const now = o.now || new Date();
+    const { data: claimed, error } = await db.rpc("notifications_claim", { p_limit: o.batch || 50 });
     if (error) throw new Error(error.message);
-    if (!rows?.length) break;
+    const rows = (claimed || []).filter((r: any) => !seen.has(r.id)); // a row held back in this run is not looked at twice
+    if (!rows.length) break;
+    rows.forEach((r: any) => seen.add(r.id));
     out.claimed += rows.length;
     const ids = [...new Set(rows.map((r: any) => r.user_id))];
-    const { data: ppl } = await db.from("profiles").select("id,email,full_name,lang,disabled").in("id", ids);
+    const { data: ppl } = await db.from("profiles").select("id,email,full_name,lang,disabled,notify_prefs").in("id", ids);
     const pmap = new Map((ppl || []).map((p: any) => [p.id, p]));
+    const recIds = [...new Set(rows.map((r: any) => r.record_id).filter(Boolean))];
+    const { data: recs } = recIds.length ? await db.from("records").select("id,controlled").in("id", recIds) : { data: [] };
+    const controlled = new Set((recs || []).filter((r: any) => r.controlled).map((r: any) => r.id));
+    const safe = (n: any) => (controlled.has(n.record_id) ? { ...n, title: "Controlled record", body: "" } : n);
     const done = async (id: number, patch: Record<string, any>) => { const { error: e } = await db.from("notifications").update(patch).eq("id", id); if (e) await reportError(db, "notify:update", e); };
-    // e-mail: one letter per person with everything new for them
-    const byUser = new Map<string, any[]>();
+    const hold: number[] = [];
+    // e-mail: one letter per person with everything due now
+    const byUser = new Map<string, any[]>(); const digestUsers = new Set<string>();
+    const today = new Map<string, boolean>();
     for (const r of rows) {
       if (r.email_state !== "sending") continue;
       const p: any = pmap.get(r.user_id);
       if (!p || p.disabled || !p.email || OWN_CHANNEL.has(r.kind)) { await done(r.id, { email_state: "skipped" }); out.skipped++; continue; }
+      const prefs = p.notify_prefs || {};
+      if (!today.has(r.user_id)) {
+        const day = localTime(prefs.tz, now).day;
+        const { data: d } = await db.from("notification_digests").select("day").eq("user_id", r.user_id).eq("day", day).maybeSingle();
+        today.set(r.user_id, !!d);
+      }
+      const what = emailDecision(prefs, r.kind, now, today.get(r.user_id)!);
+      if (what === "skip") { await done(r.id, { email_state: "skipped" }); out.skipped++; continue; }
+      if (what === "hold") { hold.push(r.id); out.held++; continue; }
+      if (what === "digest") digestUsers.add(r.user_id);
       byUser.set(r.user_id, [...(byUser.get(r.user_id) || []), r]);
     }
-    for (const [uid, list] of byUser) {
+    for (const [uid, list0] of byUser) {
+      const list = list0.map(safe);
       const p: any = pmap.get(uid); const l = ["en", "ru", "uk", "ar"].includes(p.lang) ? p.lang : "en";
-      const subject = tr(T.subject, l).replace("{n}", String(list.length));
+      const digest = digestUsers.has(uid);
+      const subject = tr(digest ? T.digest : T.subject, l).replace("{n}", String(list.length));
       const html = list.map((n) => `<p style="margin:0 0 12px"><b>${esc(tr(K[n.kind], l, n.kind))}</b> — <a href="${SITE}${linkOf(n)}">${esc(n.title || "")}</a>${n.body ? `<br><span style="color:#5A6673">${esc(plain(n.body)).slice(0, 300)}</span>` : ""}</p>`).join("") + `<p style="color:#7A8796;font-size:12px">${esc(tr(T.settings, l))}</p>`;
       const text = list.map((n) => `${tr(K[n.kind], l, n.kind)} — ${n.title || ""}\n${SITE}${linkOf(n)}${n.body ? `\n${plain(n.body).slice(0, 300)}` : ""}`).join("\n\n") + `\n\n${tr(T.settings, l)}`;
       const r = await sendMailDetailed({ to: p.email, subject, html: renderEmail({ subject, heading: subject, body: "", html, cta: { label: tr(T.open, l), url: `${SITE}/notifications` }, lang: l, sender: null }), text });
-      const now = new Date().toISOString();
+      const at = new Date().toISOString();
       for (const n of list) {
-        if (r.ok) await done(n.id, { email_state: "sent", delivered_at: now, error: null });
-        else if (r.verdict?.kind === "uncertain") await done(n.id, { email_state: "failed", error: `uncertain: ${r.error}`.slice(0, 500), attempts: 99 });
+        if (r.ok) await done(n.id, { email_state: "sent", delivered_at: at, error: null });
+        else if (r.verdict?.kind === "uncertain") await done(n.id, { email_state: "uncertain", error: `uncertain: ${r.error}`.slice(0, 500) }); // never sent again by itself
         else await done(n.id, { email_state: r.verdict?.kind === "permanent" || n.attempts >= 5 ? "failed" : "pending", error: String(r.error || "").slice(0, 500) });
       }
+      if (r.ok && digest) { await db.from("notification_digests").upsert({ user_id: uid, day: localTime((p.notify_prefs || {}).tz, now).day, items: list.length }); out.digests++; }
       if (r.ok) { out.emails++; out.email_items += list.length; } else if (r.verdict?.kind === "uncertain") out.uncertain++; else out.failed++;
     }
     // phone
-    for (const r of rows) {
-      if (r.push_state !== "pending") continue;
+    for (const r0 of rows) {
+      if (r0.push_state !== "pending") continue;
+      const r = safe(r0); const p: any = pmap.get(r.user_id);
       if (OWN_CHANNEL.has(r.kind)) { await done(r.id, { push_state: "skipped" }); continue; }
+      if (pushDecision(p?.notify_prefs, r.kind, now) === "hold") { if (!hold.includes(r.id)) { hold.push(r.id); out.held++; } continue; }
       try {
         const n = await pushTo(db, [r.user_id], () => ({ title: r.title || "AGRON Workspace", body: plain(r.body || "").slice(0, 180), url: linkOf(r), tag: `n-${r.id}` }));
         await done(r.id, { push_state: n ? "sent" : "skipped" }); if (n) out.pushed++;
       } catch (e: any) { await done(r.id, { push_state: r.attempts >= 5 ? "failed" : "pending", error: String(e?.message || e).slice(0, 500) }); out.failed++; }
     }
+    if (hold.length) { const { error: e } = await db.rpc("notifications_release", { p_ids: hold, p_state: "held" }); if (e) await reportError(db, "notify:hold", e); }
     if (rows.length < (o.batch || 50)) break;
   }
   return out;
+}
+
+/** Announcements whose publication date has come: the audience is told once per version. */
+export async function announceDue(db: any) {
+  const { data, error } = await db.rpc("announcements_dispatch_due", {});
+  if (error) throw new Error(error.message);
+  return { notified: data ?? 0 };
 }
 
 /** Deadlines: due tomorrow or today, and overdue — once per person and date. */

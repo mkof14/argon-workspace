@@ -37,7 +37,9 @@ function expected(u: U) {
   const full = u.role === "owner" || u.role === "admin";
   const readable = new Set(access.filter((x) => x.role === u.role).map((x) => x.section));
   const external = EXTERNAL.includes(u.role) || u.role === "pending";
-  return new Set(recs.filter((r) => (full || readable.has(r.section)) && (!r.controlled || u.us) && (!external || r.company === "*" || (u.company && r.company === u.company))).map((r) => r.id));
+  // v20: an announcement that is not yet published is seen only by owners, administrators and management
+  const ann = (r: { section: string }) => r.section !== "company.announcements" || full || u.role === "management";
+  return new Set(recs.filter((r) => ann(r) && (full || readable.has(r.section)) && (!r.controlled || u.us) && (!external || r.company === "*" || (u.company && r.company === u.company))).map((r) => r.id));
 }
 async function visibleApi(u: U) {
   const { c } = await signIn(u.email);

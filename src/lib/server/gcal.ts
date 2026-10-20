@@ -73,6 +73,14 @@ export async function syncUser(db: any, userId: string) {
       else { const created = await api(access, `calendars/${cal}/events`, { method: "POST", body: JSON.stringify(ev) }); if (created?.id) { await db.from("gcal_map").upsert({ user_id: userId, record_id: r.id, event_id: created.id, origin: "workspace" }); byEvent.set(created.id, { record_id: r.id, event_id: created.id, origin: "workspace" }); pushed++; } }
     }
 
+    // 1b) a meeting that was deleted (or that this person may no longer see) leaves their calendar too
+    const want = new Set(calendarRecords(visible, me).map((r: any) => r.id));
+    for (const m of (maps || []) as any[]) {
+      if (m.origin !== "workspace" || want.has(m.record_id)) continue;
+      await api(access, `calendars/${cal}/events/${encodeURIComponent(m.event_id)}`, { method: "DELETE" }).catch(() => {});
+      await db.from("gcal_map").delete().eq("user_id", userId).eq("record_id", m.record_id); byEvent.delete(m.event_id); removed++;
+    }
+
     // 2) Google → Workspace: meetings with clients in the last 7 and next 60 days
     const q = new URLSearchParams({ singleEvents: "true", orderBy: "startTime", maxResults: "250", timeMin: new Date(Date.now() - 7 * 864e5).toISOString(), timeMax: new Date(Date.now() + 60 * 864e5).toISOString() });
     const list = await api(access, `calendars/${cal}/events?${q}`);

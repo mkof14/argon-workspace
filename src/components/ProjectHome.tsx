@@ -8,11 +8,12 @@ import Icon from "./Icon";
 import { useApp } from "./App";
 import { tx, type Lang } from "@/lib/i18n";
 import { tone, saveBlob } from "@/lib/format";
-import { store, type Activity, type Comment, type Rec } from "@/lib/store";
+import { store, type Activity, type Rec } from "@/lib/store";
 import { TASK_STATUSES } from "@/config/workspace.config.mjs";
 import { useWork } from "./useWork";
 import { byUrgency, daysTo, isOpenTask, MS_CLOSED, projectStats, todayIso, workload } from "@/lib/work";
-import { CommentBody, MentionInput, deptLabel, isEmployee, mdHtml, personName } from "./PeopleFields";
+import { deptLabel, isEmployee, mdHtml, personName } from "./PeopleFields";
+import Discussion from "./Discussion";
 
 type T4 = { en: string; ru: string; uk: string; ar: string };
 const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk, ar });
@@ -29,9 +30,9 @@ export default function ProjectHome({ id }: { id: string }) {
   const meets = w.meetings.filter((m) => m.data?.project_ref === id);
   const s = p ? projectStats(p, w.all || [], today) : null;
   const [decisions, setDecisions] = useState<Rec[]>([]); const [pendingAppr, setPendingAppr] = useState<{ id: string; record_id: string; status: string; approver_id: string; created_at: string }[]>([]);
-  const [cmts, setCmts] = useState<Comment[]>([]); const [cmt, setCmt] = useState(""); const [hist, setHist] = useState<Activity[]>([]);
+  const [nCmt, setNCmt] = useState(0); const [hist, setHist] = useState<Activity[]>([]);
   useEffect(() => { if (access.read.has("company.decisions")) store.list("company.decisions").then((l) => setDecisions(l.filter((d) => d.data?.project_ref === id))).catch(() => {}); }, [id, tick, access]); // eslint-disable-line
-  useEffect(() => { store.comments(id).then(setCmts).catch(() => {}); store.markRead(id).catch(() => {}); }, [id, tick]);
+  useEffect(() => { store.comments(id).then((cs) => setNCmt(cs.filter((c) => !c.deleted_at && (c.kind || "message") !== "approval").length)).catch(() => {}); }, [id, tick]);
   const ids = useMemo(() => [id, ...tasks.map((t) => t.id), ...ms.map((m) => m.id), ...docs.map((d) => d.id)], [id, tasks, ms, docs]);
   useEffect(() => { store.activityFor(ids, 100).then(setHist).catch(() => {}); }, [ids.join(",")]); // eslint-disable-line
   useEffect(() => { // approvals still waiting on this project's records (the database shows only those I may see)
@@ -44,7 +45,6 @@ export default function ProjectHome({ id }: { id: string }) {
   const canTask = access.write.has("company.tasks");
   const setStatus = async (r: Rec, status: string) => { try { await store.save({ ...store.original(r), status }); toast(T(L("Saved", "Сохранено", "Збережено", "حُفظ"))); reload(); } catch (e: any) { toast(e.message || "Error", true); } };
   const canRead = (x: any) => ["owner", "admin"].includes(x.role) || (rules || []).some((r) => r.role === x.role && r.section === "company.projects");
-  const send = async () => { if (!cmt.trim()) return; try { await store.addComment(id, cmt.trim()); setCmt(""); setCmts(await store.comments(id)); } catch (e: any) { toast(e.message || "Error", true); } };
   if (w.loading) return <div className="card" style={{ padding: 24 }}>…</div>;
   if (!p || !s) return <div className="card empty">{T(L("This project does not exist or you cannot open it.", "Этого проекта нет или у вас нет к нему доступа.", "Цього проєкту немає або у вас немає до нього доступу.", "هذا المشروع غير موجود أو لا يمكنك فتحه."))} <Link href="/projects">{T(L("All projects", "Все проекты", "Усі проєкти", "كل المشاريع"))}</Link></div>;
   const team = s.members.map((m) => people.find((x) => x.id === m)).filter(Boolean) as any[];
@@ -59,7 +59,7 @@ export default function ProjectHome({ id }: { id: string }) {
     "", `## ${T(L("Open tasks", "Открытые задачи", "Відкриті задачі", "المهام المفتوحة"))}`, ...tasks.filter(isOpenTask).map((t) => `- ${t.title} · ${t.data?.assignee || "—"} · ${t.status}${t.data?.due ? ` · ${t.data.due}` : ""}`),
     "", `## ${T(L("Waiting for decisions", "Ждут решений", "Чекають рішень", "بانتظار القرارات"))}`, ...decisions.filter((d) => d.status === "Proposed").map((d) => `- ${d.title}`), ...pendingAppr.map((a) => `- ${[...tasks, ...ms, ...docs].find((x) => x.id === a.record_id)?.title || "—"} → ${who(a.approver_id)}`),
   ].join("\n");
-  const TABS: [Tab, string, T4, number?][] = [["overview", "grid", L("Overview", "Обзор", "Огляд", "نظرة عامة")], ["tasks", "bell", L("Tasks", "Задачи", "Задачі", "المهام"), s.open], ["milestones", "flag", L("Milestones", "Вехи", "Віхи", "المراحل"), ms.length], ["team", "users", L("Team", "Команда", "Команда", "الفريق"), team.length], ["documents", "file", L("Documents", "Документы", "Документи", "المستندات"), docs.length], ["discussion", "send", L("Discussion", "Обсуждение", "Обговорення", "النقاش"), cmts.length], ["timeline", "calendar", L("Timeline", "График", "Графік", "الجدول الزمني")], ["activity", "clock", L("Activity", "История", "Історія", "النشاط")]];
+  const TABS: [Tab, string, T4, number?][] = [["overview", "grid", L("Overview", "Обзор", "Огляд", "نظرة عامة")], ["tasks", "bell", L("Tasks", "Задачи", "Задачі", "المهام"), s.open], ["milestones", "flag", L("Milestones", "Вехи", "Віхи", "المراحل"), ms.length], ["team", "users", L("Team", "Команда", "Команда", "الفريق"), team.length], ["documents", "file", L("Documents", "Документы", "Документи", "المستندات"), docs.length], ["discussion", "send", L("Discussion", "Обсуждение", "Обговорення", "النقاش"), nCmt], ["timeline", "calendar", L("Timeline", "График", "Графік", "الجدول الزمني")], ["activity", "clock", L("Activity", "История", "Історія", "النشاط")]];
   const H = { late: ["c-bad", L("Delayed", "Задержка", "Затримка", "متأخر")], risk: ["c-warn", L("Overdue tasks", "Есть просрочки", "Є прострочення", "مهام متأخرة")], ok: ["c-ok", L("On track", "По плану", "За планом", "وفق الخطة")] } as const;
   const openDecisions = decisions.filter((d) => d.status === "Proposed").length + pendingAppr.length;
   const span = (() => { const dates = [p.data?.start, p.data?.target, ...ms.map((m) => m.data?.due), ...tasks.map((t) => t.data?.due)].filter((x) => typeof x === "string" && /^\d{4}-\d{2}-\d{2}/.test(x)).sort() as string[]; return dates.length ? [dates[0], dates[dates.length - 1] > today ? dates[dates.length - 1] : today] : [today, today]; })();
@@ -124,11 +124,9 @@ export default function ProjectHome({ id }: { id: string }) {
         : <div className="empty">{T(L("No documents linked to this project.", "К проекту не привязаны документы.", "До проєкту не прив'язано документів.", "لا مستندات مرتبطة بهذا المشروع."))}</div>}
         {meets.length > 0 && <><div className="eyebrow" style={{ padding: "10px 12px 2px" }}>{T(L("Meetings", "Встречи", "Зустрічі", "الاجتماعات"))}</div>{meets.map((m) => <Link key={m.id} href={rec(m)} className="hub-row"><span><b>{m.title}</b><small>{m.data?.date} {m.data?.time || ""}</small></span><span className={`chip dot ${tone(m.status)}`}>{m.status}</span></Link>)}</>}</div></section>}
 
-    {tab === "discussion" && <section className="card thread" style={{ padding: 16 }}><div className="eyebrow">{T(L("Project discussion", "Обсуждение проекта", "Обговорення проєкту", "نقاش المشروع"))}</div>
-      {cmts.map((c) => <div key={c.id} id={`c-${c.id}`} className={`cmt ${(c as any).mentions?.includes(me.id) ? "mentioned" : ""}`}><small><b>{who(c.author) || "—"}</b> · {c.created_at.slice(0, 16).replace("T", " ")}</small><CommentBody body={c.body} /></div>)}
-      {!cmts.length && <div className="faint">{T(L("Start the discussion. Type @ to mention a colleague — they get a notification with a link here.", "Начните обсуждение. Наберите @, чтобы упомянуть коллегу, — он получит уведомление со ссылкой сюда.", "Почніть обговорення. Наберіть @, щоб згадати колегу, — він отримає сповіщення з посиланням сюди.", "ابدأ النقاش. اكتب @ لذكر زميل — يصله إشعار برابط إلى هنا."))}</div>}
-      <div className="toolbar" style={{ flexWrap: "nowrap", alignItems: "flex-start" }}><MentionInput value={cmt} onChange={setCmt} onSubmit={send} label={T(L("Write to the team", "Написать команде", "Написати команді", "اكتب للفريق"))} placeholder={T(L("Write to the team… (@ to mention)", "Напишите команде… (@ — упомянуть)", "Напишіть команді… (@ — згадати)", "اكتب للفريق… (@ للذكر)"))} candidates={people.filter((x) => isEmployee(x) && x.id !== me.id && canRead(x) && (!p.controlled || x.us_person))} />
-        <button className="btn" onClick={send}>{T(L("Send", "Отправить", "Надіслати", "إرسال"))}</button></div></section>}
+    {tab === "discussion" && <section className="card" style={{ padding: 16 }}><Discussion rec={p} project={p} linkables={[...tasks, ...docs, ...ms]} title={T(L("Project discussion", "Обсуждение проекта", "Обговорення проєкту", "نقاش المشروع"))} onCount={setNCmt} />
+      {decisions.length > 0 && <div className="dec-log"><div className="eyebrow"><Icon n="stamp" /> {T(L("Decision log of this project", "Журнал решений проекта", "Журнал рішень проєкту", "سجل قرارات المشروع"))}</div>
+        {decisions.map((d) => <Link key={d.id} href={rec(d)} className="hub-row"><span><b>{d.title}</b><small>{d.data?.date || d.created_at?.slice(0, 10)} · {who(d.created_by)}</small></span><span className={`chip dot ${tone(d.status)}`}>{d.status}</span></Link>)}</div>}</section>}
 
     {tab === "timeline" && <section className="card" style={{ padding: 16 }}><div className="eyebrow">{span[0]} → {span[1]}</div>
       <div className="timeline" role="list">

@@ -2,6 +2,7 @@
 import { NotifyHint } from "./Notify";
 import SinceLast, { TeamClock } from "./SinceLast";
 import Link from "next/link";
+import Announcements from "./Announcements";
 import Icon from "./Icon";
 import { useTr } from "@/lib/useTr";
 import { useApp, findSection } from "./App";
@@ -75,6 +76,7 @@ export default function Today() {
           <p>{urgent.length ? T(L("Start with these:", "Начните с этого:", "Почніть із цього:", "ابدأ بهذه:")) : T(L("Nothing urgent. A good day to move a project forward.", "Ничего срочного. Хороший день, чтобы продвинуть проект.", "Нічого термінового. Добрий день, щоб просунути проєкт.", "لا شيء عاجل. يوم جيد لدفع مشروع إلى الأمام."))}</p></div></div>
         {urgent.length > 0 && <ol className="top3" aria-label={T(L("Most urgent", "Самое срочное", "Найтерміновіше", "الأكثر إلحاحاً"))}>{urgent.map((u, i) => <li key={u.kind + u.id}><Link href={u.href} className={`top3-item ${u.why}`}><span className="n mono">{i + 1}</span><span style={{ minWidth: 0 }}><small>{T(why[u.why])}{u.days !== null && u.why !== "approval" ? ` · ${rel(u.days)}` : ""}</small><b>{u.title}</b></span><Icon n="chev" /></Link></li>)}</ol>}
       </section>
+      {access.read.has("company.announcements") && <Announcements compact />}
       <div className="toolbar quick-actions">
         {access.write.has("company.tasks") && <Link href="/company/tasks?new=1" className="btn primary sm"><Icon n="plus" />{T(L("New task", "Новая задача", "Нова задача", "مهمة جديدة"))}</Link>}
         {access.write.has("company.documents") && <Link href="/company/documents?new=1" className="btn sm"><Icon n="upload" />{T(L("Upload document", "Загрузить документ", "Завантажити документ", "رفع مستند"))}</Link>}

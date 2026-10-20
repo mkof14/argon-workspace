@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import Icon from "./Icon";
 import { useApp } from "./App";
 import { tx, type Lang } from "@/lib/i18n";
-import { DEMO } from "@/lib/store";
+import { DEMO, store } from "@/lib/store";
 
 type T4 = { en: string; ru: string; uk: string; ar: string };
 const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk, ar });
@@ -83,5 +83,34 @@ export default function OpsCenter() {
           : <div className="empty">{T(L("No deliveries to check.", "Нет писем для проверки.", "Немає листів для перевірки.", "لا رسائل للتحقق."))}</div>}
       </div>
     </section>
+    <CommsIssues />
   </div>;
+}
+
+/** Communications delivery for administrators: failed / uncertain e-mail, phone failures, stuck jobs, calendar sync
+ *  errors and announcement delivery. Only states, people and record names the administrator may open — no message text. */
+function CommsIssues() {
+  const { lang, people } = useApp(); const T = (x: { en: string; ru: string; uk: string; ar: string }) => tx(x, lang as Lang);
+  const [d, setD] = useState<any>(null); const [err, setErr] = useState("");
+  useEffect(() => { store.communicationIssues(14).then(setD).catch((e) => setErr(e.message || "Error")); }, []);
+  if (err) return <section className="card"><div className="card-b faint">{err}</div></section>;
+  if (!d) return null;
+  const t = d.totals || {};
+  return <section className="card" data-ops="comms">
+    <div className="card-h"><h2><Icon n="bell" />{T(L("Communications — delivery (14 days)", "Коммуникации — доставка (14 дней)", "Комунікації — доставка (14 днів)", "الاتصالات — التسليم (14 يوماً)"))}</h2></div>
+    <div className="card-b" style={{ display: "grid", gap: 10 }}>
+      <div className="toolbar"><span className="chip mono">{T(L("Waiting e-mail", "Письма в очереди", "Листи в черзі", "بريد منتظر"))} {t.pending_email ?? 0}</span>
+        <span className={`chip mono ${t.failed_email ? "c-bad" : ""}`}>{T(L("Failed e-mail", "Ошибки писем", "Помилки листів", "بريد فاشل"))} {t.failed_email ?? 0}</span>
+        <span className={`chip mono ${t.uncertain_email ? "c-warn" : ""}`}>{T(L("Uncertain — not resent", "Неизвестно — не переотправляется", "Невідомо — не надсилається повторно", "غير مؤكد — لا يُعاد"))} {t.uncertain_email ?? 0}</span>
+        <span className={`chip mono ${t.failed_push ? "c-bad" : ""}`}>{T(L("Failed push", "Ошибки push", "Помилки push", "إشعارات فاشلة"))} {t.failed_push ?? 0}</span></div>
+      <small className="faint">{T(L("Message text is not shown here: administrators see delivery states only, and record names only where they may open the record.", "Текст сообщений здесь не показан: администратор видит только состояние доставки и названия записей, к которым у него есть доступ.", "Текст повідомлень тут не показано: адміністратор бачить лише стан доставки й назви записів, до яких має доступ.", "لا يظهر نص الرسائل هنا: يرى المسؤول حالات التسليم فقط وأسماء السجلات التي يحق له فتحها."))}</small>
+      <div className="tablewrap"><table className="tb"><thead><tr><th>{T(L("When", "Когда", "Коли", "متى"))}</th><th>{T(L("Person", "Получатель", "Отримувач", "الشخص"))}</th><th>{T(L("Event", "Событие", "Подія", "الحدث"))}</th><th>{T(L("Record", "Запись", "Запис", "السجل"))}</th><th>E-mail</th><th>Push</th><th>{T(L("Error", "Ошибка", "Помилка", "الخطأ"))}</th></tr></thead>
+        <tbody>{(d.notifications || []).slice(0, 50).map((n: any) => <tr key={n.id}><td className="mono">{String(n.at).slice(0, 16).replace("T", " ")}</td><td>{n.user}</td><td>{n.kind}</td><td>{n.title || <span className="faint">{T(L("restricted", "ограничено", "обмежено", "مقيد"))}</span>}</td><td>{n.email || "—"}</td><td>{n.push || "—"}</td><td className="faint">{n.error || ""}</td></tr>)}
+          {!(d.notifications || []).length && <tr><td colSpan={7} className="faint">{T(L("No delivery problems.", "Проблем с доставкой нет.", "Проблем із доставкою немає.", "لا مشكلات في التسليم."))}</td></tr>}</tbody></table></div>
+      {(d.jobs || []).length > 0 && <div><div className="eyebrow">{T(L("Jobs that failed", "Сбойные задания", "Збійні завдання", "مهام فشلت"))}</div>{d.jobs.map((j: any, i: number) => <div key={i} className="faint mono" style={{ fontSize: 12.5 }}>{String(j.at).slice(0, 16)} · {j.job} · {j.status} · {j.error}</div>)}</div>}
+      {(d.calendar || []).length > 0 && <div><div className="eyebrow">{T(L("Calendar sync errors", "Ошибки синхронизации календаря", "Помилки синхронізації календаря", "أخطاء مزامنة التقويم"))}</div>{d.calendar.map((c: any, i: number) => <div key={i} className="faint mono" style={{ fontSize: 12.5 }}>{String(c.at).slice(0, 16)} · {c.error}</div>)}</div>}
+      {(d.announcements || []).length > 0 && <div><div className="eyebrow">{T(L("Announcement delivery", "Доставка объявлений", "Доставка оголошень", "تسليم الإعلانات"))}</div>{d.announcements.map((a: any) => <div key={a.record} className="faint" style={{ fontSize: 12.5 }}>{a.title || T(L("restricted", "ограничено", "обмежено", "مقيد"))} · {T(L("notified", "уведомлено", "сповіщено", "أُبلغ"))} {a.notified}{a.email_failed ? ` · ${T(L("e-mail problems", "проблемы писем", "проблеми листів", "مشكلات البريد"))} ${a.email_failed}` : ""}</div>)}</div>}
+      {people.length === 0 && null}
+    </div>
+  </section>;
 }

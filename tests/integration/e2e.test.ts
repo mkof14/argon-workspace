@@ -82,12 +82,12 @@ test("the daily workflow from a new account to the management dashboard", { skip
   await pn.click(".bell"); await pn.click(`.inbox .notice:has-text('${task}')`); await drawerOpen(pn);
   assert.equal(await pn.inputValue("#f-title"), task);
   // 7. a comment that mentions the manager
-  await pn.fill("aside.drawer textarea[aria-label='Write a comment…']", "Started — see the checklist @Mia"); await pn.keyboard.press("Backspace"); await pn.keyboard.press("Backspace"); await pn.keyboard.press("Backspace");
+  await pn.fill("aside.drawer .composer textarea[aria-label='Message']", "Started — see the checklist @Mia"); await pn.keyboard.press("Backspace"); await pn.keyboard.press("Backspace"); await pn.keyboard.press("Backspace");
   await pn.keyboard.type("Mia"); await pn.click(`.mention-menu button:has-text('Mia Manager ${run}')`); // several people may be called Mia
   const netlog: string[] = []; const t7 = Date.now();
   pn.on("response", (r: any) => { if (r.url().includes("/rest/v1/comments") || r.url().includes("/auth/v1/user")) netlog.push(`${Date.now() - t7}ms ${r.request().method()} ${r.status()} ${r.url().split("?")[0].slice(-30)}`); });
   pn.on("requestfailed", (r: any) => netlog.push(`${Date.now() - t7}ms FAILED ${r.url().slice(-40)} ${r.failure()?.errorText}`));
-  await pn.click("aside.drawer button:has-text('Send')");
+  await pn.click("aside.drawer .composer button.btn.primary");
   const stored = await waitFor(async () => !!(await sql("select mentions from comments where record_id = $1", [T0.id]))[0]?.mentions?.includes(mia.id), 30000);
   assert.ok(stored, `the mention is stored by account: ${JSON.stringify(await sql("select body, mentions, created_at from comments where record_id = $1", [T0.id]))} net=${JSON.stringify(netlog)} now=${new Date().toISOString()}`);
   assert.ok(await waitFor(async () => (await sql("select count(*)::int n from notifications where user_id = $1 and kind = 'mention' and record_id = $2", [mia.id, T0.id]))[0].n === 1), "the manager is told");
@@ -241,7 +241,7 @@ test("a non-technical path: find my task, open the project, reply to a comment, 
   const { p } = await login(omar.email); let clicks = 0;
   await p.waitForSelector(`.top3 a:has-text('Book the stand ${run}')`, { timeout: 20000 }); // the task is among the three most urgent
   await p.click(`.top3 a:has-text('Book the stand ${run}')`); clicks++; await drawerOpen(p);
-  await p.fill("aside.drawer textarea[aria-label='Write a comment…']", "Hall 4, stand B12"); await p.click("aside.drawer button:has-text('Send')"); clicks++;
+  await p.fill("aside.drawer .composer textarea[aria-label='Message']", "Hall 4, stand B12"); await p.click("aside.drawer .composer button.btn.primary"); clicks++;
   assert.ok(await waitFor(async () => (await sql("select count(*)::int n from comments where record_id = $1", [t.id]))[0].n === 2));
   await p.selectOption("#f-status", "Completed"); await save(p); clicks += 2;
   assert.ok(await waitFor(async () => (await record(`Book the stand ${run}`)).status === "Completed"));
@@ -261,4 +261,69 @@ test("performance: measured page loads, navigation, task creation, search, docum
   for (let i = 0; i < 20; i++) { const t0 = performance.now(); const r = await c.from("records").insert({ section: "company.tasks", title: `Perf ${run} ${i}`, status: "New", data: { assignee_id: erin.id } }).select("id").single(); time("api_task_create", performance.now() - t0); assert.ifError(r.error); }
   for (let i = 0; i < 20; i++) { const t0 = performance.now(); const r = await c.rpc("search_records", { q: `Perf ${run}`, n: 25 }); time("api_search", performance.now() - t0); assert.ifError(r.error); }
   for (const k of Object.keys(evidence.timings)) { const xs = [...evidence.timings[k]].sort((a: number, b: number) => a - b); evidence.timings[k] = { n: xs.length, median: xs[Math.floor(xs.length / 2)], p90: xs[Math.min(xs.length - 1, Math.floor(xs.length * 0.9))], max: xs[xs.length - 1] } as any; }
+});
+
+/* ---------------- Phase 3 in the browser ---------------- */
+test("Phase 3 · project discussion: mention → notification → exact message → reply → Decision in the project's log", { skip }, async () => {
+  const proj = `Comms pilot ${run}`;
+  const { data: P } = await db.from("records").insert({ section: "company.projects", title: proj, status: "Active", data: { manager_id: mia.id, manager: `Mia Manager ${run}`, members_ids: [erin.id], members: `Erin Engineer ${run}` } }).select("*").single();
+  const { p: pm } = await login(mia.email);
+  let t0 = Date.now(); await pm.goto(`${APP}/projects/${P.id}?tab=discussion`); await pm.waitForSelector(".discussion .composer textarea"); time("p3_discussion_open", Date.now() - t0);
+  await pm.click(".discussion .composer textarea"); await pm.keyboard.type("Please confirm the harness length @Erin");
+  await pm.click(`.mention-menu button:has-text('Erin Engineer ${run}')`);
+  t0 = Date.now(); await pm.click(".discussion .composer button.btn.primary");
+  assert.ok(await waitFor(async () => (await sql("select count(*)::int n from comments where record_id = $1", [P.id]))[0].n === 1)); time("p3_post_message", Date.now() - t0);
+  const [m1] = await sql("select id, mentions from comments where record_id = $1", [P.id]); assert.deepEqual(m1.mentions, [erin.id]);
+  await shot(pm, "p3-project-discussion");
+  // the employee: notification centre → Mentions → opens the exact message, replies
+  const { p: pe } = await login(erin.email);
+  await pe.goto(`${APP}/notifications`); await pe.click("[data-cat='mentions']");
+  await pe.waitForSelector(`.notice[data-kind='mention']:has-text('${proj}')`); await shot(pe, "p3-notification-centre");
+  await pe.click(`.notice[data-kind='mention']:has-text('${proj}')`);
+  await pe.waitForURL((u: URL) => u.pathname === `/projects/${P.id}`); await pe.waitForSelector(`#c-${m1.id}`);
+  assert.ok((await pe.url()).includes(`#c-${m1.id}`), "the link opens the exact message");
+  await pe.click(`#c-${m1.id} button:has-text('Reply')`); await pe.click(".discussion .composer textarea"); await pe.keyboard.type("Confirmed: 2.4 m, rev C");
+  await pe.click(".discussion .composer button.btn.primary");
+  assert.ok(await waitFor(async () => (await sql("select count(*)::int n from comments where record_id = $1 and parent_id = $2", [P.id, m1.id]))[0].n === 1), "a reply in the thread");
+  const [r1] = await sql("select id from comments where parent_id = $1", [m1.id]);
+  // the manager marks the reply as a Decision — it appears in the project's decision log
+  await pm.reload(); await pm.waitForSelector(`#c-${r1.id}`);
+  await pm.selectOption(`#c-${r1.id} select`, "decision");
+  assert.ok(await waitFor(async () => (await sql("select count(*)::int n from records where section = 'company.decisions' and data->>'project_ref' = $1", [P.id]))[0].n === 1), "decision recorded for the project");
+  await pm.reload(); await pm.waitForSelector(".dec-log .hub-row"); assert.ok(await pm.isVisible(`#c-${r1.id} [data-flag='decision']`));
+  // the employee cannot mark messages (no control), and a phone shows the same discussion
+  await pe.reload(); await pe.waitForSelector(`#c-${r1.id}`); assert.equal(await pe.locator(`#c-${r1.id} select`).count(), 0);
+  const { p: ph } = await login(erin.email, { viewport: { width: 390, height: 844 } });
+  await ph.goto(`${APP}/projects/${P.id}?tab=discussion`); await ph.waitForSelector(`#c-${r1.id}`);
+  assert.ok(await ph.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), "no sideways scrolling on a phone");
+  await shot(ph, "p3-discussion-phone");
+});
+
+test("Phase 3 · announcement: Read & Acknowledged on Today; a changed text asks again; management sees the numbers", { skip }, async () => {
+  const today = new Date().toISOString().slice(0, 10); const title = `Safety briefing ${run}`;
+  const { p: pm } = await login(mia.email);
+  const { data: A } = await db.from("records").insert({ section: "company.announcements", title, status: "Published", created_by: mia.id, data: { message: "Hard hats in hall 4.", priority: "Important", audience_type: "roles", audience: "engineering", publish_at: today, ack_required: true } }).select("*").single();
+  const { p: pe } = await login(erin.email);
+  await pe.goto(`${APP}/`); await pe.waitForSelector(`[data-ack='${A.id}']`); await shot(pe, "p3-announcement-today");
+  await pe.click(`[data-ack='${A.id}']`);
+  assert.ok(await waitFor(async () => (await sql("select count(*)::int n from announcement_acks where announcement_id = $1 and user_id = $2 and version = 1", [A.id, erin.id]))[0].n === 1));
+  await db.from("records").update({ data: { ...A.data, message: "Hard hats and goggles in hall 4." } }).eq("id", A.id);
+  await pe.reload(); await pe.waitForSelector(`[data-ack='${A.id}']`, { timeout: 20000 });
+  assert.ok(await pe.isVisible(`[data-ann='${A.id}'] .chip.c-warn`), "the person is told the text changed");
+  await pm.goto(`${APP}/company/announcements`); await pm.waitForSelector(`[data-stats='${A.id}']`);
+  assert.match(await pm.textContent(`[data-stats='${A.id}']`) || "", /Acknowledged 0 · v2/);
+});
+
+test("Phase 3 · meeting: action item becomes one task, even after a second click", { skip }, async () => {
+  const title = `Kick-off ${run}`;
+  const { data: M } = await db.from("records").insert({ section: "company.meetings", title, status: "Planned", created_by: mia.id, data: { date: "2026-10-22", time: "10:00", timezone: "America/New_York", organizer_id: mia.id, agenda: "Plan", action_items: [{ id: "i1", title: `Order connectors ${run}`, assignee_id: erin.id, due: "2026-10-30" }] } }).select("*").single();
+  const { p } = await login(mia.email);
+  await p.goto(`${APP}/company/meetings?r=${M.id}`); await p.waitForSelector("[data-item='i1'] button:has-text('Create task')");
+  await shot(p, "p3-meeting");
+  await p.click("[data-item='i1'] button:has-text('Create task')");
+  assert.ok(await waitFor(async () => (await sql("select count(*)::int n from records where section = 'company.tasks' and data->>'_idem' = $1", [`meeting:${M.id}:i1`]))[0].n === 1));
+  // a second attempt through the API: still one
+  const { c } = await (await import("./_stack.ts")).signIn(mia.email); await c.rpc("meeting_action_to_task", { p_meeting: M.id, p_item: "i1" });
+  assert.equal((await sql("select count(*)::int n from records where section = 'company.tasks' and data->>'_idem' = $1", [`meeting:${M.id}:i1`]))[0].n, 1);
+  await p.waitForSelector("[data-item='i1'] a.chip.c-ok");
 });

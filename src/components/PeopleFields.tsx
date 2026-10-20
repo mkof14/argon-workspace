@@ -94,12 +94,12 @@ export function CommentBody({ body }: { body: string }) {
 }
 
 /** Comment box: typing @ suggests colleagues who can read this record; the mention is stored by account. */
-export function MentionInput({ value, onChange, onSubmit, placeholder, candidates, label }: { value: string; onChange: (v: string) => void; onSubmit: () => void; placeholder: string; candidates: Profile[]; label: string }) {
+export function MentionInput({ value, onChange, onSubmit, placeholder, candidates, label, onQuery }: { value: string; onChange: (v: string) => void; onSubmit: () => void; placeholder: string; candidates: Profile[]; label: string; onQuery?: (q: string) => void }) {
   const { lang } = useApp();
   const ref = useRef<HTMLTextAreaElement>(null);
   const [q, setQ] = useState<string | null>(null); const [sel, setSel] = useState(0);
   const hits = useMemo(() => (q === null ? [] : candidates.filter((p) => personName(p).toLowerCase().includes(q.toLowerCase())).slice(0, 6)), [q, candidates]);
-  const detect = (v: string, pos: number) => { const m = /(^|\s)@([\p{L}\p{N}._-]{0,30})$/u.exec(v.slice(0, pos)); setQ(m ? m[2] : null); setSel(0); };
+  const detect = (v: string, pos: number) => { const m = /(^|\s)@([\p{L}\p{N}._-]{0,30})$/u.exec(v.slice(0, pos)); setQ(m ? m[2] : null); setSel(0); if (m) onQuery?.(m[2]); };
   const pick = (p: Profile) => {
     const el = ref.current!; const pos = el.selectionStart; const before = value.slice(0, pos).replace(/@([\p{L}\p{N}._-]{0,30})$/u, ""); const tag = `@[${personName(p).replace(/[[\]]/g, "")}](${p.id}) `;
     onChange(before + tag + value.slice(pos)); setQ(null); requestAnimationFrame(() => { el.focus(); const c = (before + tag).length; el.setSelectionRange(c, c); });

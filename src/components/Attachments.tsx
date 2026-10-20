@@ -70,7 +70,7 @@ export default function Attachments({ section, rec, canWrite, title }: { section
     return [...m.values()].map((l) => l.sort((a, b) => String(b.created_at || b.path).localeCompare(String(a.created_at || a.path)))); })();
   const newVersion = async (fl: FileList | null) => {
     const f0 = fl?.[0]; if (!f0 || !verOf || !prefix) return; if (f0.size > MAX) { toast(t("file_too_big", lang), true); return; }
-    setBusy(true); try { await store.upload(prefix, new File([f0], verOf.name, { type: f0.type || verOf.type })); toast(t("uploaded", lang)); load(); } catch (e: any) { toast(e.message || "Upload failed", true); } finally { setBusy(false); setVerOf(null); }
+    setBusy(true); try { const it = await store.upload(prefix, new File([f0], verOf.name, { type: f0.type || verOf.type })); if (rec && section.id === "company.documents") store.documentVersion(rec.id, it.path, verOf.name).catch(() => {}); toast(t("uploaded", lang)); load(); } catch (e: any) { toast(e.message || "Upload failed", true); } finally { setBusy(false); setVerOf(null); }
   };
   const V = (en: string, ru: string, uk: string, ar: string) => ({ en, ru, uk, ar } as any)[lang] || en;
   return (

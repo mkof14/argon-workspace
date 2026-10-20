@@ -55,7 +55,7 @@ async function decide(db: any, a: any, decision: Decision, comment: string, by: 
   const status = decision === "approved" ? rule?.ok : decision === "changes_requested" ? rule?.changes || rule?.no || rule?.wait[0] : rule?.no;
   if (status) await db.from("records").update({ status }).eq("id", r.id);
   const who = by.full_name || by.email;
-  await db.from("comments").insert({ record_id: r.id, author: by.id, body: `${decision === "approved" ? "✓ Approved" : decision === "changes_requested" ? "↺ Changes requested" : "✗ Rejected"} by ${who}${comment ? `: ${comment}` : ""}` });
+  await db.from("comments").insert({ record_id: r.id, author: by.id, kind: "approval", body: `${decision === "approved" ? "✓ Approved" : decision === "changes_requested" ? "↺ Changes requested" : "✗ Rejected"} by ${who}${comment ? `: ${comment}` : ""}` });
   const { data: req } = await db.from("profiles").select("email,full_name,lang").eq("id", a.requested_by).single();
   if (req?.email) {
     const lang = req.lang === "ru" ? "ru" : "en"; const s = sec(r.section);
@@ -144,7 +144,7 @@ export async function POST(req: Request) {
     const ml = (["uk", "ar"].includes(ap.lang) ? ap.lang : lang) as any; const c2 = { ...cta, label: m.text };
     const err = await sendMail({ to: ap.email, subject: m.subject, html: renderEmail({ subject: m.subject, heading: m.subject, body: m.body!, cta: c2, lang: ml, sender: COMPANY }), text: plainText({ body: m.body!, cta: c2, sender: COMPANY, lang: ml }), replyTo: me.email });
     await pushTo(db, [ap.id], (l) => ({ title: PUSH.approve_t[l], body: `${r.controlled ? "US-persons-only record" : r.title} — ${me.full_name || me.email}`, url, tag: `ap-${a.id}` })).catch((e) => reportError(db, "approvals:push", e));
-    await sb.from("comments").insert({ record_id: r.id, author: me.id, body: `→ Sent for approval to ${ap.full_name || ap.email}${note ? `: ${note}` : ""}` });
+    await db.from("comments").insert({ record_id: r.id, author: me.id, kind: "approval", body: `→ Sent for approval to ${ap.full_name || ap.email}${note ? `: ${note}` : ""}` });
     return Response.json({ ...a, approver: ap.full_name || ap.email, mail_error: err });
   }
 

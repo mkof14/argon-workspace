@@ -48,7 +48,7 @@ const ProjectHome = dynamic(() => import("./ProjectHome"), { ssr: false });
 const Management = dynamic(() => import("./Management"), { ssr: false });
 const Notices = dynamic(() => import("./Notices"), { ssr: false });
 const QuickCreate = dynamic(() => import("./QuickCreate"), { ssr: false });
-export const VERSION = "2.35";
+export const VERSION = "2.36";
 /** Roles that see the management dashboard (also checked on the server for the export). */
 export const MANAGERS = ["owner", "admin", "management"];
 

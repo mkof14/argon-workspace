@@ -34,7 +34,7 @@ export default function Messages() {
   const shown = threads.filter((t) => (f === "all" || (f === "unread" ? t.unread > 0 : f === "mentions" ? t.items.some((c) => c.mentions?.includes(me.id)) : t.section === f))
     && (!q || (t.title + " " + t.items.map((c) => c.body).join(" ")).toLowerCase().includes(q.toLowerCase())));
   const who = (id: string | null) => personName(people.find((p) => p.id === id)) || "—";
-  const link = (t: Thread, cid?: string) => (t.section === "company.projects" ? `/projects/${t.record_id}?tab=discussion` : `/${t.section.replace(".", "/")}?r=${t.record_id}${cid ? `#c-${cid}` : ""}`);
+  const link = (t: Thread, cid?: string) => (t.section === "company.projects" ? `/projects/${t.record_id}?tab=discussion${cid ? `#c-${cid}` : ""}` : `/${t.section.replace(".", "/")}?r=${t.record_id}${cid ? `#c-${cid}` : ""}`);
   const filters: [typeof f, T4][] = [["all", L("All", "Все", "Усі", "الكل")], ["unread", L("Unread", "Непрочитанные", "Непрочитані", "غير مقروءة")], ["mentions", L("Mentions of me", "Упоминания меня", "Згадки про мене", "الإشارات إليّ")], ["company.projects", L("Projects", "Проекты", "Проєкти", "المشاريع")], ["company.tasks", L("Tasks", "Задачи", "Задачі", "المهام")], ["company.documents", L("Documents", "Документы", "Документи", "المستندات")]];
   const activeProjects = w.projects.filter((p) => !["Completed", "Cancelled"].includes(p.status || ""));
   return <div style={{ display: "grid", gap: 16, ["--dc" as any]: "#0EA5E9" }}>

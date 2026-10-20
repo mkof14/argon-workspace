@@ -1,4 +1,5 @@
 "use client";
+import Announcements from "./Announcements";
 import { useEffect, useMemo, useState } from "react";
 // Loaded when needed: the record form (with PDF, markdown and AI tools) and the template list are not part of the first page load
 const RecordDrawer = dynamic(() => import("./RecordDrawer"), { ssr: false });
@@ -158,6 +159,7 @@ export default function SectionView({ section }: { section: any }) {
       </section>
 
       {section.view === "desks" && <LegalHub />}
+      {section.view === "announcements" && <Announcements />}
       {section.id === "marketing.brand" && <BrandLogos />}
       {section.id === "marketing.channels" && <ChannelsBoard />}
       {section.id === "technical.systems" && <SystemsBoard />}

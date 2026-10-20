@@ -23,7 +23,10 @@ import Icon from "./Icon";
 import { useApp } from "./App";
 import { t, tx } from "@/lib/i18n";
 import { trFields, trPending, trText } from "@/lib/tr";
-import { Activity, Comment, DEMO, Rec, isConflict, isExternal, store, textSim } from "@/lib/store";
+import { Activity, Comment, DEMO, Rec, isConflict, isExternal, store, textSim, type FileItem } from "@/lib/store";
+import Discussion from "./Discussion";
+import MeetingPanel from "./MeetingPanel";
+import { AnnouncementPanel } from "./Announcements";
 import { merge3, resolve, type Conflict } from "@/lib/merge";
 import ConflictDialog from "./ConflictDialog";
 import { CommentBody, DeptField, MentionInput, PeopleField, PersonField, RichField, isEmployee, personName } from "./PeopleFields";
@@ -70,7 +73,7 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
   const [controlled, setControlled] = useState(!!rec?.controlled);
   const [comments, setComments] = useState<Comment[]>([]);
   const [hist, setHist] = useState<Activity[]>([]);
-  const [cmt, setCmt] = useState("");
+  const [versions, setVersions] = useState<FileItem[]>([]);
   const [busy, setBusy] = useState(false);
   // Automatic translation: the record is shown in the reader's language; one click shows the original
   const trd: any = (rec as any)?._o ? rec : null;
@@ -98,6 +101,7 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
       if (need) fetch("/api/translate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rec.id }) }).catch(() => {});
     }).catch(() => {});
     store.activity({ recordId: rec.id, limit: 40 }).then(setHist).catch(() => {});
+    if (section.id === "company.documents") store.files(`${section.id}/${rec.id}`).then(setVersions).catch(() => {});
     store.markRead(rec.id).catch(() => {});
   }, [rec]);
   useEffect(() => { const k = (e: KeyboardEvent) => e.key === "Escape" && onClose(); window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
@@ -154,8 +158,6 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
   };
   const del = async () => { if (!rec) return; try { await store.remove(rec.id); toast(t("deleted", lang)); onSaved(); } catch (e: any) { toast(e.message || "Error", true); } };
   const shared = !!section.external?.length && !isExternal(me.role);
-  const [internal, setInternal] = useState(true);
-  const addCmt = async () => { if (!rec || !cmt.trim()) return; try { await store.addComment(rec.id, cmt.trim(), { internal: shared && internal }); setCmt(""); setComments(await store.comments(rec.id)); } catch (e: any) { toast(e.message || "Error", true); } };
   // who can be mentioned: colleagues who may read this record (the database checks it again before telling anyone)
   const canRead = (p: any) => ["owner", "admin"].includes(p.role) || (rules || []).some((x) => x.role === p.role && x.section === section.id);
   const mentionable = people.filter((p) => isEmployee(p) && p.id !== me.id && canRead(p) && (!controlled || p.us_person));
@@ -261,18 +263,17 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
           {rec && section.id === "sales.pipeline" && rec.status === "Won" && !isExternal(me.role) && <ProjectMoney deal={rec} />}
           {section.dept === "marketing" && <MarketingStudio section={section} title={title} data={data} setData={setData} canWrite={canWrite} saved={!!rec} />}
           <datalist id="people-list">{people.map((p) => <option key={p.id} value={p.full_name || p.email} />)}</datalist>
+          {rec && Array.isArray(rec.data?._suggested_links) && rec.data._suggested_links.length > 0 && !isExternal(me.role) && <div className="thread"><div className="eyebrow">{tx({ en: "From the e-mail: possibly related (suggestion — check before linking)", ru: "Из письма: возможно связано (подсказка — проверьте перед привязкой)", uk: "З листа: можливо пов'язано (підказка — перевірте перед прив'язкою)", ar: "من البريد: قد يكون مرتبطاً (اقتراح — تحقق قبل الربط)" }, lang)}</div>
+            <div className="toolbar">{rec.data._suggested_links.map((l: any) => <a key={l.kind + l.id} className="chip" href={l.kind === "thread" ? "/system?tab=ops" : l.kind === "project" ? `/projects/${l.id}` : `/${l.kind === "supplier" ? "operations/vendors" : "operations/procurement"}?r=${l.id}`} title={l.why}>{l.kind}: {l.title} · {l.strength}</a>)}</div></div>}
+          {section.id === "company.meetings" && <MeetingPanel rec={rec} data={data} setData={setData} canWrite={canWrite} onDone={onReload || onSaved} />}
+          {rec && section.id === "company.announcements" && <AnnouncementPanel rec={rec} />}
           {rec && APPROVALS[section.id]?.wait.includes(rec.status || "") && !isExternal(me.role) && <PreCheck rec={rec} />}
           {rec && APPROVALS[section.id] && <Approval rec={rec} canWrite={canWrite} onChanged={onSaved} />}
           {section.id !== "mail.outbox" && <Attachments section={section} rec={rec} canWrite={canWrite} title={title} />}
-          {rec && <div className="thread">
-            <div className="eyebrow">{t("comments", lang)}</div>
-            {comments.map((c) => <div key={c.id} id={`c-${c.id}`} className={`cmt ${(c as any).internal ? "internal" : ""} ${(c as any).mentions?.includes(me.id) ? "mentioned" : ""}`}><small><b>{who(c.author) || "—"}</b> · {(c.created_at || "").slice(0, 16).replace("T", " ")}{(c as any).internal && <> · <Icon n="lock" className="lockico" />{tx({ en: "internal", ru: "внутренний", uk: "внутрішній", ar: "داخلي" }, lang)}</>}</small><CommentBody body={cmtText(c)} />{!orig && cmtText(c) !== c.body && <small className="faint"><Icon n="globe" className="lockico" /> {t("tr_auto", lang)}</small>}</div>)}
-            {!comments.length && <div className="faint" style={{ fontSize: 13.5 }}>{tx({ en: "No comments yet. Type @ to mention a colleague.", ru: "Комментариев пока нет. Наберите @, чтобы упомянуть коллегу.", uk: "Коментарів ще немає. Наберіть @, щоб згадати колегу.", ar: "لا تعليقات بعد. اكتب @ لذكر زميل." }, lang)}</div>}
-            <div className="toolbar" style={{ flexWrap: "nowrap", alignItems: "flex-start" }}><MentionInput value={cmt} onChange={setCmt} onSubmit={addCmt} placeholder={t("add_comment_at", lang)} label={t("add_comment", lang)} candidates={isExternal(me.role) ? [] : mentionable} /><button className="btn" onClick={addCmt}>{t("send", lang)}</button></div>
-            {shared && <label className="check" style={{ fontSize: 13 }}><input type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} /><Icon n="lock" className="lockico" />{tx({ en: "Internal — not visible to partners and vendors", ru: "Внутренний — не виден партнёрам и поставщикам", uk: "Внутрішній — не видно партнерам і постачальникам", ar: "داخلي — لا يراه الشركاء والموردون" }, lang)}</label>}
-          </div>}
+          {rec && <Discussion rec={{ ...rec, company: rec.company }} versions={section.id === "company.documents" ? versions : undefined} textOf={cmtText}
+            title={section.id === "company.documents" ? tx({ en: "Discussion and review notes", ru: "Обсуждение и замечания", uk: "Обговорення і зауваження", ar: "النقاش وملاحظات المراجعة" }, lang) : undefined} />}
           {rec && hist.length > 0 && <div className="thread">
-            <div className="eyebrow">{t("history", lang)}</div>
+            <div className="eyebrow">{t("history", lang)} · {tx({ en: "automatic", ru: "автоматически", uk: "автоматично", ar: "تلقائي" }, lang)}</div>
             {hist.map((h) => <div key={h.id} className="faint" style={{ fontSize: 12.5 }}><span className="mono">{(h.created_at || "").slice(0, 16).replace("T", " ")}</span>{who(h.actor) ? ` · ${who(h.actor)}` : ""} · {h.action}{h.action === "status" && h.detail ? `: ${h.detail.from || "—"} → ${h.detail.to}` : ""}</div>)}
           </div>}
         </div>

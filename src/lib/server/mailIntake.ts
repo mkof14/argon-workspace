@@ -4,6 +4,7 @@ import { readState, saveState } from "./backup";
 import { classify, INTAKE_SECTIONS } from "./classify";
 import { indexFile } from "./docs";
 import { cleanBody, keepFiles, skipReason } from "@/lib/mailRules";
+import { suggestLinks, type LinkHint } from "@/lib/mailLinks";
 
 /**
  * Email intake: new letters in the info@agron1.com inbox become Workspace records.
@@ -12,7 +13,7 @@ import { cleanBody, keepFiles, skipReason } from "@/lib/mailRules";
  */
 const BUCKET = "files";
 const safe = (n: string) => n.normalize("NFKD").replace(/[^\w.\-]+/g, "_").replace(/_+/g, "_").slice(-120) || "file";
-export type Filed = { uid: number; text: string; from: string; subject: string; date: string; section: string; title: string; status: string; data: Record<string, any>; summary: string; controlled: boolean; files: string[]; reason: string };
+export type Filed = { uid: number; text: string; from: string; subject: string; date: string; section: string; title: string; status: string; data: Record<string, any>; summary: string; controlled: boolean; files: string[]; reason: string; links?: LinkHint[] };
 
 export async function readInbox(db: any, opts: { max?: number; budgetMs?: number } = {}) {
   const user = (process.env.SMTP_USER || "").trim(), pass = (process.env.SMTP_PASS || "").replace(/\s+/g, "");
@@ -22,6 +23,10 @@ export async function readInbox(db: any, opts: { max?: number; budgetMs?: number
   const state = (await readState(db, "mailintake").catch(() => null)) || {};
   const client = new ImapFlow({ host: process.env.IMAP_HOST || "imap.gmail.com", port: 993, secure: true, auth: { user, pass }, logger: false });
   const items: Filed[] = []; const ignored: string[] = []; let validity = "";
+  // what a letter may belong to (suggestions for the person who files it — never applied by themselves)
+  const pick = async (section: string) => ((await db.from("records").select("id,title,status,data").eq("section", section).limit(2000)).data || []) as any[];
+  const cand = { vendors: await pick("operations.vendors"), projects: await pick("company.projects"), procurement: await pick("operations.procurement"),
+    outbound: ((await db.from("outbound_messages").select("id,provider_id,to_addr,subject,idem_key").order("created_at", { ascending: false }).limit(2000)).data || []) as any[] };
   await client.connect();
   const lock = await client.getMailboxLock("INBOX");
   try {
@@ -60,10 +65,11 @@ export async function readInbox(db: any, opts: { max?: number; budgetMs?: number
         if (!error) staged.push(path);
       }
       const sec = INTAKE_SECTIONS.find((s) => s.id === p.section);
-      const data = { ...p.data };
+      const links = suggestLinks({ from, subject, text: body.slice(0, 6000), inReplyTo: h["in-reply-to"], references: h["references"] }, cand);
+      const data: Record<string, any> = { ...p.data, ...(links.length ? { _suggested_links: links } : {}) };
       const noteKey = ["notes", "description", "request", "body", "findings"].find((k) => sec?.fields.some((f: any) => f.key === k));
       if (noteKey && !data[noteKey]) data[noteKey] = `${p.summary}\n\nFrom: ${m.from?.text || from}\nSubject: ${subject}`;
-      items.push({ uid, text: body.slice(0, 6000), from, subject, date: m.date?.toISOString?.() || new Date().toISOString(), section: p.section, title: p.title, status: p.status, data, summary: p.summary, controlled: p.controlled, files: staged, reason: p.reason });
+      items.push({ uid, text: body.slice(0, 6000), from, subject, date: m.date?.toISOString?.() || new Date().toISOString(), section: p.section, title: p.title, status: p.status, data, summary: p.summary, controlled: p.controlled, files: staged, reason: p.reason, links });
     }
     await saveState(db, "mailintake", { validity, last, at: new Date().toISOString(), filed: (state.filed || 0) + items.length });
   } finally { lock.release(); await client.logout().catch(() => {}); }

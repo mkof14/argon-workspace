@@ -7,7 +7,8 @@ import { DEPARTMENTS } from "@/config/workspace.config.mjs";
 import { GLOSSARY, GUIDES, HELP, l2 } from "@/config/learn";
 import { TEMPLATES } from "@/config/templates";
 import { t, tx } from "@/lib/i18n";
-import { Faq, Rec, store, isExternal } from "@/lib/store";
+import { Faq, Rec, store, isExternal, type MessageHit } from "@/lib/store";
+import { messageLink } from "./Discussion";
 import { commentText, deptLabel, isEmployee, personName } from "./PeopleFields";
 
 type Hit = { id: string; group: string; icon: string; color?: string; title: string; sub?: string; go: () => void };
@@ -22,7 +23,8 @@ export default function Search({ onClose, initial = "", voice = false }: { onClo
   const [q, setQ] = useState(initial);
   const [recs, setRecs] = useState<Rec[]>([]);
   const [faq, setFaq] = useState<Faq[]>([]);
-  const [cmts, setCmts] = useState<Awaited<ReturnType<typeof store.searchComments>>>([]);
+  const [cmts, setCmts] = useState<MessageHit[]>([]);
+  const [mf, setMf] = useState<{ author: string; from: string; to: string; mentions: boolean; decisions: boolean }>({ author: "", from: "", to: "", mentions: false, decisions: false });
   // what to look for: everything, or one kind of information; and optionally one project
   const [kind, setKind] = useState<"all" | "task" | "project" | "document" | "person" | "decision" | "discussion">("all");
   const [proj, setProj] = useState(""); const [projects, setProjects] = useState<Rec[]>([]);
@@ -37,9 +39,9 @@ export default function Search({ onClose, initial = "", voice = false }: { onClo
   useEffect(() => { // records and FAQ from the server, debounced
     setSel(0);
     if (q.trim().length < 2) { setRecs([]); setFaq([]); setCmts([]); return; }
-    const h = setTimeout(() => { store.searchRecords(q.trim(), 40).then(setRecs).catch(() => {}); store.faqSearch(q.trim(), lang, 4).then(setFaq).catch(() => {}); if (!isExternal(me.role)) store.searchComments(q.trim(), 12).then(setCmts).catch(() => {}); }, 220);
+    const h = setTimeout(() => { store.searchRecords(q.trim(), 40).then(setRecs).catch(() => {}); store.faqSearch(q.trim(), lang, 4).then(setFaq).catch(() => {}); store.searchMessages(q.trim(), { project: proj || undefined, author: mf.author || undefined, from: mf.from || undefined, to: mf.to || undefined, mentions: mf.mentions, decisions: mf.decisions }, kind === "discussion" ? 40 : 12).then(setCmts).catch(() => setCmts([])); }, 220);
     return () => clearTimeout(h);
-  }, [q, lang]);
+  }, [q, lang, proj, kind, mf.author, mf.from, mf.to, mf.mentions, mf.decisions]);
 
   const listen = () => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -82,7 +84,12 @@ export default function Search({ onClose, initial = "", voice = false }: { onClo
     const inProj = (r: Rec) => !proj || r.id === proj || r.data?.project_ref === proj;
     if (kind !== "all") out.length = out.findIndex((h) => h.group === "ai") + 1; // one kind only: keep the AI line, drop pages and actions
     for (const p of kind === "all" || kind === "person" ? people : []) if (isEmployee(p) && !isExternal(me.role) && match(s, p.full_name, p.email, p.title || "", deptLabel(p.department, lang))) out.push({ id: "p-" + p.id, group: "person", icon: "user", title: personName(p), sub: [p.title, deptLabel(p.department, lang), p.email].filter(Boolean).join(" · "), go: () => go(`/people?q=${encodeURIComponent(personName(p))}`) });
-    for (const c of kind === "all" || kind === "discussion" ? cmts : []) { if (proj && c.record_id !== proj) continue; out.push({ id: "c-" + c.id, group: "talk", icon: "send", title: c.title || "—", sub: commentText(c.body).slice(0, 120), go: () => go(c.section === "company.projects" ? `/projects/${c.record_id}?tab=discussion` : `/${String(c.section).replace(".", "/")}?r=${c.record_id}#c-${c.id}`) }); }
+    for (const c of kind === "all" || kind === "discussion" || kind === "decision" ? cmts : []) {
+      if (kind === "decision" && c.flag !== "decision") continue;
+      const sec = findSection(c.section); const au = people.find((p) => p.id === c.author);
+      const typ = c.flag === "decision" ? tx({ en: "Decision", ru: "Решение", uk: "Рішення", ar: "قرار" }, lang) : c.kind === "review" ? tx({ en: "Review note", ru: "Замечание", uk: "Зауваження", ar: "ملاحظة مراجعة" }, lang) : sec ? tx(sec.label, lang) : "";
+      out.push({ id: "c-" + c.id, group: "talk", icon: c.flag === "decision" ? "stamp" : "send", color: sec?.color, title: c.title || "—", sub: `${typ}${au ? ` · ${au.full_name || au.email}` : ""} · ${c.created_at.slice(0, 10)} — ${commentText(c.excerpt).slice(0, 140)}`, go: () => go(messageLink({ id: c.record_id, section: c.section }, c.id)) });
+    }
     for (const r of recs) { const sec = findSection(r.section); if (!sec) continue; if (kind === "person" || kind === "discussion" || (kind !== "all" && !KSEC[kind]?.includes(r.section)) || !inProj(r)) continue; out.push({ id: "r-" + r.id, group: "rec", icon: sec.icon, color: sec.color, title: r.title, sub: `${tx(sec.label, lang)}${r.status ? " · " + r.status : ""}`, go: () => go(r.section === "company.projects" ? `/projects/${r.id}` : `/${r.section.replace(".", "/")}?r=${r.id}`) }); }
     if (kind === "all") for (const f of faq) out.push({ id: "f-" + f.id, group: "faq", icon: "lifebuoy", title: f.question, sub: f.answer.replace(/[#*_`>]/g, "").slice(0, 110), go: () => go(`/learn?tab=faq&q=${encodeURIComponent(f.question)}`) });
     if (kind === "all") for (const [dept, terms] of Object.entries(GLOSSARY)) for (const [term, def] of terms) if (match(s, term, def.en, def.ru)) out.push({ id: "g-" + dept + term, group: "term", icon: "book", title: term, sub: l2(def, lang), go: () => go(`/learn?tab=terms&q=${encodeURIComponent(term)}`) });
@@ -117,7 +124,13 @@ export default function Search({ onClose, initial = "", voice = false }: { onClo
           <kbd>Esc</kbd>
         </div>
         <div className="search-kinds" role="group" aria-label={tx({ en: "Look in", ru: "Искать в", uk: "Шукати в", ar: "ابحث في" }, lang)}>
-          {([["all", { en: "All", ru: "Всё", uk: "Усе", ar: "الكل" }], ["task", { en: "Tasks", ru: "Задачи", uk: "Задачі", ar: "المهام" }], ["project", { en: "Projects", ru: "Проекты", uk: "Проєкти", ar: "المشاريع" }], ["document", { en: "Documents", ru: "Документы", uk: "Документи", ar: "المستندات" }], ["person", { en: "People", ru: "Сотрудники", uk: "Співробітники", ar: "الموظفون" }], ["decision", { en: "Decisions", ru: "Решения", uk: "Рішення", ar: "القرارات" }], ["discussion", { en: "Discussions", ru: "Обсуждения", uk: "Обговорення", ar: "النقاشات" }]] as [typeof kind, any][]).filter(([k]) => !isExternal(me.role) || k === "all").map(([k, l]) => <button key={k} className={`chip ${kind === k ? "on" : ""}`} onClick={() => { setKind(k); inp.current?.focus(); }} aria-pressed={kind === k}>{tx(l, lang)}</button>)}
+          {([["all", { en: "All", ru: "Всё", uk: "Усе", ar: "الكل" }], ["task", { en: "Tasks", ru: "Задачи", uk: "Задачі", ar: "المهام" }], ["project", { en: "Projects", ru: "Проекты", uk: "Проєкти", ar: "المشاريع" }], ["document", { en: "Documents", ru: "Документы", uk: "Документи", ar: "المستندات" }], ["person", { en: "People", ru: "Сотрудники", uk: "Співробітники", ar: "الموظفون" }], ["decision", { en: "Decisions", ru: "Решения", uk: "Рішення", ar: "القرارات" }], ["discussion", { en: "Discussions", ru: "Обсуждения", uk: "Обговорення", ar: "النقاشات" }]] as [typeof kind, any][]).filter(([k]) => !isExternal(me.role) || k === "all" || k === "discussion").map(([k, l]) => <button key={k} className={`chip ${kind === k ? "on" : ""}`} onClick={() => { setKind(k); inp.current?.focus(); }} aria-pressed={kind === k}>{tx(l, lang)}</button>)}
+          {kind === "discussion" && <span className="msg-filters">
+            <select className="input" value={mf.author} onChange={(e) => setMf({ ...mf, author: e.target.value })} aria-label={tx({ en: "Person", ru: "Автор", uk: "Автор", ar: "الشخص" }, lang)} style={{ width: "auto", padding: "3px 8px" }}><option value="">{tx({ en: "Anyone", ru: "Любой автор", uk: "Будь-хто", ar: "أي شخص" }, lang)}</option>{people.filter((p) => !p.disabled).map((p) => <option key={p.id} value={p.id}>{p.full_name || p.email}</option>)}</select>
+            <input className="input" type="date" value={mf.from} onChange={(e) => setMf({ ...mf, from: e.target.value })} aria-label={tx({ en: "From", ru: "С", uk: "З", ar: "من" }, lang)} style={{ width: "auto", padding: "3px 8px" }} />
+            <input className="input" type="date" value={mf.to} onChange={(e) => setMf({ ...mf, to: e.target.value })} aria-label={tx({ en: "To", ru: "По", uk: "По", ar: "إلى" }, lang)} style={{ width: "auto", padding: "3px 8px" }} />
+            <button className={`chip ${mf.mentions ? "on" : ""}`} aria-pressed={mf.mentions} onClick={() => setMf({ ...mf, mentions: !mf.mentions })}>@ {tx({ en: "Mentions me", ru: "Упомянули меня", uk: "Згадали мене", ar: "يذكرني" }, lang)}</button>
+            <button className={`chip ${mf.decisions ? "on" : ""}`} aria-pressed={mf.decisions} onClick={() => setMf({ ...mf, decisions: !mf.decisions })}>{tx({ en: "Decisions only", ru: "Только решения", uk: "Лише рішення", ar: "القرارات فقط" }, lang)}</button></span>}
           {projects.length > 0 && <select className="input" value={proj} onChange={(e) => setProj(e.target.value)} aria-label={tx({ en: "Project", ru: "Проект", uk: "Проєкт", ar: "المشروع" }, lang)} style={{ width: "auto", padding: "3px 8px" }}><option value="">{tx({ en: "Any project", ru: "Любой проект", uk: "Будь-який проєкт", ar: "أي مشروع" }, lang)}</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}</select>}
         </div>
         {listening && <div className="search-listen"><span className="pulse" />{t("listening", lang)}</div>}

@@ -12,7 +12,8 @@
   "git": {
     "deploymentEnabled": {
       "phase1-reliability": false,
-      "phase2-daily-operations": false
+      "phase2-daily-operations": false,
+      "phase3-communications": false
     }
   }
 }

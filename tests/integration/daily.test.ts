@@ -102,7 +102,9 @@ test("mentions come from the text by account; forged lists are ignored; partners
   const { data: rec } = await db.from("records").insert({ section: "operations.support", title: `Support case ${run}`, status: "Active", data: {}, company: `Acme ${run}`, controlled: false }).select("*").single();
   const { c: cm } = await signIn(mgr.email);
   const ins = await cm.from("comments").insert({ record_id: rec.id, author: mgr.id, body: `Hi @[Pat](${pat.id}) and @[Fay](${fin.id}) — internal pricing note`, internal: true, mentions: [ops.id] }).select("id, mentions").single();
-  assert.ifError(ins.error); assert.deepEqual(new Set(ins.data!.mentions), new Set([pat.id, fin.id]), "the stored list is what the text says");
+  const canFin0 = (await sql("select count(*)::int n from section_access where role = 'finance' and section = 'operations.support'"))[0].n > 0;
+  // v20: only people who may read the record are kept, and never a partner in an internal note
+  assert.ifError(ins.error); assert.deepEqual(new Set(ins.data!.mentions), new Set(canFin0 ? [fin.id] : []), "the stored list is what the text says, limited to who may read it");
   assert.equal((await notes(ops.id, rec.id)).length, 0, "a forged mention list notifies nobody");
   assert.equal((await notes(pat.id, rec.id)).length, 0, "an internal note never reaches a partner");
   const fn = await notes(fin.id, rec.id); // finance is told only if it may read support cases

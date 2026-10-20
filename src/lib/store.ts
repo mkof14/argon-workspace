@@ -35,10 +35,15 @@ export type Rule = { section: string; role: string; can_write: boolean; external
 export type FileItem = { name: string; path: string; size: number; type: string; created_at?: string };
 export const BUCKET = "files";
 export type Faq = { id: string; question: string; answer: string; lang: string; section: string | null; verified: boolean; hits: number; source?: string; created_by?: string | null; created_at?: string; sim?: number };
-export type Comment = { id: string; record_id: string; author: string | null; body: string; created_at: string };
+export type Comment = { id: string; record_id: string; author: string | null; body: string; created_at: string;
+  parent_id?: string | null; edited_at?: string | null; deleted_at?: string | null; kind?: "message" | "review" | "approval" | "system"; internal?: boolean; mentions?: string[];
+  mention_names?: { id: string; name: string }[]; flag?: "important" | "decision" | "announcement" | null; flagged_by?: string | null; pinned_at?: string | null;
+  file_path?: string | null; version_label?: string | null; refs?: string[]; files?: { path: string; name?: string; size?: number; type?: string }[] };
+export type CommentDraft = { parent_id?: string | null; kind?: "message" | "review"; internal?: boolean; file_path?: string | null; version_label?: string | null; refs?: string[]; files?: { path: string; name?: string; size?: number; type?: string }[] };
+export type MessageHit = { id: string; record_id: string; section: string; title: string; project_ref: string | null; author: string | null; created_at: string; excerpt: string; flag: string | null; kind: string };
 export type Activity = { id: number; record_id: string | null; section: string; actor: string | null; action: string; detail: any; created_at: string };
 export type Access = { read: Set<string>; write: Set<string> };
-export type Notice = { id: number; kind: string; record_id: string | null; section: string | null; title: string | null; body: string | null; actor: string | null; link: string | null; created_at: string; read_at: string | null };
+export type Notice = { id: number; kind: string; record_id: string | null; section: string | null; title: string | null; body: string | null; actor: string | null; link: string | null; created_at: string; read_at: string | null; critical?: boolean };
 
 import { DEMO, SUPA_KEY, SUPA_URL, sb } from "./sb";
 export { DEMO, SUPA_KEY, SUPA_URL, sb };
@@ -332,19 +337,94 @@ export const store = {
     if (DEMO) return demoLoad().comments.filter((c) => c.record_id === recordId);
     const { data } = await sb().from("comments").select("*").eq("record_id", recordId).order("created_at"); return (data || []) as Comment[];
   },
-  async addComment(recordId: string, body: string, o: { internal?: boolean } = {}) {
+  async addComment(recordId: string, body: string, o: CommentDraft = {}) {
     const internal = !!o.internal;
-    if (DEMO) { const db = demoLoad(); const mentions = [...body.matchAll(/@\[[^\]]{1,120}\]\(([0-9a-fA-F-]{36})\)/g)].map((m) => m[1]); db.comments.push({ id: uid(), record_id: recordId, author: demoMe(db).id, body, created_at: new Date().toISOString(), internal, mentions } as any); demoSave(db); return; }
+    const extra = Object.fromEntries(Object.entries({ parent_id: o.parent_id, kind: o.kind, file_path: o.file_path, version_label: o.version_label, refs: o.refs?.length ? o.refs : undefined, files: o.files?.length ? o.files : undefined }).filter(([, v]) => v != null));
+    if (DEMO) { const db = demoLoad(); const mentions = [...body.matchAll(/@\[[^\]]{1,120}\]\(([0-9a-fA-F-]{36})\)/g)].map((m) => m[1]); const par = db.comments.find((c) => c.id === o.parent_id) as any; db.comments.push({ id: uid(), record_id: recordId, author: demoMe(db).id, body, created_at: new Date().toISOString(), internal, mentions, kind: "message", ...extra, ...(par?.parent_id ? { parent_id: par.parent_id } : {}) } as any); demoSave(db); return; }
     if ((offline() || isTemp(recordId)) && !FLUSHING) { await this.queue({ kind: "comment", record_id: recordId, body, internal }); return; }
     const { data: u } = await sb().auth.getUser();
-    const { error } = await sb().from("comments").insert({ record_id: recordId, body, author: u?.user?.id, ...(internal ? { internal } : {}) }); if (error) { if (!FLUSHING && isNetworkError(error)) { await this.queue({ kind: "comment", record_id: recordId, body, internal }); return; } throw error; }
+    const { error } = await sb().from("comments").insert({ record_id: recordId, body, author: u?.user?.id, ...(internal ? { internal } : {}), ...extra }); if (error) { if (!FLUSHING && isNetworkError(error)) { await this.queue({ kind: "comment", record_id: recordId, body, internal }); return; } throw error; }
     translateLater({ id: recordId });
     if (/@\p{L}/u.test(body)) try { fetch("/api/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "mention", record_id: recordId }), keepalive: true }).catch(() => {}); } catch {}
+  },
+  /** Edit my own message (the earlier text is kept as evidence by the database). */
+  async editComment(id: string, body: string) {
+    if (DEMO) { const db = demoLoad(); const c: any = db.comments.find((x) => x.id === id); if (c) { c.body = body; c.edited_at = new Date().toISOString(); demoSave(db); } return; }
+    const { error } = await sb().from("comments").update({ body }).eq("id", id); if (error) throw error;
+  },
+  /** Withdraw my own message: the text leaves the discussion, the history keeps it. */
+  async withdrawComment(id: string) {
+    if (DEMO) { const db = demoLoad(); const c: any = db.comments.find((x) => x.id === id); if (c) { c.body = ""; c.deleted_at = new Date().toISOString(); demoSave(db); } return; }
+    const { error } = await sb().from("comments").update({ deleted_at: new Date().toISOString() }).eq("id", id); if (error) throw error;
+  },
+  /** Important / Decision / Announcement mark (project manager or management; a Decision goes into the decision log). */
+  async flagComment(id: string, flag: "important" | "decision" | "announcement" | null): Promise<{ flag: string | null; decision: string | null }> {
+    if (DEMO) { const db = demoLoad(); const c: any = db.comments.find((x) => x.id === id); if (c) { c.flag = flag; demoSave(db); } return { flag, decision: null }; }
+    const { data, error } = await sb().rpc("comment_flag", { p_comment: id, p_flag: flag }); if (error) throw error; return data as any;
+  },
+  async pinComment(id: string, on: boolean) {
+    if (DEMO) { const db = demoLoad(); const c: any = db.comments.find((x) => x.id === id); if (c) { c.pinned_at = on ? new Date().toISOString() : null; demoSave(db); } return; }
+    const { error } = await sb().rpc("comment_pin", { p_comment: id, p_on: on }); if (error) throw error;
+  },
+  /** People I may mention on this record — the database decides (partners see only the people working on it). */
+  async mentionCandidates(recordId: string, q = "", internal = false): Promise<{ id: string; name: string; department: string | null; role: string }[]> {
+    if (DEMO || isTemp(recordId)) { const db = demoLoad(); return db.profiles.filter((p) => p.id !== demoMe(db).id && (p.full_name || p.email).toLowerCase().includes(q.toLowerCase())).slice(0, 8).map((p) => ({ id: p.id, name: p.full_name || p.email, department: (p as any).department || null, role: p.role })); }
+    const { data, error } = await sb().rpc("mention_candidates", { p_record: recordId, p_q: q, p_internal: internal }); if (error) return []; return (data || []) as any;
+  },
+  /** Search in the discussions I may read (same rules as opening them). */
+  async searchMessages(q: string, f: { project?: string; author?: string; from?: string; to?: string; kind?: string; mentions?: boolean; decisions?: boolean } = {}, n = 30): Promise<MessageHit[]> {
+    if (DEMO) { const db = demoLoad(); const s = q.toLowerCase(); return db.comments.filter((c: any) => !c.deleted_at && c.body.toLowerCase().includes(s) && (!f.decisions || c.flag === "decision")).slice(0, n).map((c: any) => { const r = db.records.find((x) => x.id === c.record_id); return r && demoVisible(db, r) ? { id: c.id, record_id: c.record_id, section: r.section, title: r.title, project_ref: r.section === "company.projects" ? r.id : r.data?.project_ref || null, author: c.author, created_at: c.created_at, excerpt: c.body.slice(0, 220), flag: c.flag || null, kind: c.kind || "message" } : null; }).filter(Boolean) as MessageHit[]; }
+    const { data, error } = await sb().rpc("search_messages", { p_q: q, p_project: f.project || null, p_author: f.author || null, p_from: f.from || null, p_to: f.to || null, p_kind: f.kind || null, p_mentions_me: !!f.mentions, p_decisions: !!f.decisions, p_limit: n });
+    if (error) throw error; return (data || []) as MessageHit[];
+  },
+  /** A new version of a document is stored: tell its owner, the project manager and pending approvers. */
+  async documentVersion(recordId: string, path: string, label?: string) {
+    if (DEMO || isTemp(recordId)) return 0;
+    const { data, error } = await sb().rpc("document_version_uploaded", { p_record: recordId, p_path: path, p_label: label || null }); if (error) throw error; return data as number;
+  },
+  /** An action item of a meeting becomes a task — once, however often it is clicked. */
+  async meetingActionToTask(meetingId: string, itemId: string): Promise<string> {
+    if (DEMO) { const db = demoLoad(); const m = db.records.find((r) => r.id === meetingId)!; const it = (m.data?.action_items || []).find((x: any) => x.id === itemId); if (it?.task_id) return it.task_id; const id = uid(); db.records.push({ id, section: "company.tasks", title: it?.title || "Action item", status: "New", data: { assignee_id: it?.assignee_id, due: it?.due, description: it?.description, project_ref: m.data?.project_ref, meeting_ref: m.id, meeting_ref_title: m.title }, controlled: m.controlled, company: null, created_by: demoMe(db).id, created_at: new Date().toISOString(), updated_at: new Date().toISOString() } as any); it.task_id = id; demoSave(db); return id; }
+    const { data, error } = await sb().rpc("meeting_action_to_task", { p_meeting: meetingId, p_item: itemId }); if (error) throw error; return data as string;
+  },
+  /** Write a decision into the decision log from a meeting or another record (the same text is recorded once). */
+  async recordDecision(sourceId: string, text: string): Promise<string | null> {
+    if (DEMO) return null;
+    const { data, error } = await sb().rpc("record_decision", { p_source: sourceId, p_text: text }); if (error) throw error; return data as string;
+  },
+  async announcementAck(id: string): Promise<number> {
+    if (DEMO) { const db = demoLoad(); (db as any).acks = { ...((db as any).acks || {}), [id]: 1 }; demoSave(db); return 1; }
+    const { data, error } = await sb().rpc("announcement_ack", { p_id: id }); if (error) throw error; return data as number;
+  },
+  /** My acknowledgements: announcement → versions acknowledged. */
+  async myAcks(): Promise<Record<string, number[]>> {
+    if (DEMO) { const a = (demoLoad() as any).acks || {}; return Object.fromEntries(Object.entries(a).map(([k, v]) => [k, [v as number]])); }
+    const { data } = await sb().from("announcement_acks").select("announcement_id,version").limit(5000);
+    const out: Record<string, number[]> = {}; for (const x of (data || []) as any[]) (out[x.announcement_id] ||= []).push(x.version); return out;
+  },
+  async announcementStats(id: string): Promise<{ version: number; audience: number; read: number; acknowledged: number; outstanding: { id: string; name: string }[] } | null> {
+    if (DEMO) return null;
+    const { data, error } = await sb().rpc("announcement_stats", { p_id: id }); if (error) return null; return data as any;
+  },
+  /** Delivery problems for administrators (no message content). */
+  async communicationIssues(days = 14): Promise<any> {
+    if (DEMO) return { notifications: [], outbound: [], jobs: [], calendar: [], announcements: [], totals: {} };
+    const { data, error } = await sb().rpc("communication_issues", { p_days: days }); if (error) throw error; return data;
+  },
+  /** Mark a discussion unread again (from a message on). */
+  async markUnread(recordId: string, before: string) {
+    if (DEMO || isTemp(recordId)) return;
+    const { data: u } = await sb().auth.getUser(); if (!u?.user) return;
+    await sb().from("record_reads").upsert({ user_id: u.user.id, record_id: recordId, read_at: new Date(Date.parse(before) - 1000).toISOString() });
+  },
+  async readAt(recordId: string): Promise<string | null> {
+    if (DEMO || isTemp(recordId)) return null;
+    const { data } = await sb().from("record_reads").select("read_at").eq("record_id", recordId).maybeSingle(); return (data as any)?.read_at || null;
   },
   /** Recent discussions I can see (comments on records I may read), newest first. */
   async discussions(n = 400): Promise<(Comment & { section?: string; title?: string; internal?: boolean; mentions?: string[] })[]> {
     if (DEMO) { const db = demoLoad(); return db.comments.slice(-n).reverse().map((c) => { const r = db.records.find((x) => x.id === c.record_id); return { ...c, section: r?.section, title: r?.title }; }).filter((c) => c.section && demoVisible(db, db.records.find((x) => x.id === c.record_id)!)); }
-    const { data } = await sb().from("comments").select("*, records(section,title)").order("created_at", { ascending: false }).limit(n);
+    const { data } = await sb().from("comments").select("*, records(section,title)").is("deleted_at", null).order("created_at", { ascending: false }).limit(n);
     return (data || []).filter((c: any) => c.records).map((c: any) => ({ ...c, section: c.records?.section, title: c.records?.title }));
   },
   /** Marks a record's discussion as read by me (Messages shows what is new since). */
@@ -361,7 +441,7 @@ export const store = {
   /** My notifications, newest first (the database only returns mine, and only for records I can still open). */
   async notifications(n = 100): Promise<Notice[]> {
     if (DEMO) return [];
-    const { data, error } = await sb().from("notifications").select("id,kind,record_id,section,title,body,actor,link,created_at,read_at").order("created_at", { ascending: false }).limit(n);
+    const { data, error } = await sb().from("notifications").select("id,kind,record_id,section,title,body,actor,link,created_at,read_at,critical").order("created_at", { ascending: false }).limit(n);
     if (error) return []; return (data || []) as Notice[];
   },
   async markNotices(ids: number[] | "all") {
