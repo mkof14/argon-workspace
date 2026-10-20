@@ -93,32 +93,35 @@ test("the daily workflow from a new account to the management dashboard", { skip
   assert.ok(await waitFor(async () => (await sql("select count(*)::int n from notifications where user_id = $1 and kind = 'mention' and record_id = $2", [mia.id, T0.id]))[0].n === 1), "the manager is told");
   // 8. the employee adds the document to the register, attaches the file and sends it for approval
   await pn.goto(`${APP}/company/documents?new=1&project_ref=${P.id}&project_ref_title=${encodeURIComponent(proj)}`); await drawerOpen(pn);
-  await pn.fill("#f-title", doc); await pn.selectOption("#f-doc_type", "Engineering documentation"); await pn.fill("#f-version", "1"); await pn.selectOption("#f-status", "In review");
+  await pn.fill("#f-title", doc); await pn.selectOption("#f-doc_type", "Engineering documentation"); // number and version are given by the system
   await save(pn); assert.ok(await waitFor(async () => !!(await record(doc))));
   const D = await record(doc);
   await pn.goto(`${APP}/company/documents?r=${D.id}`); await drawerOpen(pn);
-  await pn.setInputFiles("aside.drawer input[type=file][multiple]", { name: "fat-checklist.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 synthetic v1") });
-  assert.ok(await waitFor(async () => (await sql("select count(*)::int n from storage.objects where name like $1", [`company.documents/${D.id}/%`]))[0].n === 1), "file attached");
+  assert.match(D.data.doc_number, /^AGR-ENG-\d{4,}$/, "the register number is allocated on save");
+  await pn.setInputFiles("aside.drawer input[data-upload-version]", { name: "fat-checklist.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 synthetic v1") });
+  assert.ok(await waitFor(async () => (await sql("select count(*)::int n from document_versions where record_id = $1", [D.id]))[0].n === 1), "first version registered with its hash");
+  await pn.waitForSelector("aside.drawer .ver[data-version]");
   await pn.click("aside.drawer button:has-text('Send for approval')"); await pn.selectOption(".appr-form select", mia.id); await pn.click(".appr-form button:has-text('Send')");
   assert.ok(await waitFor(async () => (await sql("select status from approvals where record_id = $1", [D.id]))[0]?.status === "pending"), "approval requested");
   // 9–10. the manager reviews the document and asks for changes
   await pm.goto(`${APP}/company/documents?r=${D.id}`); await drawerOpen(pm);
-  await pm.waitForSelector("aside.drawer .att-row:has-text('fat-checklist.pdf')");
-  t0 = Date.now(); const [popup] = await Promise.all([pm.waitForEvent("response", (r: any) => r.url().includes("/object/sign/") || r.url().includes("/storage/v1/object/sign"), { timeout: 15000 }).catch(() => null), pm.click("aside.drawer .att-row:has-text('fat-checklist.pdf') button[title='Preview']")]); time("document_open", Date.now() - t0);
-  assert.ok(popup, "the preview link was issued"); await pm.click(".viewer .iconbtn");
+  await pm.waitForSelector("aside.drawer .ver:has-text('fat-checklist.pdf')");
+  t0 = Date.now(); const [popup] = await Promise.all([pm.waitForEvent("response", (r: any) => r.url().includes("/api/documents") && r.request().method() === "POST", { timeout: 15000 }).catch(() => null), pm.click("aside.drawer .ver:has-text('fat-checklist.pdf') .ver-act button:has-text('Open')")]); time("document_open", Date.now() - t0);
+  assert.equal(popup?.status(), 200, "the preview link was issued by the audited route");
+  assert.ok(await waitFor(async () => (await sql("select count(*)::int n from document_access_log where record_id = $1 and user_id = $2 and ok", [D.id, mia.id]))[0].n >= 1), "the opening is in the download audit");
+  for (const pg of pm.context().pages()) if (pg !== pm) await pg.close();
   await pm.fill(".appr textarea", "Add the wiring section"); await pm.click(".appr button:has-text('Request changes')");
   assert.ok(await waitFor(async () => (await sql("select status, decided_by from approvals where record_id = $1 order by created_at desc limit 1", [D.id]))[0]?.status === "changes_requested"));
-  assert.equal((await record(doc)).status, "Draft", "the document goes back to Draft");
+  assert.equal((await record(doc)).status, "Changes requested", "the document waits for a new version");
   assert.ok(await waitFor(async () => (await sql("select count(*)::int n from notifications where user_id = $1 and kind = 'approval_done' and record_id = $2", [nina.id, D.id]))[0].n === 1), "the employee is told");
   // 11. the employee uploads a new version (the first one stays) and sends it again
   await pn.goto(`${APP}/company/documents?r=${D.id}`); await drawerOpen(pn);
-  await pn.waitForSelector("aside.drawer button[aria-label='Upload a new version']");
-  const [fc] = await Promise.all([pn.waitForEvent("filechooser"), pn.click("aside.drawer button[aria-label='Upload a new version']")]);
-  await fc.setFiles({ name: "fat-checklist.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 synthetic v2 with wiring") });
-  assert.ok(await waitFor(async () => (await sql("select count(*)::int n from storage.objects where name like $1", [`company.documents/${D.id}/%`]))[0].n === 2), "both versions kept");
-  await pn.reload(); await drawerOpen(pn); await pn.waitForSelector("aside.drawer .att-vers");
-  await pn.fill("#f-version", "2"); await pn.selectOption("#f-status", "In review"); await save(pn);
-  assert.ok(await waitFor(async () => (await record(doc)).status === "In review"));
+  await pn.waitForSelector("aside.drawer input[data-upload-version]", { state: "attached" });
+  await pn.fill("aside.drawer input[aria-label='Change description']", "Wiring section added");
+  await pn.setInputFiles("aside.drawer input[data-upload-version]", { name: "fat-checklist.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 synthetic v2 with wiring") });
+  assert.ok(await waitFor(async () => (await sql("select count(*)::int n from document_versions where record_id = $1", [D.id]))[0].n === 2), "both versions kept");
+  assert.equal((await sql("select count(*)::int n from storage.objects where name like $1", [`company.documents/${D.id}/%`]))[0].n, 2);
+  assert.ok(await waitFor(async () => (await record(doc)).status === "Draft"), "a new version starts a new draft");
   await pn.goto(`${APP}/company/documents?r=${D.id}`); await drawerOpen(pn);
   await pn.click("aside.drawer button:has-text('Send for approval')"); await pn.selectOption(".appr-form select", mia.id); await pn.click(".appr-form button:has-text('Send')");
   assert.ok(await waitFor(async () => (await sql("select count(*)::int n from approvals where record_id = $1 and status = 'pending'", [D.id]))[0].n === 1));
@@ -126,6 +129,7 @@ test("the daily workflow from a new account to the management dashboard", { skip
   await pm.goto(`${APP}/decide`); await pm.waitForSelector(`.dc:has-text('${doc}')`, { timeout: 20000 }); await shot(pm, "approvals-desktop");
   await pm.click(`.dc:has-text('${doc}') button:has-text('Approve')`);
   assert.ok(await waitFor(async () => (await record(doc)).status === "Approved"), "document approved");
+  assert.equal((await record(doc)).data.approved_version, "0.2", "the approval is for the second version exactly");
   // 13. the employee completes the task
   await pn.goto(`${APP}/company/tasks?r=${T0.id}`); await drawerOpen(pn); await pn.selectOption("#f-status", "Completed"); await save(pn);
   assert.ok(await waitFor(async () => (await record(task)).status === "Completed"));

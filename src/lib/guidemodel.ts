@@ -33,7 +33,7 @@ const ROLE_ICONS = ["building", "d_sales", "d_ops", "d_fin", "d_tech", "d_mkt", 
 const RHYTHM_ICONS = ["refresh", "radar", "sun", "calendar", "pie", "bell"];
 const RULE_ICONS = ["pen", "mail", "lock", "stamp", "refresh", "globe"];
 const UI_BAR = ["search", "plus", "bell", "spark", "globe", "user"]; const UI_NAV = ["sun", "send", "layers", "file", "calendar", "spark"];
-const HB_ICONS: Record<string, string> = { dailywork: "sun", communications: "send", management: "target", reliability: "pulse", overview: "home", start: "rocket", records: "file", everyday: "sun", deals: "handshake", control: "target", projectmoney: "coins", portfolio: "layers", speed: "pulse",
+const HB_ICONS: Record<string, string> = { dailywork: "sun", communications: "send", documents: "file", management: "target", reliability: "pulse", overview: "home", start: "rocket", records: "file", everyday: "sun", deals: "handshake", control: "target", projectmoney: "coins", portfolio: "layers", speed: "pulse",
   languages: "globe", access: "key", approvals: "stamp", intake: "upload", ai: "spark", automation: "gear", agents: "radar", emails: "mail", reports: "pie", marketing: "megaphone", safety: "shield", owner: "building", phone: "bell", trouble: "lifebuoy" };
 
 export function guideBlocks(lang: string, src: GuideSources, T: GuideTextIn, md: (s: string) => string, img: (name: string) => string | null = () => null) {
@@ -95,7 +95,7 @@ export function guideBlocks(lang: string, src: GuideSources, T: GuideTextIn, md:
   if (screens) chapter(S.c_screens, screens, "", "image");
 
   // Part 4: the handbook
-  const groups: [string, string[]][] = [[S.g_found, ["dailywork", "communications", "records", "everyday", "languages", "access"]], [S.g_sales, ["deals", "control", "projectmoney", "portfolio", "speed"]],
+  const groups: [string, string[]][] = [[S.g_found, ["dailywork", "communications", "documents", "records", "everyday", "languages", "access"]], [S.g_sales, ["deals", "control", "projectmoney", "portfolio", "speed"]],
     [S.g_appr, ["approvals", "intake", "ai", "automation", "agents", "emails"]], [S.g_reports, ["management", "reports", "marketing"]], [S.g_sec, ["safety", "reliability", "owner", "phone", "trouble"]]];
   const used = new Set(["overview", "start", ...groups.flatMap(([, ids]) => ids)]);
   const extra = src.hb.map((h) => h.id).filter((id) => !used.has(id)); // new handbook chapters appear automatically
