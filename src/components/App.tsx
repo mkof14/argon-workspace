@@ -41,6 +41,9 @@ const OfflineBar = dynamic(() => import("./OfflineBar"), { ssr: false });
 const Guide = dynamic(() => import("./Guide"), { ssr: false });
 const Messages = dynamic(() => import("./Messages"), { ssr: false });
 const Documents = dynamic(() => import("./Documents"), { ssr: false });
+const InfoSettings = dynamic(() => import("./InfoSettings"), { ssr: false });
+const Knowledge = dynamic(() => import("./Knowledge"), { ssr: false });
+const DecisionLog = dynamic(() => import("./DecisionLog"), { ssr: false });
 const CalendarPage = dynamic(() => import("./CalendarPage"), { ssr: false });
 const Assistant = dynamic(() => import("./Assistant"), { ssr: false });
 const People = dynamic(() => import("./People"), { ssr: false });
@@ -48,7 +51,7 @@ const ProjectHome = dynamic(() => import("./ProjectHome"), { ssr: false });
 const Management = dynamic(() => import("./Management"), { ssr: false });
 const Notices = dynamic(() => import("./Notices"), { ssr: false });
 const QuickCreate = dynamic(() => import("./QuickCreate"), { ssr: false });
-export const VERSION = "2.36";
+export const VERSION = "2.37";
 /** Roles that see the management dashboard (also checked on the server for the export). */
 export const MANAGERS = ["owner", "admin", "management"];
 
@@ -207,7 +210,7 @@ export default function App({ slug }: { slug: string[] }) {
   const isOn = (r: string) => (r === "" ? !route || route === "today" : route === r || route.startsWith(r + "/"));
   const special: Record<string, [string, string]> = { trash: [t("workspace", lang), t("trash", lang)], today: [t("workspace", lang), tx({ en: "Today", ru: "Сегодня", uk: "Сьогодні", ar: "اليوم" }, lang)], stardome: [t("workspace", lang), t("sd_title", lang)], projects: [t("workspace", lang), tx({ en: "Projects", ru: "Проекты", uk: "Проєкти", ar: "المشاريع" }, lang)], decide: [t("workspace", lang), tx({ en: "Decisions", ru: "Решения", uk: "Рішення", ar: "القرارات" }, lang)], "admin/users": [t("admin", lang), t("users", lang)], "admin/roles": [t("admin", lang), t("roles", lang)], "admin/system": [t("admin", lang), t("sys_title", lang)], me: [t("workspace", lang), t("my_profile", lang)], learn: [t("workspace", lang), t("learn", lang)], guide: [t("workspace", lang), tx({ en: "User guide", ru: "Руководство", uk: "Посібник", ar: "دليل المستخدم" }, lang)], reports: [t("workspace", lang), t("reports", lang)], templates: [t("workspace", lang), t("templates", lang)], ask: [t("workspace", lang), t("ask_docs", lang)],
     messages: [t("workspace", lang), N.messages], documents: [t("workspace", lang), N.documents], calendar: [t("workspace", lang), N.calendar], assistant: [t("workspace", lang), N.assistant],
-    people: [N.company, N.people], management: [N.company, N.management], "company-overview": [N.company, t("overview", lang)], notifications: [t("workspace", lang), t("notifications", lang)] };
+    people: [N.company, N.people], management: [N.company, N.management], "company-overview": [N.company, t("overview", lang)], knowledge: [N.company, tx({ en: "Knowledge", ru: "Знания", uk: "Знання", ar: "المعرفة" }, lang)], decisions: [N.company, tx({ en: "Decision log", ru: "Журнал решений", uk: "Журнал рішень", ar: "سجل القرارات" }, lang)], notifications: [t("workspace", lang), t("notifications", lang)] };
   if (route.startsWith("projects/")) special[route] = [tx({ en: "Projects", ru: "Проекты", uk: "Проєкти", ar: "المشاريع" }, lang), tx({ en: "Project", ru: "Проект", uk: "Проєкт", ar: "مشروع" }, lang)];
   const hubD = hubDept ? DEPARTMENTS.find((d: any) => d.key === hubDept) : null;
   const crumbGroup = hubD ? tx(hubD.label, lang) : section ? tx(dept.label, lang) : special[route]?.[0] || t("workspace", lang);
@@ -226,18 +229,21 @@ export default function App({ slug }: { slug: string[] }) {
   else if (route === "messages") body = <Messages />;
   else if (route === "documents" && !ext) body = <Documents />;
   else if (route === "calendar" && !ext) body = <CalendarPage />;
+  else if (route === "knowledge" && !ext) body = <Knowledge />;
+  else if (route === "decisions" && !ext) body = <DecisionLog />;
   else if (route === "assistant" && !ext) body = <Assistant />;
   else if (route === "people" && !ext) body = <People />;
   else if (route === "notifications") body = <Notices />;
   else if (route === "management") body = MANAGERS.includes(me.role) ? <Management /> : <div className="card empty">{t("no_access", lang)}</div>;
   else if (route.startsWith("projects/") && slug.length === 2 && !ext) body = <ProjectHome id={slug[1]} />;
-  else if ((route === "admin/users" || route === "admin/roles" || route === "admin/system") && isAdmin) body = <>
+  else if ((route === "admin/users" || route === "admin/roles" || route === "admin/system" || route === "admin/info") && isAdmin) body = <>
       <nav className="dtabs" style={{ ["--dc" as any]: "#5B6CF0" }}>
         <Link href="/admin/users" className={route === "admin/users" ? "on" : ""}><Icon n="users" />{t("users", lang)}</Link>
         <Link href="/admin/roles" className={route === "admin/roles" ? "on" : ""}><Icon n="key" />{t("roles", lang)}</Link>
         <Link href="/admin/system" className={route === "admin/system" ? "on" : ""}><Icon n="pulse" />{t("sys_title", lang)}</Link>
+        <Link href="/admin/info" className={route === "admin/info" ? "on" : ""}><Icon n="building" />{tx({ en: "Departments & documents", ru: "Отделы и документы", uk: "Відділи та документи", ar: "الأقسام والمستندات" }, lang)}</Link>
       </nav>
-      {route === "admin/users" ? <Admin /> : route === "admin/system" ? <System /> : <Roles />}
+      {route === "admin/users" ? <Admin /> : route === "admin/system" ? <System /> : route === "admin/info" ? <InfoSettings /> : <Roles />}
     </>;
   else if (route.startsWith("admin/")) body = <div className="empty">{t("no_access", lang)}</div>;
   else if (route === "today") body = <Today />;
@@ -288,6 +294,8 @@ export default function App({ slug }: { slug: string[] }) {
               {access.read.has("company.tasks") && <Link href="/company/tasks" className={`nav-item top ${route === "company/tasks" ? "active" : ""}`} style={{ ["--dc" as any]: "#5B6CF0" }}><Icon n="bell" /><span>{N.tasks}</span></Link>}
               <Link href="/decide" className={`nav-item top ${route === "decide" ? "active" : ""}`} style={{ ["--dc" as any]: "#D9480F" }}><Icon n="check" /><span>{N.decide}</span></Link>
               <Link href="/people" className={`nav-item top ${route === "people" ? "active" : ""}`} style={{ ["--dc" as any]: "#0EA5E9" }}><Icon n="users" /><span>{N.people}</span></Link>
+              <Link href="/knowledge" className={`nav-item top ${route === "knowledge" ? "active" : ""}`} style={{ ["--dc" as any]: "#0E9F6E" }}><Icon n="book" /><span>{tx({ en: "Knowledge", ru: "Знания", uk: "Знання", ar: "المعرفة" }, lang)}</span></Link>
+              <Link href="/decisions" className={`nav-item top ${route === "decisions" ? "active" : ""}`} style={{ ["--dc" as any]: "#7C5CFF" }}><Icon n="stamp" /><span>{tx({ en: "Decision log", ru: "Журнал решений", uk: "Журнал рішень", ar: "سجل القرارات" }, lang)}</span></Link>
               {MANAGERS.includes(me.role) && <Link href="/management" className={`nav-item top ${route === "management" ? "active" : ""}`} style={{ ["--dc" as any]: "#E5484D" }}><Icon n="target" /><span>{N.management}</span></Link>}
               <Link href="/company-overview" className={`nav-item top ${route === "company-overview" ? "active" : ""}`} style={{ ["--dc" as any]: "#FF6A2B" }}><Icon n="stardome" /><span>{t("overview", lang)}</span></Link>
               <Link href="/stardome" className={`nav-item top ${route === "stardome" ? "active" : ""}`} style={{ ["--dc" as any]: "#FF6A2B" }}><Icon n="container" /><span>{t("sd_title", lang)}</span></Link>

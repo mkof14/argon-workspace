@@ -9,7 +9,7 @@ import Icon from "./Icon";
 import { MANAGERS, useApp } from "./App";
 import { tx, type Lang } from "@/lib/i18n";
 import { store, type Rec } from "@/lib/store";
-import { mdHtml } from "./PeopleFields";
+import { mdHtml, useDepartments } from "./PeopleFields";
 
 type T4 = { en: string; ru: string; uk: string; ar: string };
 const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk, ar });
@@ -69,4 +69,20 @@ export function AnnouncementPanel({ rec }: { rec: Rec }) {
   useEffect(() => { store.myAcks().then(setAcks).catch(() => {}); }, [rec.id]);
   return <div className="thread"><div className="eyebrow">{isLive(rec) ? T(L("Published — as the audience sees it", "Опубликовано — так видит аудитория", "Опубліковано — так бачить аудиторія", "منشور — كما يراه الجمهور")) : T(L("Not visible to the audience yet (draft, scheduled or expired)", "Аудитория пока не видит (черновик, запланировано или истекло)", "Аудиторія поки не бачить (чернетка, заплановано або минуло)", "غير مرئي للجمهور بعد (مسودة أو مجدول أو منتهٍ)"))}</div>
     <AnnouncementCard r={rec} acks={acks} onAck={() => store.myAcks().then(setAcks)} /></div>;
+}
+
+/** Who the announcement is for: departments and roles are picked from lists (stored by id / role key), so a
+ *  misspelt audience cannot happen; a project audience takes the project's id. */
+export function AudienceField({ data, setData, ro }: { data: Record<string, any>; setData: (fn: (d: Record<string, any>) => Record<string, any>) => void; ro: boolean }) {
+  const { lang } = useApp(); const T = (x: T4) => tx(x, lang as Lang); const depts = useDepartments();
+  const type = data.audience_type || "company"; const vals = String(data.audience || "").split(",").map((x) => x.trim()).filter(Boolean);
+  const set = (v: string[]) => setData((d) => ({ ...d, audience: v.join(",") }));
+  if (type === "company") return null;
+  const opts: { v: string; l: string }[] = type === "department" ? depts.filter((d) => d.active).map((d) => ({ v: d.id, l: d.label?.[lang] || d.label?.en || d.name }))
+    : type === "roles" ? ["management", "engineering", "operations", "finance", "sales", "marketing", "hr", "legal", "security"].map((r) => ({ v: r, l: r })) : [];
+  if (type === "project") return <div className="field wide"><label>{T(L("Project (id or exact name)", "Проект (id или точное название)", "Проєкт (id або точна назва)", "المشروع (المعرّف أو الاسم الدقيق)"))}</label><input className="input" value={data.audience || ""} readOnly={ro} onChange={(e) => setData((d) => ({ ...d, audience: e.target.value }))} /></div>;
+  const legacy = vals.filter((v) => !opts.some((o) => o.v === v));
+  return <div className="field wide"><label>{type === "department" ? T(L("Departments", "Отделы", "Відділи", "الأقسام")) : T(L("Roles", "Роли", "Ролі", "الأدوار"))}</label>
+    <div className="people-chips" data-audience={type}>{opts.map((o) => <label key={o.v} className="chk"><input type="checkbox" disabled={ro} checked={vals.includes(o.v)} onChange={(e) => set(e.target.checked ? [...vals, o.v] : vals.filter((x) => x !== o.v))} />{o.l}</label>)}
+      {legacy.map((v) => <span key={v} className="chip c-warn" title={T(L("Not in the department list — choose from the list", "Нет в списке отделов — выберите из списка", "Немає у списку відділів — виберіть зі списку", "ليس في قائمة الأقسام — اختر من القائمة"))}>{v}{!ro && <button type="button" className="iconbtn" aria-label="×" onClick={() => set(vals.filter((x) => x !== v))}>×</button>}</span>)}</div></div>;
 }

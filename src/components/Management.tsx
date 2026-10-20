@@ -11,7 +11,7 @@ import { DEMO, store, type Activity, type Rec } from "@/lib/store";
 import { ORG_DEPTS } from "@/config/workspace.config.mjs";
 import { useWork } from "./useWork";
 import { csv, daysTo, isOpenTask, MS_CLOSED, projectStats, todayIso, workload } from "@/lib/work";
-import { deptLabel, personName } from "./PeopleFields";
+import { deptLabel, personName, deptChoices, deptObjs, useDepartments } from "./PeopleFields";
 
 type T4 = { en: string; ru: string; uk: string; ar: string };
 const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk, ar });
@@ -22,6 +22,7 @@ const OTHER = L("Other", "Другое", "Інше", "أخرى");
 
 export default function Management() {
   const { lang, people, access, tick } = useApp(); const T = (x: T4) => tx(x, lang as Lang);
+  const depts = useDepartments();
   const w = useWork(["company.decisions"]); const today = todayIso();
   const [dept, setDept] = useState(""); const [proj, setProj] = useState(""); const [emp, setEmp] = useState(""); const [days, setDays] = useState(30);
   const [appr, setAppr] = useState<Appr[] | null>(null); const [hist, setHist] = useState<Activity[]>([]);
@@ -44,7 +45,7 @@ export default function Management() {
   const wl = workload(tasks, today);
   const byEmp = [...wl.entries()].map(([id, x]) => ({ id, p: people.find((q) => q.id === id), ...x })).sort((a, b) => b.overdue - a.overdue || b.open - a.open);
   const needHelp = byEmp.filter((x) => x.overdue >= 2 || x.open > 8);
-  const byDept = (ORG_DEPTS as any[]).map((d) => { const l = open.filter((t) => deptOf(t) === d.key); return { d, open: l.length, overdue: l.filter((t) => (daysTo(t.data?.due, today) ?? 1) < 0).length, review: l.filter((t) => t.status === "Review").length }; }).filter((x) => x.open);
+  const byDept = deptObjs(depts).map((d: any) => { const l = open.filter((t) => deptOf(t) === d.key); return { d, open: l.length, overdue: l.filter((t) => (daysTo(t.data?.due, today) ?? 1) < 0).length, review: l.filter((t) => t.status === "Review").length }; }).filter((x) => x.open);
   const apGroups = useMemo(() => { const m = new Map<string, Appr[]>(); for (const a of ap) { const k = T(CAT[a.section] || OTHER); m.set(k, [...(m.get(k) || []), a]); } return [...m.entries()]; }, [ap, lang]); // eslint-disable-line
   const who = (id?: string | null) => personName(people.find((p) => p.id === id)) || "—";
   const rec = (r: { id: string; section: string }) => `/${r.section.replace(".", "/")}?r=${r.id}`;
@@ -59,7 +60,7 @@ export default function Management() {
   if (w.loading) return <div className="card" style={{ padding: 24 }}>…</div>;
   return <div style={{ display: "grid", gap: 16, ["--dc" as any]: "#E5484D" }}>
     <section className="card"><div className="filters">
-      <select className="input" value={dept} onChange={(e) => setDept(e.target.value)} aria-label={T(L("Department", "Отдел", "Відділ", "القسم"))}><option value="">{T(L("All departments", "Все отделы", "Усі відділи", "كل الأقسام"))}</option>{(ORG_DEPTS as any[]).map((d) => <option key={d.key} value={d.key}>{tx(d.label, lang as Lang)}</option>)}</select>
+      <select className="input" value={dept} onChange={(e) => setDept(e.target.value)} aria-label={T(L("Department", "Отдел", "Відділ", "القسم"))}><option value="">{T(L("All departments", "Все отделы", "Усі відділи", "كل الأقسام"))}</option>{deptChoices(depts, lang as any).map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}</select>
       <select className="input" value={proj} onChange={(e) => setProj(e.target.value)} aria-label={T(L("Project", "Проект", "Проєкт", "المشروع"))}><option value="">{T(L("All projects", "Все проекты", "Усі проєкти", "كل المشاريع"))}</option>{w.projects.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}</select>
       <select className="input" value={emp} onChange={(e) => setEmp(e.target.value)} aria-label={T(L("Employee", "Сотрудник", "Співробітник", "الموظف"))}><option value="">{T(L("Everyone", "Все сотрудники", "Усі співробітники", "الجميع"))}</option>{people.filter((p) => !["partner", "vendor", "investor", "pending"].includes(p.role)).map((p) => <option key={p.id} value={p.id}>{personName(p)}</option>)}</select>
       <select className="input" value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label={T(L("Period", "Период", "Період", "الفترة"))}>{[7, 30, 90].map((d) => <option key={d} value={d}>{T(L(`${d} days`, `${d} дней`, `${d} днів`, `${d} يوماً`))}</option>)}</select>

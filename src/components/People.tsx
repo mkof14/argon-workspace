@@ -9,7 +9,7 @@ import { tx, type Lang } from "@/lib/i18n";
 import { ORG_DEPTS, ROLES, ROLE_COLORS } from "@/config/workspace.config.mjs";
 import { useWork } from "./useWork";
 import { workload } from "@/lib/work";
-import { deptLabel, personName } from "./PeopleFields";
+import { deptLabel, personName, deptChoices, deptObjs, useDepartments } from "./PeopleFields";
 import { isExternal, type Profile } from "@/lib/store";
 
 type T4 = { en: string; ru: string; uk: string; ar: string };
@@ -17,6 +17,7 @@ const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk,
 
 export default function People() {
   const { lang, people, me, access } = useApp(); const T = (x: T4) => tx(x, lang as Lang);
+  const depts = useDepartments();
   const w = useWork(); const load = useMemo(() => workload(w.tasks), [w.tasks]);
   const [q, setQ] = useState(() => (typeof window !== "undefined" ? new URLSearchParams(location.search).get("q") || "" : "")); const [dept, setDept] = useState(""); const [inactive, setInactive] = useState(false); const [open, setOpen] = useState<string | null>(null);
   const isAdmin = ["owner", "admin"].includes(me.role);
@@ -24,7 +25,7 @@ export default function People() {
   const shown = staff.filter((p) => (inactive || !p.disabled) && (!dept || (dept === "-" ? !p.department : p.department === dept)) && (!q || `${p.full_name} ${p.email} ${p.title || ""} ${deptLabel(p.department, lang as Lang)}`.toLowerCase().includes(q.toLowerCase())))
     .sort((a, b) => (a.disabled ? 1 : 0) - (b.disabled ? 1 : 0) || personName(a).localeCompare(personName(b)));
   const projectsOf = (p: Profile) => w.projects.filter((x) => x.data?.manager_id === p.id || (Array.isArray(x.data?.members_ids) && x.data.members_ids.includes(p.id)));
-  const byDept = (ORG_DEPTS as any[]).map((d) => ({ d, n: staff.filter((p) => !p.disabled && p.department === d.key).length })).filter((x) => x.n);
+  const byDept = deptObjs(depts).map((d: any) => ({ d, n: staff.filter((p) => !p.disabled && p.department === d.key).length })).filter((x) => x.n);
   return <div style={{ display: "grid", gap: 16, ["--dc" as any]: "#0EA5E9" }}>
     <section className="sec-hero"><span className="ic"><Icon n="users" /></span>
       <div style={{ minWidth: 0, position: "relative", zIndex: 1 }}><div className="eyebrow">{T(L("Company", "Компания", "Компанія", "الشركة"))}</div><h2>{T(L("People", "Сотрудники", "Співробітники", "الموظفون"))}</h2>
@@ -33,7 +34,7 @@ export default function People() {
     <section className="card">
       <div className="filters">
         <div className="search"><Icon n="search" /><input className="input" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={T(L("Name, position, department", "Имя, должность, отдел", "Ім'я, посада, відділ", "الاسم أو المنصب أو القسم"))} aria-label={T(L("Search people", "Поиск сотрудников", "Пошук співробітників", "ابحث عن موظفين"))} /></div>
-        <select className="input" value={dept} onChange={(e) => setDept(e.target.value)} aria-label={T(L("Department", "Отдел", "Відділ", "القسم"))}><option value="">{T(L("All departments", "Все отделы", "Усі відділи", "كل الأقسام"))}</option><option value="-">{T(L("No department yet", "Отдел не указан", "Відділ не вказано", "بلا قسم بعد"))}</option>{(ORG_DEPTS as any[]).map((d) => <option key={d.key} value={d.key}>{tx(d.label, lang as Lang)}</option>)}</select>
+        <select className="input" value={dept} onChange={(e) => setDept(e.target.value)} aria-label={T(L("Department", "Отдел", "Відділ", "القسم"))}><option value="">{T(L("All departments", "Все отделы", "Усі відділи", "كل الأقسام"))}</option><option value="-">{T(L("No department yet", "Отдел не указан", "Відділ не вказано", "بلا قسم بعد"))}</option>{deptChoices(depts, lang as Lang).map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}</select>
         <label className="check" style={{ fontSize: 13.5 }}><input type="checkbox" checked={inactive} onChange={(e) => setInactive(e.target.checked)} />{T(L("Show inactive", "Показать неактивных", "Показати неактивних", "إظهار غير النشطين"))}</label>
       </div>
       <div className="people-grid">{shown.map((p) => { const c = (ROLE_COLORS as any)[p.role]; const wl = load.get(p.id); const pr = projectsOf(p); const mgr = people.find((x) => x.id === p.manager_id); const on = open === p.id;

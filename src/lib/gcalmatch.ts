@@ -28,7 +28,9 @@ export function toEvent(r: R, site: string) {
   const tz = validZone(r.data.timezone) ? String(r.data.timezone) : "UTC";
   const dur = Math.max(5, Math.min(24 * 60, Number(r.data.duration) || 60));
   const hhmm = timed ? time.padStart(5, "0") : "";
-  return { summary: r.title, description: lines.join("\n"), ...(r.data.place || r.data.meet_url ? { location: String(r.data.place || r.data.meet_url) } : {}),
+  const rr = String(r.data.recurrence || "none"); const until = /^\d{4}-\d{2}-\d{2}/.test(String(r.data.recurrence_until || "")) ? String(r.data.recurrence_until).slice(0, 10).replace(/-/g, "") + "T235959Z" : "";
+  const recurrence = rr === "weekly" || rr === "biweekly" || rr === "monthly" ? [`RRULE:FREQ=${rr === "monthly" ? "MONTHLY" : "WEEKLY"}${rr === "biweekly" ? ";INTERVAL=2" : ""}${until ? `;UNTIL=${until}` : ""}`] : undefined;
+  return { summary: r.title, description: lines.join("\n"), ...(recurrence ? { recurrence } : {}), ...(r.data.place || r.data.meet_url ? { location: String(r.data.place || r.data.meet_url) } : {}),
     start: timed ? { dateTime: `${d}T${hhmm}:00`, timeZone: tz } : { date: d }, end: timed ? { dateTime: addMinutes(d, hhmm, dur), timeZone: tz } : { date: next.toISOString().slice(0, 10) },
     source: { title: "AGRON Workspace", url } };
 }

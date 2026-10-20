@@ -1431,3 +1431,47 @@ tr.grp td b{margin-inline-end:6px}
 .ai-sources{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12.5px;margin-top:6px}
 .ai-sources a{padding:2px 8px;border:1px solid var(--line);border-radius:999px;color:var(--ink-2);text-decoration:none;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ai-sources a.susp{border-color:color-mix(in srgb,var(--warn) 60%,var(--line))}
+
+/* ---------- Phase 4: documents, versions, knowledge, calendar, decisions ---------- */
+.doc-views{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none}
+.doc-filters{flex-wrap:wrap}
+.doc-filters .input{width:auto;min-width:0}
+.doc-list{display:grid}
+.doc-item{display:grid;grid-template-columns:130px minmax(0,1fr) auto;gap:12px;align-items:center;padding:10px 14px;border-top:1px solid var(--line-2);color:inherit;text-decoration:none}
+.doc-item:hover{background:var(--surface-2)}
+.doc-num{font-size:12.5px;color:var(--ink-3)}
+.doc-main{display:grid;min-width:0}.doc-main b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.doc-main small{color:var(--ink-3)}
+.doc-meta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.doc-group{border-top:1px solid var(--line-2)}.doc-group summary{padding:10px 14px;cursor:pointer;display:flex;gap:8px;align-items:center}
+.doc-table td{vertical-align:top}
+.doc-panel .ver-list{display:grid;gap:8px}
+.ver{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:8px;align-items:start;border:1px solid var(--line-2);border-radius:10px;padding:8px 10px;background:var(--surface-2)}
+.ver.current{border-color:color-mix(in srgb,var(--info) 45%,var(--line))}
+.ver-main{display:grid;gap:4px;min-width:0}.ver-main span{overflow-wrap:anywhere}
+.ver-tags{display:flex;gap:4px;flex-wrap:wrap}.ver-tags .chip{font-size:11.5px;padding:1px 7px}
+.ver-hash{font-size:11px}
+.ver-act{display:flex;gap:2px}
+.ver-cmp tr.diff td{background:color-mix(in srgb,var(--warn) 12%,transparent)}
+.ver-upload,.ver-review{display:grid;gap:6px;border-top:1px solid var(--line-2);padding-top:8px}
+.doc-log summary{cursor:pointer;font-size:13px;color:var(--ink-2)}.doc-log tr.denied td{color:var(--bad)}
+.appr-chain{margin:4px 0;padding-inline-start:18px;display:grid;gap:3px;font-size:13px}.appr-chain li.approved{color:var(--ok)}.appr-chain li.queued{color:var(--ink-3)}
+.week-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;padding:8px}
+.week-day{border:1px solid var(--line-2);border-radius:10px;padding:6px;min-height:120px;display:grid;align-content:start;gap:4px}
+.week-day.today{border-color:var(--accent)}.wd-h{font-size:12.5px;color:var(--ink-2)}
+.week-day .hub-row{padding:4px 6px}.week-day .hub-row small{display:none}
+.cal-legend{display:flex;flex-wrap:wrap;gap:10px;padding:0 14px 8px;font-size:12.5px}
+.dot-review,.dot-expiry,.dot-approval{display:inline-block;width:8px;height:8px;border-radius:50%}
+.dot-review{background:var(--vio)}.dot-expiry{background:var(--bad)}.dot-approval{background:var(--warn)}
+.kb-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;padding:12px}
+.kb-item{display:grid;gap:4px;text-align:start;border:1px solid var(--line-2);border-radius:12px;padding:12px;background:var(--surface-2);cursor:pointer;color:inherit;font:inherit}
+.kb-item:hover{border-color:var(--line)}.kb-item small{color:var(--ink-3)}.kb-item span{font-size:13px}
+.kb-article .md{max-width:760px}.kb-summary{font-size:15px;color:var(--ink-2);margin:0}
+.minutes-view{border:1px dashed var(--line);border-radius:10px;padding:10px 14px;max-height:420px;overflow:auto;background:var(--surface)}
+.minutes-view[data-minutes-state="approved"]{border-style:solid;border-color:color-mix(in srgb,var(--ok) 40%,var(--line))}
+.decision-log td{vertical-align:top}
+@media (max-width:640px){
+  .doc-item{grid-template-columns:1fr}.doc-meta{justify-content:flex-start}
+  .week-grid{grid-template-columns:1fr}.week-day{min-height:0}
+  .doc-table .col-dept,.doc-table .col-upd{display:none}
+  .ver{grid-template-columns:22px minmax(0,1fr)}.ver-act{grid-column:2}
+}

@@ -1,5 +1,5 @@
 "use client";
-import { allSections, defaultRules, ROLES } from "@/config/workspace.config.mjs";
+import { allSections, defaultRules, ROLES, ORG_DEPTS } from "@/config/workspace.config.mjs";
 import type * as DemoMod from "./demo";
 import { l2, loadLearnLang } from "@/config/l2";
 // The starter FAQ (part of the Learning Center texts) is loaded only when the FAQ is opened
@@ -40,6 +40,13 @@ export type Comment = { id: string; record_id: string; author: string | null; bo
   mention_names?: { id: string; name: string }[]; flag?: "important" | "decision" | "announcement" | null; flagged_by?: string | null; pinned_at?: string | null;
   file_path?: string | null; version_label?: string | null; refs?: string[]; files?: { path: string; name?: string; size?: number; type?: string }[] };
 export type CommentDraft = { parent_id?: string | null; kind?: "message" | "review"; internal?: boolean; file_path?: string | null; version_label?: string | null; refs?: string[]; files?: { path: string; name?: string; size?: number; type?: string }[] };
+const ORG_DEPTS_FALLBACK = (): Department[] => (ORG_DEPTS as any[]).map((d) => ({ id: d.key, code: d.key.slice(0, 3).toUpperCase(), key: d.key, name: d.label.en, label: d.label, manager_id: null, active: true, description: null }));
+export type DocRow = { id: string; doc_number?: string; title: string; doc_type?: string; project_ref?: string; project?: string; department?: string; owner_id?: string; owner?: string; version?: string; approved_version?: string; status?: string; classification?: string; controlled?: boolean; updated_at: string; approval: string };
+export type DocVersion = { id: string; record_id: string; label: string; major: number; minor: number; path: string; file_name: string; size: number; mime?: string; sha256: string; author?: string; created_at: string; change_note?: string; review_state: string; approval_state: string; approved_by?: string; approved_at?: string; effective_date?: string; superseded_at?: string; verified_at?: string; verified_ok?: boolean };
+export type CorpHit = { kind: string; id: string; record_id: string | null; section: string | null; title: string; excerpt: string; project_ref: string | null; version: string | null; owner_id: string | null; updated_at: string | null; link: string; rank: number };
+export type CalItem = { kind: string; record_id: string; title: string; day: string; at_time: string | null; tz: string | null; status: string | null; project_ref: string | null; link: string; meta: any };
+export type Department = { id: string; code: string; key: string; name: string; label: Record<string, string>; manager_id: string | null; active: boolean; description: string | null };
+export type Taxon = { kind: string; code: string; label: Record<string, string>; sort: number; active: boolean; meta: Record<string, any> };
 export type MessageHit = { id: string; record_id: string; section: string; title: string; project_ref: string | null; author: string | null; created_at: string; excerpt: string; flag: string | null; kind: string };
 export type Activity = { id: number; record_id: string | null; section: string; actor: string | null; action: string; detail: any; created_at: string };
 export type Access = { read: Set<string>; write: Set<string> };
@@ -420,6 +427,70 @@ export const store = {
   async readAt(recordId: string): Promise<string | null> {
     if (DEMO || isTemp(recordId)) return null;
     const { data } = await sb().from("record_reads").select("read_at").eq("record_id", recordId).maybeSingle(); return (data as any)?.read_at || null;
+  },
+  /* ----- Phase 4: documents, versions, knowledge, departments, calendar, decisions ----- */
+  async documentCenter(f: { view?: string; q?: string; project?: string; department?: string; owner?: string; type?: string; status?: string; approval?: string; classification?: string; from?: string; to?: string; version?: string; sort?: string; limit?: number; offset?: number } = {}): Promise<{ total: number; rows: DocRow[] }> {
+    if (DEMO) { const db = demoLoad(); const rows = db.records.filter((r) => r.section === "company.documents" && demoVisible(db, r) && (!f.q || r.title.toLowerCase().includes(f.q.toLowerCase()))).map((r) => ({ id: r.id, doc_number: r.data?.doc_number, title: r.title, doc_type: r.data?.doc_type, project_ref: r.data?.project_ref, project: r.data?.project_ref_title, department: r.data?.department, owner_id: r.data?.owner_id, owner: r.data?.owner, version: r.data?.version, approved_version: r.data?.approved_version, status: r.status, classification: r.data?.classification || "Internal", controlled: r.controlled, updated_at: r.updated_at, approval: "none" } as DocRow)); return { total: rows.length, rows }; }
+    const { data, error } = await sb().rpc("document_center", { p_view: f.view || "all", p_q: f.q || null, p_project: f.project || null, p_department: f.department || null, p_owner: f.owner || null, p_type: f.type || null, p_status: f.status || null,
+      p_approval: f.approval || null, p_classification: f.classification || null, p_from: f.from || null, p_to: f.to || null, p_version: f.version || null, p_sort: f.sort || "updated", p_limit: f.limit || 50, p_offset: f.offset || 0 });
+    if (error) throw error; return (data || { total: 0, rows: [] }) as any;
+  },
+  async versions(recordId: string): Promise<DocVersion[]> {
+    if (DEMO || isTemp(recordId)) return [];
+    const { data } = await sb().from("document_versions").select("*").eq("record_id", recordId).order("major", { ascending: false }).order("minor", { ascending: false }); return (data || []) as DocVersion[];
+  },
+  /** Upload a file as the next version (the server stores it, hashes it and registers it). */
+  async uploadVersion(recordId: string, file: File, o: { label?: string; major?: boolean; note?: string } = {}): Promise<DocVersion> {
+    const fd = new FormData(); fd.set("record_id", recordId); fd.set("file", file); if (o.label) fd.set("label", o.label); if (o.major) fd.set("major", "true"); if (o.note) fd.set("note", o.note);
+    const r = await fetch("/api/documents", { method: "POST", body: fd }); if (!r.ok) throw new Error(await r.text()); return (await r.json()).version;
+  },
+  /** A 2-minute link to a version (access checked and logged on the server). */
+  async openVersion(a: { version_id?: string; path?: string }, mode: "download" | "preview" = "download"): Promise<{ url: string; name: string }> {
+    const r = await fetch("/api/documents", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "open", mode, ...a }) }); if (!r.ok) throw new Error(await r.text()); return r.json();
+  },
+  async verifyVersion(versionId: string): Promise<{ ok: boolean; expected: string; found: string; label: string }> {
+    const r = await fetch("/api/documents", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "verify", version_id: versionId }) }); if (!r.ok) throw new Error(await r.text()); return r.json();
+  },
+  async reviewDocument(recordId: string, decision: "reviewed" | "changes_requested", note?: string) {
+    const { error } = await sb().rpc("document_review", { p_record: recordId, p_decision: decision, p_note: note || null }); if (error) throw error;
+  },
+  async docAccessLog(recordId: string): Promise<any[]> {
+    if (DEMO) return [];
+    const { data } = await sb().from("document_access_log").select("*").eq("record_id", recordId).order("at", { ascending: false }).limit(100); return data || [];
+  },
+  async corpSearch(q: string, f: { types?: string[]; project?: string; department?: string; person?: string; doc_type?: string; from?: string; to?: string; classification?: string; status?: string } = {}, n = 40): Promise<CorpHit[]> {
+    if (DEMO) { const db = demoLoad(); const s = q.toLowerCase(); return db.records.filter((r) => demoVisible(db, r) && r.title.toLowerCase().includes(s)).slice(0, n).map((r) => ({ kind: r.section === "company.documents" ? "document" : r.section === "company.wiki" ? "knowledge" : "record", id: r.id, record_id: r.id, section: r.section, title: r.title, excerpt: String(r.data?.description || r.data?.summary || ""), project_ref: r.data?.project_ref || null, version: r.data?.version || null, owner_id: r.data?.owner_id || null, updated_at: r.updated_at, link: r.section === "company.documents" ? `/documents?d=${r.id}` : `/${r.section.replace(".", "/")}?r=${r.id}`, rank: 1 })); }
+    const { data, error } = await sb().rpc("corp_search", { p_q: q, p_types: f.types?.length ? f.types : null, p_project: f.project || null, p_department: f.department || null, p_person: f.person || null, p_doc_type: f.doc_type || null,
+      p_from: f.from || null, p_to: f.to || null, p_classification: f.classification || null, p_status: f.status || null, p_limit: n });
+    if (error) throw error; return (data || []) as CorpHit[];
+  },
+  async calendarItems(from: string, to: string, scope: "mine" | "all" = "mine"): Promise<CalItem[]> {
+    if (DEMO) return [];
+    const { data, error } = await sb().rpc("calendar_items", { p_from: from, p_to: to, p_scope: scope }); if (error) throw error; return (data || []) as CalItem[];
+  },
+  async decisionLog(f: { q?: string; project?: string; status?: string } = {}): Promise<any[]> {
+    if (DEMO) return demoLoad().records.filter((r) => r.section === "company.decisions").map((r) => ({ id: r.id, title: r.title, decision: r.data?.decision, date: r.data?.date, status: r.status, number: r.data?.doc_number }));
+    const { data, error } = await sb().rpc("decision_log", { p_q: f.q || null, p_project: f.project || null, p_status: f.status || null, p_limit: 300 }); if (error) throw error; return (data || []) as any[];
+  },
+  async approveMinutes(meetingId: string) { const { error } = await sb().rpc("meeting_minutes_approve", { p_meeting: meetingId }); if (error) throw error; },
+  async departments(): Promise<Department[]> {
+    if (DEMO) return ORG_DEPTS_FALLBACK();
+    const { data } = await sb().from("departments").select("*").order("name"); return (data || []) as Department[];
+  },
+  async saveDepartment(d: Partial<Department>) {
+    const row = { name: d.name, code: d.code, label: d.label || {}, manager_id: d.manager_id || null, active: d.active ?? true, description: d.description || null };
+    const q = d.id ? sb().from("departments").update(row).eq("id", d.id) : sb().from("departments").insert(row);
+    const { error } = await q; if (error) throw error;
+  },
+  async taxonomy(kind?: string): Promise<Taxon[]> {
+    if (DEMO) return [];
+    let q = sb().from("taxonomy").select("*").order("sort"); if (kind) q = q.eq("kind", kind); const { data } = await q; return (data || []) as Taxon[];
+  },
+  async saveTaxon(t: Taxon) { const { error } = await sb().from("taxonomy").upsert({ kind: t.kind, code: t.code, label: t.label, sort: t.sort, active: t.active, meta: t.meta, updated_at: new Date().toISOString() }); if (error) throw error; },
+  async numberFormats(): Promise<any[]> { if (DEMO) return []; const { data } = await sb().from("doc_number_formats").select("*").order("scope"); return data || []; },
+  async saveNumberFormat(f: any) {
+    const row = { scope: f.scope || "document", doc_type: f.doc_type || null, department_key: f.department_key || null, project_id: f.project_id || null, company: f.company || "AGR", pattern: f.pattern, active: f.active ?? true, updated_at: new Date().toISOString() };
+    const { error } = f.id ? await sb().from("doc_number_formats").update(row).eq("id", f.id) : await sb().from("doc_number_formats").insert(row); if (error) throw error;
   },
   /** Recent discussions I can see (comments on records I may read), newest first. */
   async discussions(n = 400): Promise<(Comment & { section?: string; title?: string; internal?: boolean; mentions?: string[] })[]> {

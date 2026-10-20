@@ -159,7 +159,7 @@ export async function POST(req: Request) {
     if (r.section === "company.documents") {
       const plan = await docPlan(db, r);
       const steps = await Promise.all(plan.steps.map(async (st, i) => ({ step: i + 1, label: st.label || null, people: (await approversFor(db, r, me.id, st.roles)).map((p: any) => ({ id: p.id, name: p.full_name || p.email, role: p.role })) })));
-      return Response.json(Object.assign(steps[0].people, { mode: plan.mode, steps }));
+      return Response.json({ mode: plan.mode, steps });
     }
     return Response.json((await approversFor(db, r, me.id)).map((p: any) => ({ id: p.id, name: p.full_name || p.email, role: p.role })));
   }

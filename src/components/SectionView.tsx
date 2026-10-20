@@ -1,5 +1,6 @@
 "use client";
 import Announcements from "./Announcements";
+import DecisionLog from "./DecisionLog";
 import { useEffect, useMemo, useState } from "react";
 // Loaded when needed: the record form (with PDF, markdown and AI tools) and the template list are not part of the first page load
 const RecordDrawer = dynamic(() => import("./RecordDrawer"), { ssr: false });
@@ -160,6 +161,8 @@ export default function SectionView({ section }: { section: any }) {
 
       {section.view === "desks" && <LegalHub />}
       {section.view === "announcements" && <Announcements />}
+      {section.view === "decisions" && <DecisionLog />}
+      {section.view === "knowledge" && <div className="toolbar"><Link className="btn sm" href="/knowledge"><Icon n="book" />{tx({ en: "Open the Knowledge center (published articles, search)", ru: "Открыть «Знания» (опубликованные статьи, поиск)", uk: "Відкрити «Знання» (опубліковані статті, пошук)", ar: "افتح مركز المعرفة (المقالات المنشورة والبحث)" }, lang)}</Link></div>}
       {section.id === "marketing.brand" && <BrandLogos />}
       {section.id === "marketing.channels" && <ChannelsBoard />}
       {section.id === "technical.systems" && <SystemsBoard />}

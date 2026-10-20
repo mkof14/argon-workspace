@@ -68,7 +68,8 @@ export default function Discussion({ rec, project, versions, linkables, title, o
   };
   const act = async (f: () => Promise<any>, ok?: string) => { try { await f(); if (ok) toast(ok); await load(); } catch (e: any) { toast(e.message || "Error", true); } };
   const attach = async (fl: FileList | null) => { if (!fl?.length) return; try { const up: FileItem[] = []; for (const f of Array.from(fl).slice(0, 5)) up.push(await store.upload(`${rec.section}/${rec.id}`, f)); setFiles([...files, ...up]); } catch (e: any) { toast(e.message || "Error", true); } };
-  const openFile = async (path: string, name?: string) => { try { window.open(await store.fileUrl(path, 600, name), "_blank", "noopener"); } catch (e: any) { toast(e.message || "Error", true); } };
+  const openFile = async (path: string, name?: string) => { try { window.open(rec.section === "company.documents" ? (await store.openVersion({ path }, "preview")).url : await store.fileUrl(path, 600, name), "_blank", "noopener"); } catch (e: any) { toast(e.message || "Error", true); } };
+  const sealed = rec.section === "company.documents" && (rec.controlled || rec.data?.classification === "Restricted"); // files of these go through versions only
   const copy = async (c: Comment) => { try { await navigator.clipboard.writeText(location.origin + messageLink(rec, c.id)); toast(T(L("Link copied", "Ссылка скопирована", "Посилання скопійовано", "نُسخ الرابط"))); } catch { toast(location.origin + messageLink(rec, c.id)); } };
   const refRec = (id: string) => linkables?.find((r) => r.id === id);
 
@@ -131,7 +132,7 @@ export default function Discussion({ rec, project, versions, linkables, title, o
         <button className="btn primary" onClick={send} disabled={busy || !text.trim()}>{editing ? T(L("Save", "Сохранить", "Зберегти", "حفظ")) : T(L("Send", "Отправить", "Надіслати", "إرسال"))}</button>
       </div>
       {!editing && <div className="composer-opts">
-        <button type="button" className="btn ghost xs" onClick={() => fileIn.current?.click()}><Icon n="clip" />{T(L("Attach", "Файл", "Файл", "إرفاق"))}</button>
+        {!sealed && <button type="button" className="btn ghost xs" onClick={() => fileIn.current?.click()}><Icon n="clip" />{T(L("Attach", "Файл", "Файл", "إرفاق"))}</button>}
         <input ref={fileIn} type="file" multiple hidden onChange={(e) => { attach(e.target.files); e.target.value = ""; }} aria-label={T(L("Attach a file", "Прикрепить файл", "Прикріпити файл", "إرفاق ملف"))} />
         {files.map((f) => <span key={f.path} className="chip"><Icon n="clip" />{f.name}<button type="button" className="iconbtn" aria-label="×" onClick={() => setFiles(files.filter((x) => x.path !== f.path))}><Icon n="x" /></button></span>)}
         {linkables && linkables.length > 0 && <select className="input xs" value="" aria-label={T(L("Link a task, document or milestone", "Связать задачу, документ или веху", "Пов'язати задачу, документ або віху", "اربط مهمة أو مستنداً أو مرحلة"))} onChange={(e) => { if (e.target.value && !refs.includes(e.target.value)) setRefs([...refs, e.target.value]); }}>
@@ -148,7 +149,8 @@ export default function Discussion({ rec, project, versions, linkables, title, o
 }
 
 /** V1, V2 … by upload order (oldest first), as on the document's file list. */
-export function versionName(v: FileItem, all: FileItem[]) {
+export function versionName(v: FileItem & { label?: string }, all: FileItem[]) {
+  if (v.label) return `V${v.label}`;
   const same = all.filter((f) => f.name === v.name).sort((a, b) => String(a.created_at || a.path).localeCompare(String(b.created_at || b.path)));
   const i = same.findIndex((f) => f.path === v.path); return `V${(i < 0 ? 0 : i) + 1}${all.some((f) => f.name !== v.name) ? ` ${v.name}` : ""}`;
 }

@@ -60,7 +60,7 @@ test("task, project, milestone and document sections are configured with the Pha
   assert.equal(sec("company.projects").fields.find((f: any) => f.key === "members")?.type, "people");
   assert.equal(sec("company.milestones").fields.find((f: any) => f.key === "project_ref")?.ref, "company.projects");
   assert.ok(sec("company.documents").fields.find((f: any) => f.key === "doc_type").options.includes("NDA"));
-  assert.ok(APPROVALS["company.documents"].changes === "Draft");
+  assert.ok(APPROVALS["company.documents"].changes === "Changes requested", "Phase 4: changes requested is its own state");
   assert.equal(new Set(ORG_DEPTS.map((d: any) => d.key)).size, ORG_DEPTS.length);
   for (const d of ORG_DEPTS as any[]) for (const l of ["en", "ru", "uk", "ar"]) assert.ok(d.label[l], `${d.key} ${l}`);
   assert.ok(DEPARTMENTS.length > 5);

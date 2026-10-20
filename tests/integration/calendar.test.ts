@@ -62,6 +62,20 @@ test("a deleted meeting leaves the calendar; an all-day meeting without time sta
   assert.equal(count, 0);
 });
 
+test("a repeating meeting is one Google event with a repeat rule; changing it never adds a second one", async () => {
+  const { data: m } = await db.from("records").insert({ section: "company.meetings", title: `Weekly sync ${run}`, status: "Scheduled",
+    data: { date: "2026-11-02", time: "08:00", timezone: "Asia/Dubai", organizer_id: u.id, recurrence: "biweekly", recurrence_until: "2026-12-31" } }).select("*").single();
+  await syncUser(db, u.id); const evs = [...G.events.values()].filter((e) => e.summary === `Weekly sync ${run}`);
+  assert.equal(evs.length, 1); assert.deepEqual(evs[0].recurrence, ["RRULE:FREQ=WEEKLY;INTERVAL=2;UNTIL=20261231T235959Z"]); assert.equal(evs[0].start.timeZone, "Asia/Dubai");
+  await db.from("records").update({ data: { ...m.data, recurrence: "monthly", time: "09:00" } }).eq("id", m.id);
+  await syncUser(db, u.id); const after = [...G.events.values()].filter((e) => e.summary === `Weekly sync ${run}`);
+  assert.equal(after.length, 1, "no duplicate after the change"); assert.deepEqual(after[0].recurrence, ["RRULE:FREQ=MONTHLY;UNTIL=20261231T235959Z"]); assert.equal(after[0].start.dateTime, "2026-11-02T09:00:00");
+  // the Workspace calendar shows the repeats too
+  const { c } = await (await import("./_stack.ts")).signIn(u.email);
+  const items = (await c.rpc("calendar_items", { p_from: "2026-11-01", p_to: "2026-12-31", p_scope: "mine" })).data.filter((x: any) => x.record_id === m.id);
+  assert.deepEqual(items.map((x: any) => x.day), ["2026-11-02", "2026-12-02"], "monthly repeats until the end date");
+});
+
 test("revoked Google access: the sync stops with a visible error, nothing is changed", async () => {
   G.revoked = true; const before = G.calls.length;
   const r = await syncUser(db, u.id); assert.equal(r.ok, false); assert.match(String(r.reason), /revoked/);

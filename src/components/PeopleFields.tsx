@@ -2,21 +2,33 @@
 // Fields that point at people and departments, formatted text, and comments with @mentions.
 // People are stored by account: <key>_id (one person) or <key>_ids (several); the name is kept next to it so the
 // record still reads correctly after someone leaves (historical attribution).
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import Icon from "./Icon";
 import { useApp } from "./App";
 import { tx, type Lang } from "@/lib/i18n";
 import { ORG_DEPTS } from "@/config/workspace.config.mjs";
-import type { Profile } from "@/lib/store";
+import { store, type Department, type Profile } from "@/lib/store";
 
 type T4 = { en: string; ru: string; uk: string; ar: string };
 const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk, ar });
 const EXTERNAL = ["partner", "vendor", "investor", "pending"];
 export const isEmployee = (p: Profile) => !EXTERNAL.includes(p.role) && !p.disabled;
 export const personName = (p?: Profile | null) => (p ? p.full_name || p.email : "");
-export const deptLabel = (k: string | null | undefined, lang: Lang) => { const d = (ORG_DEPTS as any[]).find((x) => x.key === k); return d ? tx(d.label, lang) : k || ""; };
+/* Departments come from the company directory (Administration → Departments); the built-in list is the fallback. */
+let DEPTS: Department[] | null = null; let loading: Promise<Department[]> | null = null; const subs = new Set<(d: Department[]) => void>();
+export const loadDepartments = (fresh = false) => { if (!loading || fresh) loading = store.departments().then((d) => { DEPTS = d.length ? d : null; subs.forEach((f) => f(d)); return d; }).catch(() => []); return loading; };
+export function useDepartments() { const [d, setD] = useState<Department[]>(DEPTS || []); useEffect(() => { subs.add(setD); loadDepartments(); return () => { subs.delete(setD); }; }, []); return d.length ? d : (DEPTS || []); }
+/** Department choices for a picker: the directory when loaded (active ones), otherwise the built-in list. */
+export const deptChoices = (depts: Department[], lang: Lang) => depts.length ? depts.filter((d) => d.active).map((d) => ({ key: d.key, label: d.label?.[lang] || d.label?.en || d.name }))
+  : (ORG_DEPTS as any[]).map((d) => ({ key: d.key, label: tx(d.label, lang) }));
+/** Departments as {key, label: {en, ru, uk, ar}} for grouping in reports (directory first, built-in list as fallback). */
+export const deptObjs = (depts: Department[]) => depts.length ? depts.filter((d) => d.active).map((d) => ({ key: d.key, label: { en: d.label?.en || d.name, ru: d.label?.ru || d.label?.en || d.name, uk: d.label?.uk || d.label?.en || d.name, ar: d.label?.ar || d.label?.en || d.name } })) : (ORG_DEPTS as any[]);
+export const deptLabel = (k: string | null | undefined, lang: Lang) => {
+  const d = DEPTS?.find((x) => x.key === k || x.id === k); if (d) return d.label?.[lang] || d.label?.en || d.name;
+  const o = (ORG_DEPTS as any[]).find((x) => x.key === k); return o ? tx(o.label, lang) : k || "";
+};
 
 /** One employee. Only active employees can be chosen; a person who has since left stays shown, marked as inactive. */
 export function PersonField({ f, data, setData, ro, id }: { f: any; data: Record<string, any>; setData: (fn: (d: Record<string, any>) => Record<string, any>) => void; ro: boolean; id: string }) {
@@ -51,10 +63,13 @@ export function PeopleField({ f, data, setData, ro }: { f: any; data: Record<str
 }
 
 export function DeptField({ f, value, set, ro, id }: { f: any; value: string; set: (v: string) => void; ro: boolean; id: string }) {
-  const { lang } = useApp();
+  const { lang } = useApp(); const depts = useDepartments();
+  const list = depts.length ? depts.filter((d) => d.active || d.key === value).map((d) => ({ key: d.key, label: d.label?.[lang] || d.label?.en || d.name })) : (ORG_DEPTS as any[]).map((d) => ({ key: d.key, label: tx(d.label, lang as Lang) }));
+  const unknown = value && !list.some((d) => d.key === value);
   return <div className="field"><label htmlFor={id}>{tx(f.label, lang as Lang)}</label>
-    <select id={id} className="input" value={value || ""} disabled={ro} onChange={(e) => set(e.target.value)}><option value="">—</option>
-      {(ORG_DEPTS as any[]).map((d) => <option key={d.key} value={d.key}>{tx(d.label, lang as Lang)}</option>)}</select></div>;
+    <select id={id} className="input" value={value || ""} disabled={ro} onChange={(e) => set(e.target.value)} data-dept={f.key}><option value="">—</option>
+      {unknown && <option value={value}>{value} (?)</option>}
+      {list.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}</select></div>;
 }
 
 export const mdHtml = (s: string) => DOMPurify.sanitize(marked.parse(String(s || ""), { gfm: true, breaks: true }) as string);

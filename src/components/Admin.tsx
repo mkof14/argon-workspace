@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import Icon from "./Icon";
+import { deptChoices, deptObjs, useDepartments } from "./PeopleFields";
 import { useApp } from "./App";
 import { ORG_DEPTS, ROLES, ROLE_COLORS } from "@/config/workspace.config.mjs";
 import { t, tx } from "@/lib/i18n";
@@ -10,6 +11,7 @@ import AccountSecurity from "./AccountSecurity";
 
 export default function Admin() {
   const { lang, toast, me } = useApp();
+  const depts = useDepartments();
   const [list, setList] = useState<Profile[]>([]);
   const [emails, setEmails] = useState(""); const [role, setRole] = useState("engineering"); const [company, setCompany] = useState(""); const [dept, setDept] = useState("");
   const [q, setQ] = useState(""); const [rf, setRf] = useState("");
@@ -57,7 +59,7 @@ export default function Admin() {
         <div className="card-b toolbar" style={{ alignItems: "flex-end", gap: 12 }}>
           <div className="field" style={{ flex: "3 1 300px" }}><label htmlFor="inv-email">{t("email", lang)}</label><textarea id="inv-email" className="input" rows={2} style={{ minHeight: 48 }} value={emails} onChange={(e) => setEmails(e.target.value)} placeholder="anna@agron1.com, oleg@agron1.com" /><span className="hint">{t("invite_hint", lang)}</span></div>
           <div className="field" style={{ flex: "1 1 180px" }}><label htmlFor="inv-role">{t("role", lang)}</label><select id="inv-role" className="input" value={role} onChange={(e) => setRole(e.target.value)}>{roleOpts}</select></div>
-          <div className="field" style={{ flex: "1 1 180px" }}><label htmlFor="inv-dept">{tx({ en: "Department", ru: "Отдел", uk: "Відділ", ar: "القسم" }, lang)}</label><select id="inv-dept" className="input" value={dept} onChange={(e) => setDept(e.target.value)}><option value="">—</option>{(ORG_DEPTS as any[]).map((d) => <option key={d.key} value={d.key}>{tx(d.label, lang)}</option>)}</select></div>
+          <div className="field" style={{ flex: "1 1 180px" }}><label htmlFor="inv-dept">{tx({ en: "Department", ru: "Отдел", uk: "Відділ", ar: "القسم" }, lang)}</label><select id="inv-dept" className="input" value={dept} onChange={(e) => setDept(e.target.value)}><option value="">—</option>{deptChoices(depts, lang as any).map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}</select></div>
           <div className="field" style={{ flex: "1 1 180px" }}><label htmlFor="inv-co">{t("company", lang)}</label><input id="inv-co" className="input" value={company} onChange={(e) => setCompany(e.target.value)} placeholder={isExternal(role) ? "Partner Co." : ""} /></div>
           <button className="btn primary" disabled={busy} onClick={invite}><Icon n="send" />{busy ? "…" : t("invite", lang)}</button>
         </div></section>
@@ -81,7 +83,7 @@ export default function Admin() {
               <td><span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}><span className="avatar" style={{ background: `color-mix(in srgb,${c} 18%,var(--surface))`, color: c, borderColor: "transparent", width: 34, height: 34, fontSize: 14 }}>{(p.full_name || p.email || "?").slice(0, 1).toUpperCase()}</span><b style={{ fontWeight: 600 }}>{p.full_name}</b>{p.super && <span className="chip c-ok" title={t("protected_owner", lang)}><Icon n="lock" className="lockico" />{t("protected_owner", lang)}</span>}</span></td>
               <td className="faint">{p.email}</td>
               <td><input className="input" style={{ width: 150 }} defaultValue={p.title || ""} onBlur={(e) => e.target.value !== (p.title || "") && upd(p, { title: e.target.value || null })} aria-label={t("job_title", lang)} /></td>
-              <td><select className="input" style={{ width: "auto" }} value={p.department || ""} onChange={(e) => upd(p, { department: e.target.value || null })} aria-label={tx({ en: "Department", ru: "Отдел", uk: "Відділ", ar: "القسم" }, lang)}><option value="">—</option>{(ORG_DEPTS as any[]).map((d) => <option key={d.key} value={d.key}>{tx(d.label, lang)}</option>)}</select></td>
+              <td><select className="input" style={{ width: "auto" }} value={p.department || ""} onChange={(e) => upd(p, { department: e.target.value || null })} aria-label={tx({ en: "Department", ru: "Отдел", uk: "Відділ", ar: "القسم" }, lang)}><option value="">—</option>{deptChoices(depts, lang as any).map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}</select></td>
               <td><select className="input" style={{ width: "auto" }} value={p.manager_id || ""} onChange={(e) => upd(p, { manager_id: e.target.value || null })} aria-label={tx({ en: "Manager", ru: "Руководитель", uk: "Керівник", ar: "المدير" }, lang)}><option value="">—</option>{list.filter((x) => x.id !== p.id && !isExternal(x.role) && x.role !== "pending" && !x.disabled).map((x) => <option key={x.id} value={x.id}>{x.full_name || x.email}</option>)}</select></td>
               <td><select className="input" style={{ width: "auto", color: c, fontWeight: 600, borderColor: `color-mix(in srgb,${c} 45%,var(--line))` }} value={p.role} disabled={!!p.super || (p.id === me.id && p.role === "owner" && owners <= 1)} onChange={(e) => upd(p, { role: e.target.value })} aria-label={t("role", lang)}>{roleOpts}</select></td>
               <td><input className="input" style={{ width: 170 }} defaultValue={p.company || ""} onBlur={(e) => e.target.value !== (p.company || "") && upd(p, { company: e.target.value || null })} aria-label={t("company", lang)} /></td>

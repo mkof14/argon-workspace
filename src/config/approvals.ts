@@ -25,7 +25,8 @@ export const APPROVALS: Record<string, ApprovalRule> = {
   "legal.contracts": { wait: ["Drafting", "Counsel review"], ok: "Negotiation", approvers: LEAD, key: ["type", "counterparty", "amount", "currency", "schedule_days", "scope", "jurisdiction", "due"] },
   "marketing.brand": { wait: ["Draft"], ok: "Approved", approvers: LEAD, key: ["kind", "language", "text"] },
   // Phase 2: documents in the register; "request changes" sends the document back to Draft
-  "company.documents": { wait: ["Draft", "In review"], ok: "Approved", no: "Draft", changes: "Draft", approvers: LEAD, key: ["doc_type", "project_ref", "owner", "version", "description"] },
+  // Phase 4: an exact version is approved; the chain per document type is set in Administration → Departments & documents
+  "company.documents": { wait: ["Draft", "In review", "Changes requested"], ok: "Approved", no: "Draft", changes: "Changes requested", approvers: LEAD, key: ["doc_number", "doc_type", "project_ref", "owner", "version", "classification", "description"] },
 };
 export const canSendForApproval = (section: string, status: string | null) => !!APPROVALS[section]?.wait.includes(status || "");
 /** Missing precondition (e.g. the compliance check) → the field key, otherwise null. */

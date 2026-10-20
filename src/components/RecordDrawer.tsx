@@ -26,7 +26,8 @@ import { trFields, trPending, trText } from "@/lib/tr";
 import { Activity, Comment, DEMO, Rec, isConflict, isExternal, store, textSim, type FileItem } from "@/lib/store";
 import Discussion from "./Discussion";
 import MeetingPanel from "./MeetingPanel";
-import { AnnouncementPanel } from "./Announcements";
+import DocumentPanel from "./DocumentPanel";
+import { AnnouncementPanel, AudienceField } from "./Announcements";
 import { merge3, resolve, type Conflict } from "@/lib/merge";
 import ConflictDialog from "./ConflictDialog";
 import { CommentBody, DeptField, MentionInput, PeopleField, PersonField, RichField, isEmployee, personName } from "./PeopleFields";
@@ -101,7 +102,6 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
       if (need) fetch("/api/translate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rec.id }) }).catch(() => {});
     }).catch(() => {});
     store.activity({ recordId: rec.id, limit: 40 }).then(setHist).catch(() => {});
-    if (section.id === "company.documents") store.files(`${section.id}/${rec.id}`).then(setVersions).catch(() => {});
     store.markRead(rec.id).catch(() => {});
   }, [rec]);
   useEffect(() => { const k = (e: KeyboardEvent) => e.key === "Escape" && onClose(); window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
@@ -191,6 +191,7 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
     if (f.type === "people") return <PeopleField key={f.key} f={f} data={data} setData={setData} ro={ro} />;
     if (f.type === "dept") return <DeptField key={f.key} f={f} value={v} set={set} ro={ro} id={id} />;
     if (f.type === "rich") return <RichField key={f.key} f={f} value={v} set={set} ro={ro} id={id} />;
+    if (section.id === "company.announcements" && f.key === "audience") return <AudienceField key={f.key} data={data} setData={setData} ro={ro} />;
     if (f.type === "readonly") return v ? <div key={f.key} className="field"><label>{tx(f.label, lang)}</label><div className="input ro mono" id={id} data-field={f.key}>{String(v)}</div></div> : null;
     if (f.auto) return v ? <div key={f.key} className="field"><label>{tx(f.label, lang)}</label><div className="input ro mono" id={id}>{String(v)}</div></div> : null;
     if (f.type === "html") return v ? <div key={f.key} className="field wide"><label>{tx(f.label, lang)}</label><iframe title={tx(f.label, lang)} className="mailframe" style={{ height: 560 }} srcDoc={String(v)} sandbox="" /></div> : null;
@@ -270,7 +271,8 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
           {rec && section.id === "company.announcements" && <AnnouncementPanel rec={rec} />}
           {rec && APPROVALS[section.id]?.wait.includes(rec.status || "") && !isExternal(me.role) && <PreCheck rec={rec} />}
           {rec && APPROVALS[section.id] && <Approval rec={rec} canWrite={canWrite} onChanged={onSaved} />}
-          {section.id !== "mail.outbox" && <Attachments section={section} rec={rec} canWrite={canWrite} title={title} />}
+          {rec && section.id === "company.documents" ? <DocumentPanel rec={rec} canWrite={canWrite} onChanged={onReload || onSaved} onVersions={(v) => setVersions(v.map((x) => ({ name: x.file_name, path: x.path, size: x.size, type: x.mime || "", created_at: x.created_at, label: x.label } as any)))} />
+            : section.id !== "mail.outbox" && <Attachments section={section} rec={rec} canWrite={canWrite} title={title} />}
           {rec && <Discussion rec={{ ...rec, company: rec.company }} versions={section.id === "company.documents" ? versions : undefined} textOf={cmtText}
             title={section.id === "company.documents" ? tx({ en: "Discussion and review notes", ru: "Обсуждение и замечания", uk: "Обговорення і зауваження", ar: "النقاش وملاحظات المراجعة" }, lang) : undefined} />}
           {rec && hist.length > 0 && <div className="thread">
