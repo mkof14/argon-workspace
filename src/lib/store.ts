@@ -172,8 +172,14 @@ export const store = {
     if (DEMO) { const db = demoLoad(); return db.records.filter((r) => sections.includes(r.section) && demoVisible(db, r)).map(loc); }
     try {
       if (offline()) throw new TypeError("Failed to fetch");
-      const { data, error } = await sb().from("records").select("*").in("section", sections).limit(3000); if (error) throw error;
-      const out = ((data || []) as Rec[]).map(loc); for (const s of sections) MEM.set(s, out.filter((r) => r.section === s)); return out;
+      // each section on its own, newest first, so a large section (10,000 documents) can never crowd a new project or
+      // task out of one shared, unordered limit; six requests at a time
+      const parts: Rec[][] = []; const todo = [...new Set(sections)];
+      for (let i = 0; i < todo.length; i += 6) parts.push(...(await Promise.all(todo.slice(i, i + 6).map(async (s) => {
+        const { data, error } = await sb().from("records").select("*").eq("section", s).order("updated_at", { ascending: false }).limit(2000); if (error) throw error;
+        const rows = ((data || []) as Rec[]).map(loc); MEM.set(s, rows); return rows;
+      }))));
+      return parts.flat();
     } catch (e) { if (!isNetworkError(e)) throw e; return this.withPending(sections, sections.flatMap((s) => MEM.get(s) || [])); }
   },
   /** The record as it would be written: texts shown translated and left untouched go back to their original wording. */
