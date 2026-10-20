@@ -1422,3 +1422,9 @@ tr.grp td b{margin-inline-end:6px}
   .disc-h .seg{margin-inline-start:0 !important}
   .notice-act .btn{padding:3px 6px}
 }
+@media (max-width:640px){
+  .proj-hero{flex-wrap:wrap}
+  .proj-hero > div{flex-basis:calc(100% - 64px)}
+  .proj-hero .stats{flex-basis:100%;justify-content:flex-start}
+  .proj-hero h2{word-break:normal;overflow-wrap:break-word}
+}

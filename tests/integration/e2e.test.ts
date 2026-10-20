@@ -290,7 +290,7 @@ test("Phase 3 · project discussion: mention → notification → exact message 
   await pm.reload(); await pm.waitForSelector(`#c-${r1.id}`);
   await pm.selectOption(`#c-${r1.id} select`, "decision");
   assert.ok(await waitFor(async () => (await sql("select count(*)::int n from records where section = 'company.decisions' and data->>'project_ref' = $1", [P.id]))[0].n === 1), "decision recorded for the project");
-  await pm.reload(); await pm.waitForSelector(".dec-log .hub-row"); assert.ok(await pm.isVisible(`#c-${r1.id} [data-flag='decision']`));
+  await pm.reload(); await pm.waitForSelector(".dec-log .hub-row"); assert.ok(await pm.waitForSelector(`#c-${r1.id} [data-flag='decision']`, { timeout: 15000 }), "the reply carries the Decision mark");
   // the employee cannot mark messages (no control), and a phone shows the same discussion
   await pe.reload(); await pe.waitForSelector(`#c-${r1.id}`); assert.equal(await pe.locator(`#c-${r1.id} select`).count(), 0);
   const { p: ph } = await login(erin.email, { viewport: { width: 390, height: 844 } });
