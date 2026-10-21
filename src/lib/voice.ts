@@ -66,7 +66,7 @@ const READS: [Intent, (string | RegExp)[]][] = [
 ];
 const E = "(?=[\\s:,.!?]|$)"; // the end of a word (\\b does not see Cyrillic letters)
 const CREATE_TASK = new RegExp(`^(?:please\\s+)?(?:create|add|new|make)\\s+(?:a\\s+)?task${E}|^(?:создай|создать|добавь|поставь|новая)\\s+задач[ау]${E}|^(?:створи|додай|постав|нове)\\s+завдання${E}|^задача${E}`);
-const REMIND = new RegExp(`^(?:remind me|напомни(?: мне)?|нагадай(?: мені)?)${E}`);
+const REMIND = new RegExp(`^(?:remind me|(?:create|add|set)(?: a)? reminder|создай напоминание|поставь напоминание|напомни(?: мне)?|нагадай(?: мені)?|створи нагадування)${E}`);
 const NOTE = new RegExp(`^(?:note|write down|record|запиши себе|запиши|заметка|запам.ятай|нотатка)${E}`);
 const ASSIGN = new RegExp(`^(?:assign|reassign|назначь|переназначь|признач|перепризнач)${E}`);
 const DUE = new RegExp(`(?:move|change|shift|push|postpone|reschedule)\\b.*\\b(?:deadline|due(?: date)?)\\b|^(?:перенеси|сдвинь|измени|поменяй)\\s.*(?:срок|дедлайн)|^(?:перенеси|зміни|посунь)\\s.*(?:термін|дедлайн)`);
@@ -96,7 +96,7 @@ export function parseCommand(raw: string, today: string): Parsed {
   }
 
   if (REMIND.test(s)) {
-    const body = text.replace(/^\s*(remind me|напомни( мне)?|нагадай( мені)?)\s*/i, "");
+    const body = text.replace(/^\s*(remind me|(create|add|set)( a)? reminder|создай напоминание|поставь напоминание|напомни( мне)?|нагадай( мені)?|створи нагадування)\s*/i, "");
     const d = parseDate(body, today);
     const title = cleanTitle((d ? dropDate(body, d.match) : body).trim().replace(/^(to|что|чтобы|про|о|щоб|що)\s+/i, ""));
     return out({ intent: "create_reminder", risk: "low", slots: { title, date: d?.date }, missing: [...(title ? [] : ["title" as const]), ...(d ? [] : ["date" as const])] });

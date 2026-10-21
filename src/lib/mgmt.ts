@@ -5,7 +5,7 @@ import type { Lang } from "@/lib/i18n";
 
 export type T4 = { en: string; ru: string; uk: string; ar: string };
 const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk, ar });
-const fill = (s: string, v: Record<string, any>) => s.replace(/\{(\w+)\}/g, (_, k) => (v[k] ?? v[k] === 0 ? String(v[k]) : "—"));
+const fill = (s: string, v: Record<string, any>) => s.replace(/\{(\w+)\}/g, (_, k) => (v[k] != null && v[k] !== "" ? String(v[k]) : "—"));
 export const say = (t: T4 | undefined, lang: Lang | string, v: Record<string, any> = {}) => (t ? fill((t as any)[lang] || t.en, v) : "");
 
 export type Level = "healthy" | "attention" | "risk" | "critical" | "closed";
