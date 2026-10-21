@@ -108,7 +108,7 @@ export function financeFindings(all: R[], today: string, th: Th): Finding[] {
 }
 
 /* ---------------- Sales ---------------- */
-const SITE = "https://workspace.agron1.com";
+const SITE = (process.env.NEXT_PUBLIC_SITE_URL || "https://workspace.agron1.com").replace(/\/+$/, ""); // production sets the same address; a staging preview sets its own
 const link = (r: R) => `${SITE}/${r.section.replace(".", "/")}?r=${r.id}`;
 const openTask = (all: R[], title: string) => all.some((t) => t.section === "company.tasks" && !["Done", "Completed", "Cancelled"].includes(t.status || "") && t.title.trim().toLowerCase() === title.trim().toLowerCase());
 

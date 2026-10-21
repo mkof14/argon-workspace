@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const SECS: any[] = allSections() as any[];
-const SITE = "https://workspace.agron1.com";
+const SITE = (process.env.NEXT_PUBLIC_SITE_URL || "https://workspace.agron1.com").replace(/\/+$/, ""); // production sets the same address; a staging preview sets its own
 const INTERNAL: string[] = [...INTERNAL_ROLES];
 
 /** Private calendar subscription: GET /api/calendar/feed/<token>.ics — the person's open deadlines as all-day events. */

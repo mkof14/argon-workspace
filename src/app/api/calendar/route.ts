@@ -4,7 +4,7 @@ import { hashToken, newToken } from "@/lib/server/tokens";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-const SITE = "https://workspace.agron1.com";
+const SITE = (process.env.NEXT_PUBLIC_SITE_URL || "https://workspace.agron1.com").replace(/\/+$/, ""); // production sets the same address; a staging preview sets its own
 
 /**
  * My calendar link: get / create (or replace) / scope / delete. The link itself is the key; the database keeps only

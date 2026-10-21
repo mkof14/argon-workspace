@@ -8,7 +8,7 @@ export type MailTemplate = {
   cta?: { label: ML; url: string }; system?: boolean; custom?: boolean;
 };
 
-export const SITE = "https://workspace.agron1.com";
+export const SITE = (process.env.NEXT_PUBLIC_SITE_URL || "https://workspace.agron1.com").replace(/\/+$/, ""); // production sets the same address; a staging preview sets its own
 export const LOGO = `${SITE}/email/logo.png`;
 
 export const MAIL_CATS: Record<string, { label: ML; color: string; icon: string }> = {
