@@ -46,7 +46,9 @@ const config = f("config", "select", L("StarDome configuration", "Конфигу
 const priority = f("priority", "select", L("Priority", "Приоритет", "Пріоритет", "الأولوية"), { options: PRIORITY });
 
 /** Tasks: one set of statuses and priorities for the whole company (v19 maps the earlier Open/Done and Medium). */
-export const TASK_STATUSES = ["New", "In progress", "Waiting", "Review", "Completed", "Cancelled"];
+export const TASK_STATUSES = ["New", "In progress", "Blocked", "Waiting", "Review", "Completed", "Cancelled"];
+/** Who a task waits on when its status is Waiting (Phase 5 Waiting For): a colleague, or a party outside AGRON. */
+export const WAITING_KINDS = ["Colleague", "Supplier", "Partner", "Client", "Contractor", "Authority"];
 export const TASK_PRIORITY = ["Low", "Normal", "High", "Critical"];
 /** Company departments (people, tasks, projects, documents); independent of the Workspace section groups. */
 export const ORG_DEPTS = [
@@ -672,14 +674,28 @@ export const DEPARTMENTS = [
           f("project_ref", "ref", L("Project", "Проект", "Проєкт", "المشروع"), { ref: "company.projects" }), f("department", "dept", L("Department", "Отдел", "Відділ", "القسم")),
           f("start", "date", L("Start date", "Дата начала", "Дата початку", "تاريخ البدء")), f("description", "rich", L("Description", "Описание", "Опис", "الوصف")),
           f("completed_at", "date", L("Completed on", "Выполнено", "Виконано", "أُنجز في"), { auto: true }),
-          f("related", "url", L("Link to record or file", "Ссылка на запись или файл", "Посилання на запис або файл", "رابط")), notes],
+          f("related", "url", L("Link to record or file", "Ссылка на запись или файл", "Посилання на запис або файл", "رابط")),
+          f("milestone_ref", "ref", L("Milestone", "Веха", "Віха", "المرحلة"), { ref: "company.milestones" }),
+          f("requested_by", "person", L("Requested by (who waits for it)", "Кто ждёт результат", "Хто чекає результат", "من ينتظر النتيجة")),
+          f("blocked_by", "ref", L("Blocked by task", "Блокирует задача", "Блокує задача", "تعيقها المهمة"), { ref: "company.tasks" }),
+          f("blocker", "text", L("What blocks it", "Что мешает", "Що заважає", "ما الذي يعيقها")),
+          f("waiting_kind", "select", L("Waiting on", "Ждём от", "Чекаємо від", "بانتظار"), { options: WAITING_KINDS }),
+          f("waiting_on", "text", L("Waiting on (name, company)", "От кого ждём (имя, компания)", "Від кого чекаємо (ім'я, компанія)", "بانتظار (الاسم، الجهة)")), notes],
         columns: ["assignee", "due", "priority", "project_ref"] },
+      { key: "portfolios", label: L("Portfolios and programs", "Портфели и программы", "Портфелі та програми", "المحافظ والبرامج"), view: "portfolio",
+        read: [...INTERNAL], write: ["management"],
+        statuses: ["Planned", "Active", "On hold", "Completed", "Cancelled"],
+        fields: [f("owner", "person", L("Owner", "Владелец", "Власник", "المالك")),
+          f("priority", "select", L("Priority", "Приоритет", "Пріоритет", "الأولوية"), { options: TASK_PRIORITY }),
+          f("start", "date", L("Start date", "Дата начала", "Дата початку", "تاريخ البدء")), f("target", "date", L("Target date", "Целевая дата", "Цільова дата", "التاريخ المستهدف")),
+          f("description", "long", L("Description", "Описание", "Опис", "الوصف"))],
+        columns: ["owner", "priority", "target"] },
       { key: "projects", label: L("Projects", "Проекты", "Проєкти", "المشاريع"), view: "projects", controlled: true, external: ["partner"],
         statuses: ["Planned", "Active", "On hold", "Completed", "Cancelled"],
         fields: [f("manager", "person", L("Project manager", "Руководитель проекта", "Керівник проєкту", "مدير المشروع")), f("department", "dept", L("Department", "Отдел", "Відділ", "القسم")),
           f("priority", "select", L("Priority", "Приоритет", "Пріоритет", "الأولوية"), { options: TASK_PRIORITY }),
           f("start", "date", L("Start date", "Дата начала", "Дата початку", "تاريخ البدء")), f("target", "date", L("Target completion", "Плановое завершение", "Планове завершення", "الإنجاز المستهدف")),
-          f("members", "people", L("Team", "Команда", "Команда", "الفريق")), f("deal_ref", "ref", L("Deal (if for a client)", "Сделка (если для клиента)", "Угода (якщо для клієнта)", "الصفقة (إن كانت لعميل)"), { ref: "sales.pipeline" }),
+          f("members", "people", L("Team", "Команда", "Команда", "الفريق")), f("portfolio_ref", "ref", L("Portfolio / program", "Портфель / программа", "Портфель / програма", "المحفظة / البرنامج"), { ref: "company.portfolios" }), f("deal_ref", "ref", L("Deal (if for a client)", "Сделка (если для клиента)", "Угода (якщо для клієнта)", "الصفقة (إن كانت لعميل)"), { ref: "sales.pipeline" }),
           f("description", "rich", L("Description", "Описание", "Опис", "الوصف"))],
         columns: ["manager", "department", "target", "priority"] },
       { key: "milestones", label: L("Milestones", "Вехи", "Віхи", "المراحل الرئيسية"),
@@ -754,14 +770,15 @@ export const DEPARTMENTS = [
         columns: ["priority", "audience_type", "publish_at", "expires"] },
       { key: "decisions", label: L("Decision log", "Журнал решений", "Журнал рішень", "سجل القرارات"), view: "decisions",
         read: [...INTERNAL], write: ["management"],
-        statuses: ["Proposed", "Approved", "Rejected", "Superseded"],
+        statuses: ["Proposed", "In review", "Deferred", "Approved", "Rejected", "Superseded"],
         fields: [f("doc_number", "readonly", L("Decision ID", "Номер решения", "Номер рішення", "رقم القرار")),
           f("date", "date", L("Date", "Дата", "Дата", "التاريخ")), f("area", "text", L("Area", "Область", "Область", "المجال")), f("decision", "long", L("Decision", "Решение", "Рішення", "القرار")), f("rationale", "long", L("Rationale", "Обоснование", "Обґрунтування", "المبررات")),
           f("made_by", "person", L("Made by", "Кто принял", "Хто ухвалив", "صاحب القرار")),
           f("project_ref", "ref", L("Project", "Проект", "Проєкт", "المشروع"), { ref: "company.projects" }),
           f("document_ref", "ref", L("Related document", "Связанный документ", "Пов'язаний документ", "مستند مرتبط"), { ref: "company.documents" }),
           f("task_ref", "ref", L("Resulting task", "Задача по решению", "Задача за рішенням", "المهمة الناتجة"), { ref: "company.tasks" }),
-          f("responsible", "person", L("Responsible", "Ответственный", "Відповідальний", "المسؤول")), f("due", "date", L("Due", "Срок", "Термін", "الموعد")), owner],
+          f("responsible", "person", L("Responsible", "Ответственный", "Відповідальний", "المسؤول")), f("due", "date", L("Due", "Срок", "Термін", "الموعد")),
+          f("reconsider", "date", L("Reconsider on (deferred)", "Вернуться к решению (отложено)", "Повернутися до рішення (відкладено)", "إعادة النظر في (مؤجل)")), owner],
         columns: ["doc_number", "date", "area", "responsible"] },
     ],
   },
@@ -809,7 +826,7 @@ export const SECTION_ICONS = {
   "legal.ip": "code", "legal.privacy": "eye", "legal.hse": "alert", "legal.board": "users", "legal.registers": "contact", "legal.authority": "stamp",
   "hr.team": "users", "hr.hiring": "userplus", "hr.onboarding": "rocket", "hr.training": "grad", "hr.policies": "book", "hr.leave": "sun",
   "hr.reviews": "target", "hr.assets": "laptop", "hr.candidates": "userplus", "hr.compensation": "coins", "hr.offboarding": "logout",
-  "company.tasks": "bell", "company.projects": "layers", "company.milestones": "flag", "company.documents": "file", "company.wiki": "book", "company.contacts": "contact", "company.meetings": "calendar", "company.announcements": "megaphone", "company.decisions": "check",
+  "company.tasks": "bell", "company.projects": "layers", "company.milestones": "flag", "company.documents": "file", "company.wiki": "book", "company.contacts": "contact", "company.meetings": "calendar", "company.announcements": "megaphone", "company.decisions": "check", "company.portfolios": "grid",
   "mail.templates": "mail", "mail.outbox": "send",
 };
 
