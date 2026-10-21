@@ -105,7 +105,9 @@ test("meeting record: generated as a draft, becomes the record only when the org
 
 test("information settings for administrators; Document Center and Knowledge fit a 390 px phone", { skip }, async () => {
   const a = await login(U.adm.email); await a.goto(`${APP}/admin/info`); await a.waitForSelector(":text('Departments')", { timeout: 15000 });
-  const codes = await a.$$eval("main input", (els: any[]) => els.map((e) => e.value)); assert.ok(codes.includes("ENG") || /ENG/.test(await a.textContent("main")), "the department directory is listed");
+  // the directory loads after the page: wait for its rows (codes are editable fields, so read their values)
+  const listed = await a.waitForFunction(() => [...document.querySelectorAll("main input")].some((e: any) => e.value === "ENG"), null, { timeout: 15000 }).then(() => true).catch(() => false);
+  assert.ok(listed, "the department directory is listed");
   assert.match(await a.textContent("main"), /Document numbers/); await shot(a, "info-settings"); await a.context().close();
   const p = await login(U.eng.email, { width: 390, height: 844 });
   for (const r of ["/documents", "/knowledge", "/calendar", "/decisions"]) {
