@@ -49,7 +49,7 @@ export async function dispatch(db: any, fns: Record<string, JobFn>, o: { trigger
   const t0 = Date.now(); const budget = o.budgetMs ?? 50_000; const now = new Date();
   const runs = await recentRuns(db, 2);
   const out: any[] = [];
-  const order = ["backup", "agents", "retry", "monitor", "intake", "sla", "digest", "calendar", "translate", "trash", "reports"];
+  const order = ["backup", "agents", "retry", "monitor", "intake", "sla", "digest", "executive", "calendar", "translate", "trash", "reports"];
   for (const id of order) {
     const def = jobDef(id); if (!def || !fns[id] || (o.only && !o.only.includes(id))) continue;
     const d = isDue(def, now, runs);

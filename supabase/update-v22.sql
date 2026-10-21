@@ -34,6 +34,8 @@ create index if not exists records_task_assignee_idx on public.records ((data->>
 create index if not exists records_project_portfolio_idx on public.records ((data->>'portfolio_ref')) where section = 'company.projects';
 create index if not exists records_task_blocked_by_idx on public.records ((data->>'blocked_by')) where section = 'company.tasks' and data ? 'blocked_by';
 create index if not exists approvals_pending_created_idx on public.approvals (created_at) where status = 'pending';
+create index if not exists activity_record_idx on public.activity (record_id, created_at desc);
+create index if not exists activity_mgmt_idx on public.activity (record_id, created_at desc) where action in ('mgmt_escalated', 'mgmt_reminded');
 create index if not exists activity_created_idx on public.activity (created_at desc);
 
 /* ---------------------------------------------------------------------------------------------
@@ -444,7 +446,7 @@ begin
         jsonb_build_object('code', 'meeting_action_no_task', 'item', it->>'id'), 'create_task'
       from v mt cross join lateral jsonb_array_elements(case when jsonb_typeof(mt.data->'action_items') = 'array' then mt.data->'action_items' else '[]'::jsonb end) it
       where mt.section = 'company.meetings' and mt.status is distinct from 'Cancelled' and public.mgmt_date(mt.data->>'date') < today and coalesce(it->>'task_id', '') = ''
-    union all select 'meeting_task_no_owner', 'meeting', 'medium', t.id, t.section, t.title, t.pid, public.as_uuid(t.data->>'meeting_ref'), t.created_at,
+    union all select 'meeting_task_no_owner', 'meeting', 'medium', t.id, t.section, t.title, t.pid, t.created_by, t.created_at,
         jsonb_build_object('code', 'meeting_task_no_owner', 'meeting', t.data->>'meeting_ref'), 'assign_owner'
       from t where coalesce(t.data->>'meeting_ref', '') <> '' and coalesce(t.data->>'assignee_id', '') = ''
   )
@@ -481,6 +483,7 @@ begin
   return query
   with v as materialized (select * from public.mgmt_visible(p_viewer)),
   pr as (select v.id, v.title, v.data from v where v.section = 'company.projects'),
+  esc as (select x.record_id, max(x.created_at) at from public.activity x where x.action = 'mgmt_escalated' and x.created_at > now() - interval '90 days' group by x.record_id),
   team as (select p.id from public.profiles p join public.departments d on d.id = p.department_id where d.manager_id = me and p.id <> me and not p.disabled
            union select public.as_uuid(x) from pr, jsonb_array_elements_text(coalesce(pr.data->'members_ids', '[]')) x where pr.data->>'manager_id' = me::text),
   t as (select v.*, public.as_uuid(v.data->>'project_ref') pid, public.mgmt_date(v.data->>'due') due, public.as_uuid(v.data->>'assignee_id') asg,
@@ -489,7 +492,7 @@ begin
   items as (
     -- someone waits for me
     select 'me' b, 'task' k, t.id rid, t.section sec, t.title ttl, t.pid, 'person' pt, t.req party, null::text pname, t.created_at req_at, t.due, t.status st, t.updated_at last_act,
-      t.data->>'escalated_at' esc, null::uuid aid from t where t.asg = me and t.req is distinct from me
+      null::text esc, null::uuid aid from t where t.asg = me and t.req is distinct from me
     union all select 'me', 'approval', a.record_id, rv.section, rv.title, coalesce(public.as_uuid(rv.data->>'project_ref'), case when rv.section = 'company.projects' then rv.id end),
       'person', a.requested_by, null, a.created_at, null::date, 'pending', a.created_at, null, a.id
       from public.approvals a join v rv on rv.id = a.record_id where a.status = 'pending' and a.approver_id = me
@@ -499,7 +502,7 @@ begin
     union all select 'me', 'decision', d.id, d.section, d.title, public.as_uuid(d.data->>'project_ref'), 'person', d.created_by, null, d.created_at, public.mgmt_date(d.data->>'due'), d.status, d.updated_at, null, null
       from v d where d.section = 'company.decisions' and d.status in ('Proposed', 'In review') and d.data->>'responsible_id' = me::text and d.created_by is distinct from me
     -- I wait for a colleague
-    union all select 'others', 'task', t.id, t.section, t.title, t.pid, 'person', t.asg, null, t.created_at, t.due, t.status, t.updated_at, t.data->>'escalated_at', null
+    union all select 'others', 'task', t.id, t.section, t.title, t.pid, 'person', t.asg, null, t.created_at, t.due, t.status, t.updated_at, null, null
       from t where t.req = me and t.asg is not null and t.asg <> me and not (t.status = 'Waiting' and coalesce(t.data->>'waiting_kind', 'Colleague') <> 'Colleague')
     union all select 'others', 'approval', a.record_id, rv.section, rv.title, coalesce(public.as_uuid(rv.data->>'project_ref'), case when rv.section = 'company.projects' then rv.id end),
       'person', a.approver_id, null, a.created_at, null, 'pending', a.created_at, null, a.id
@@ -508,12 +511,12 @@ begin
       public.mgmt_date(d.data->>'review_due'), d.status, d.updated_at, null, null
       from v d where d.section = 'company.documents' and d.status = 'In review' and (d.data->>'owner_id' = me::text or d.created_by = me) and coalesce(d.data->>'reviewer_id', '') not in ('', me::text)
     -- my team owes it (late, blocked or due within two days)
-    union all select 'team', 'task', t.id, t.section, t.title, t.pid, 'person', t.asg, null, t.created_at, t.due, t.status, t.updated_at, t.data->>'escalated_at', null
+    union all select 'team', 'task', t.id, t.section, t.title, t.pid, 'person', t.asg, null, t.created_at, t.due, t.status, t.updated_at, null, null
       from t where t.asg in (select team.id from team) and t.req is distinct from t.asg and t.req is distinct from me
         and (t.due <= today + 2 or t.status in ('Blocked', 'Waiting'))
     -- an outside party
     union all select 'external', 'task', t.id, t.section, t.title, t.pid, 'external', null, coalesce(nullif(t.data->>'waiting_on', ''), t.data->>'waiting_kind'), t.updated_at, t.due, t.status, t.updated_at,
-      t.data->>'escalated_at', null
+      null, null
       from t where t.status = 'Waiting' and coalesce(t.data->>'waiting_kind', 'Colleague') <> 'Colleague'
         and (t.asg = me or t.req = me or t.created_by = me or exists (select 1 from pr where pr.id = t.pid and pr.data->>'manager_id' = me::text)
              or exists (select 1 from public.profiles q where q.id = me and q.role in ('owner', 'admin', 'management')))
@@ -521,12 +524,12 @@ begin
   select i.b || ':' || i.k || ':' || i.rid || coalesce(':' || i.aid, ''), i.b, i.k, i.rid, i.sec, i.ttl, i.pid, pr.title, i.pt, i.party,
     coalesce(i.pname, (select coalesce(nullif(q.full_name, ''), q.email) from public.profiles q where q.id = i.party)),
     i.req_at, i.due, greatest(0, extract(day from now() - i.req_at))::int, i.st, i.last_act,
-    case when i.esc is not null then 'escalated' when i.due < today then 'overdue' when i.due <= today + 2 then 'due_soon'
+    case when e.at is not null then 'escalated' when i.due < today then 'overdue' when i.due <= today + 2 then 'due_soon'
          when i.req_at < now() - make_interval(days => (c->>'approval_age_days')::int) then 'aging' else 'none' end,
     public.mgmt_link(i.sec, i.rid), i.aid
-  from items i left join pr on pr.id = i.pid
+  from items i left join pr on pr.id = i.pid left join esc e on e.record_id = i.rid and e.at >= i.req_at
   order by case i.b when 'me' then 0 when 'team' then 1 when 'others' then 2 else 3 end,
-    case when i.esc is not null then 0 when i.due < today then 1 when i.due <= today + 2 then 2 else 3 end, i.due nulls last, i.req_at, 1;
+    case when e.at is not null then 0 when i.due < today then 1 when i.due <= today + 2 then 2 else 3 end, i.due nulls last, i.req_at, 1;
 end $$;
 revoke execute on function public._waiting_for(uuid) from public, anon, authenticated;
 create or replace function public.waiting_for()
@@ -830,9 +833,11 @@ grant execute on function public.management_changes(text) to authenticated;
    15. Team Status — who is where, their availability as they set it, and what they are responsible for among
        the projects and tasks the VIEWER may open. No scores of people, no presence tracking.
    --------------------------------------------------------------------------------------------- */
+drop function if exists public.team_status();
+drop function if exists public._team_status(uuid);
 create or replace function public._team_status(p_viewer uuid)
 returns table (person_id uuid, name text, title text, role text, department_id uuid, department text, location text, timezone text,
-  availability text, availability_note text, availability_until timestamptz, projects jsonb, assignments jsonb, open_tasks integer, overdue_tasks integer, blocked_tasks integer)
+  availability text, availability_note text, availability_until timestamptz, projects jsonb, assignments jsonb, open_tasks integer, overdue_tasks integer, blocked_tasks integer, upcoming_14 integer)
 language plpgsql stable security definer set search_path = public as $$
 #variable_conflict use_column
 declare today date := (now() at time zone 'utc')::date;
@@ -845,7 +850,7 @@ begin
          union select public.as_uuid(x), pr.id, pr.title, 'member' from pr, jsonb_array_elements_text(coalesce(pr.data->'members_ids', '[]')) x where x <> coalesce(pr.data->>'manager_id', '')),
   t as (select v.id, v.title, v.status, public.as_uuid(v.data->>'assignee_id') asg, public.mgmt_date(v.data->>'due') due, v.data->>'priority' pri, v.data->>'project_ref_title' ptitle
         from v where v.section = 'company.tasks' and v.status not in ('Completed', 'Cancelled') and coalesce(v.data->>'assignee_id', '') <> ''),
-  ta as (select t.asg, count(*) n, count(*) filter (where t.due < today) od, count(*) filter (where t.status = 'Blocked') bl,
+  ta as (select t.asg, count(*) n, count(*) filter (where t.due < today) od, count(*) filter (where t.status = 'Blocked') bl, count(*) filter (where t.due between today and today + 14) up,
            jsonb_agg(jsonb_build_object('id', t.id, 'title', t.title, 'due', t.due, 'status', t.status, 'priority', t.priority, 'project', t.ptitle)
              order by (t.due < today) desc, case t.pri when 'Critical' then 0 when 'High' then 1 else 2 end, t.due nulls last, t.title) items
          from (select t.*, t.pri priority from t) t group by t.asg)
@@ -853,7 +858,7 @@ begin
     case when p.availability_until is not null and p.availability_until < now() then null else p.availability end, p.availability_note,
     case when p.availability_until is not null and p.availability_until < now() then null else p.availability_until end,
     coalesce((select jsonb_agg(jsonb_build_object('id', pm.id, 'title', pm.title, 'as', pm.r) order by pm.r, pm.title) from pm where pm.pid = p.id), '[]'),
-    coalesce((select jsonb_path_query_array(ta.items, '$[0 to 4]')), '[]'), coalesce(ta.n, 0)::int, coalesce(ta.od, 0)::int, coalesce(ta.bl, 0)::int
+    coalesce((select jsonb_path_query_array(ta.items, '$[0 to 4]')), '[]'), coalesce(ta.n, 0)::int, coalesce(ta.od, 0)::int, coalesce(ta.bl, 0)::int, coalesce(ta.up, 0)::int
   from public.profiles p left join public.departments d on d.id = p.department_id left join ta on ta.asg = p.id
   where not p.disabled and p.role not in ('partner', 'vendor', 'investor', 'pending')
   order by coalesce(nullif(p.full_name, ''), p.email);
@@ -861,7 +866,7 @@ end $$;
 revoke execute on function public._team_status(uuid) from public, anon, authenticated;
 create or replace function public.team_status()
 returns table (person_id uuid, name text, title text, role text, department_id uuid, department text, location text, timezone text,
-  availability text, availability_note text, availability_until timestamptz, projects jsonb, assignments jsonb, open_tasks integer, overdue_tasks integer, blocked_tasks integer)
+  availability text, availability_note text, availability_until timestamptz, projects jsonb, assignments jsonb, open_tasks integer, overdue_tasks integer, blocked_tasks integer, upcoming_14 integer)
 language sql stable security definer set search_path = public as $$
   select * from public._team_status(public.mgmt_viewer()) where public.mgmt_viewer() is not null
 $$;
@@ -1110,5 +1115,91 @@ language sql stable security definer set search_path = public as $$
 $$;
 revoke execute on function public.mgmt_decisions_report() from public, anon;
 grant execute on function public.mgmt_decisions_report() to authenticated;
+
+/* ---------------------------------------------------------------------------------------------
+   21. Waiting For actions. Remind: a notification to the party (once a day per item). Escalate: the project
+       manager (or the department head of the person) and the party are told; the escalation is a history row, the
+       record itself is not touched. Both only for an item that is in the caller's own Waiting For list.
+   --------------------------------------------------------------------------------------------- */
+create or replace function public._waiting_target(p_viewer uuid, p_record uuid, p_approval uuid)
+returns table (bucket text, kind text, record_id uuid, section text, title text, project_id uuid, party_id uuid, party_name text, link text)
+language sql stable security definer set search_path = public as $$
+  select w.bucket, w.kind, w.record_id, w.section, w.title, w.project_id, w.party_id, w.party_name, w.link
+  from public._waiting_for(p_viewer) w
+  where w.record_id = p_record and w.approval_id is not distinct from p_approval and w.bucket in ('others', 'team', 'external')
+  order by case w.bucket when 'others' then 0 when 'team' then 1 else 2 end limit 1
+$$;
+revoke execute on function public._waiting_target(uuid, uuid, uuid) from public, anon, authenticated;
+
+create or replace function public.waiting_remind(p_record uuid, p_approval uuid default null) returns jsonb
+language plpgsql volatile security definer set search_path = public as $$
+declare me uuid := public.mgmt_viewer(); w record; who uuid; last timestamptz; sent boolean;
+begin
+  if me is null then raise exception 'Not allowed' using errcode = '42501'; end if;
+  select * into w from public._waiting_target(me, p_record, p_approval);
+  if w.record_id is null then raise exception 'Not in your Waiting For list' using errcode = '42501'; end if;
+  -- an outside party is reminded through the colleague who handles it
+  who := coalesce(w.party_id, (select public.as_uuid(r.data->>'assignee_id') from public.records r where r.id = p_record));
+  if who is null or who = me then raise exception 'Nobody to remind'; end if;
+  select max(a.created_at) into last from public.activity a where a.record_id = p_record and a.action = 'mgmt_reminded' and a.actor = me and (a.detail->>'to')::uuid = who;
+  if last > now() - interval '20 hours' then return jsonb_build_object('ok', false, 'reason', 'cooldown', 'last', last); end if;
+  sent := public.notify_user(who, 'waiting_remind', p_record, 'remind:' || p_record || ':' || me || ':' || to_char(now() at time zone 'utc', 'YYYY-MM-DD'),
+    'Reminder: ' || w.title, coalesce((select coalesce(nullif(full_name, ''), email) from public.profiles where id = me), '') || ' is waiting for this.', me, w.link);
+  insert into public.activity (record_id, section, actor, action, detail) values (p_record, w.section, me, 'mgmt_reminded', jsonb_build_object('to', who, 'kind', w.kind, 'approval', p_approval));
+  return jsonb_build_object('ok', true, 'to', who, 'notified', coalesce(sent, false));
+end $$;
+revoke execute on function public.waiting_remind(uuid, uuid) from public, anon;
+grant execute on function public.waiting_remind(uuid, uuid) to authenticated;
+
+create or replace function public.waiting_escalate(p_record uuid, p_approval uuid default null, p_note text default null) returns jsonb
+language plpgsql volatile security definer set search_path = public as $$
+declare me uuid := public.mgmt_viewer(); w record; r record; up uuid; party uuid; n int := 0; last timestamptz;
+begin
+  if me is null then raise exception 'Not allowed' using errcode = '42501'; end if;
+  select * into w from public._waiting_target(me, p_record, p_approval);
+  if w.record_id is null then raise exception 'Not in your Waiting For list' using errcode = '42501'; end if;
+  select max(a.created_at) into last from public.activity a where a.record_id = p_record and a.action = 'mgmt_escalated';
+  if last > now() - interval '20 hours' then return jsonb_build_object('ok', false, 'reason', 'cooldown', 'last', last); end if;
+  select * into r from public.records where id = p_record;
+  party := coalesce(w.party_id, public.as_uuid(r.data->>'assignee_id'));
+  -- the person above: the project's manager, else the department head of the party
+  up := (select public.as_uuid(p.data->>'manager_id') from public.records p where p.id = w.project_id and p.section = 'company.projects');
+  if up is null or up in (me, party) then up := (select d.manager_id from public.profiles q join public.departments d on d.id = q.department_id where q.id = party); end if;
+  if up is not null and up not in (me) and exists (select 1 from public.profiles q where q.id = up and not q.disabled) then
+    perform public.notify_user(up, 'waiting_escalated', p_record, 'escalate:' || p_record || ':' || to_char(now() at time zone 'utc', 'YYYY-MM-DD'), 'Escalated: ' || w.title,
+      left(coalesce(p_note, ''), 300), me, w.link); n := n + 1;
+  end if;
+  if party is not null and party not in (me) and party is distinct from up then
+    perform public.notify_user(party, 'waiting_escalated', p_record, 'escalate-party:' || p_record || ':' || to_char(now() at time zone 'utc', 'YYYY-MM-DD'), 'Escalated: ' || w.title,
+      left(coalesce(p_note, ''), 300), me, w.link); n := n + 1;
+  end if;
+  insert into public.activity (record_id, section, actor, action, detail) values (p_record, w.section, me, 'mgmt_escalated', jsonb_build_object('to', up, 'party', party, 'approval', p_approval, 'note', left(coalesce(p_note, ''), 300)));
+  return jsonb_build_object('ok', true, 'to', up, 'party', party, 'notified', n);
+end $$;
+revoke execute on function public.waiting_escalate(uuid, uuid, text) from public, anon;
+grant execute on function public.waiting_escalate(uuid, uuid, text) to authenticated;
+
+/* ---------------------------------------------------------------------------------------------
+   22. Hourly management job (Phase 1 scheduler, job "executive"): one daily snapshot per manager (for "since
+       yesterday") — service role only. The alert scan is mgmt_alert_scan(null).
+   --------------------------------------------------------------------------------------------- */
+create or replace function public.mgmt_daily_snapshots() returns integer
+language plpgsql security definer set search_path = public as $$
+declare u uuid; n int := 0;
+begin
+  if auth.uid() is not null then raise exception 'Not allowed' using errcode = '42501'; end if;
+  for u in select p.id from public.profiles p where not p.disabled
+             and (p.role in ('owner', 'admin', 'management') or exists (select 1 from public.records r where r.section = 'company.projects' and r.data->>'manager_id' = p.id::text and r.status not in ('Completed', 'Cancelled')))
+  loop
+    if not exists (select 1 from public.management_snapshots s where s.user_id = u and s.kind = 'daily' and s.taken_at::date = (now() at time zone 'utc')::date) then
+      perform public._mgmt_snapshot(u, 'daily'); n := n + 1;
+    end if;
+  end loop;
+  -- snapshots older than 400 days (daily) are not needed for any comparison
+  delete from public.management_snapshots where kind = 'daily' and taken_at < now() - interval '400 days';
+  return n;
+end $$;
+revoke execute on function public.mgmt_daily_snapshots() from public, anon, authenticated;
+grant execute on function public.mgmt_daily_snapshots() to service_role;
 
 commit;

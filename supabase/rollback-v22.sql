@@ -7,6 +7,10 @@ begin;
 drop trigger if exists records_mgmt_changes on public.records;
 drop trigger if exists action_audit_guard on public.action_audit;
 
+drop function if exists public.mgmt_daily_snapshots();
+drop function if exists public.waiting_escalate(uuid, uuid, text);
+drop function if exists public.waiting_remind(uuid, uuid);
+drop function if exists public._waiting_target(uuid, uuid, uuid);
 drop function if exists public.exec_overview();
 drop function if exists public.mgmt_decisions_report();
 drop function if exists public.mgmt_alert_scan(uuid);
@@ -44,6 +48,8 @@ drop index if exists public.records_project_portfolio_idx;
 drop index if exists public.records_task_blocked_by_idx;
 drop index if exists public.approvals_pending_created_idx;
 drop index if exists public.activity_created_idx;
+drop index if exists public.activity_record_idx;
+drop index if exists public.activity_mgmt_idx;
 
 -- portfolios leave the access map (records kept)
 delete from public.section_access where section = 'company.portfolios';

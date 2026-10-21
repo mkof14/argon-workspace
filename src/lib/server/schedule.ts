@@ -25,4 +25,10 @@ export const JOBS_FNS: Record<string, JobFn> = {
   monitor: (db) => monitorJob(db),
   trash: async (db) => ({ trash: await purgeOld(db), housekeeping: await housekeeping(db), intake_files: await guarded(db, "trash:intake", () => cleanIntake().then(() => "ok"), "failed") }),
   reports: (db) => reportsJob(db),
+  // Phase 5: management alerts (deduplicated, cooled down, resolved when the condition clears) and the daily snapshot
+  executive: async (db) => {
+    const { data: alerts, error } = await db.rpc("mgmt_alert_scan", { p_user: null }); if (error) throw new Error(error.message);
+    const { data: snapshots, error: e2 } = await db.rpc("mgmt_daily_snapshots"); if (e2) throw new Error(e2.message);
+    return { alerts, snapshots };
+  },
 };
