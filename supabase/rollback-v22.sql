@@ -15,6 +15,7 @@ drop function if exists public.exec_overview();
 drop function if exists public.mgmt_decisions_report();
 drop function if exists public.mgmt_alert_scan(uuid);
 drop function if exists public._alert_conditions(uuid);
+drop function if exists public.mgmt_alert_text(text);
 drop function if exists public.team_status();
 drop function if exists public._team_status(uuid);
 drop function if exists public.management_changes(text);

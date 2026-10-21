@@ -27,6 +27,7 @@ export default function People() {
   const projectsOf = (p: Profile) => w.projects.filter((x) => x.data?.manager_id === p.id || (Array.isArray(x.data?.members_ids) && x.data.members_ids.includes(p.id)));
   const byDept = deptObjs(depts).map((d: any) => ({ d, n: staff.filter((p) => !p.disabled && p.department === d.key).length })).filter((x) => x.n);
   return <div style={{ display: "grid", gap: 16, ["--dc" as any]: "#0EA5E9" }}>
+    <nav className="seg"><span className="on" style={{ padding: "6px 12px", fontWeight: 600 }}><Icon n="users" />{T(L("Directory", "Справочник", "Довідник", "الدليل"))}</span><Link href="/team" style={{ padding: "6px 12px", fontWeight: 600, textDecoration: "none", color: "var(--ink-2)", display: "inline-flex", gap: 6, alignItems: "center" }}><Icon n="clock" />{T(L("Team status", "Статус команды", "Статус команди", "حالة الفريق"))}</Link></nav>
     <section className="sec-hero"><span className="ic"><Icon n="users" /></span>
       <div style={{ minWidth: 0, position: "relative", zIndex: 1 }}><div className="eyebrow">{T(L("Company", "Компания", "Компанія", "الشركة"))}</div><h2>{T(L("People", "Сотрудники", "Співробітники", "الموظفون"))}</h2>
         <div className="sub"><b className="mono">{staff.filter((p) => !p.disabled).length}</b> {T(L("active", "активных", "активних", "نشط"))} · {byDept.length} {T(L("departments", "отделов", "відділів", "أقسام"))}</div></div>

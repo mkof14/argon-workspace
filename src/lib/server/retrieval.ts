@@ -56,7 +56,8 @@ export async function retrieve(sb: any, me: { id: string; role: string }, ask: A
   let project: any = null;
   { const { data } = await sb.rpc("corp_search", { p_q: q, p_types: ["project"], p_limit: 3 });
     project = (data || [])[0] || null;
-    if (!project && focus?.section === "company.projects") project = { id: focus.id, title: focus.title };
+    // the project the person has open wins over a name match in the words (unless the words name a different project exactly)
+    if (focus?.section === "company.projects" && !(project && project.id !== focus.id && lq.includes(String(project.title || "").toLowerCase()))) project = { id: focus.id, title: focus.title };
     if (!project && focus?.data?.project_ref) project = { id: focus.data.project_ref, title: focus.data.project_ref_title }; }
   if (!project) { // the name may be one word inside the question ("for Project C20")
     for (const w of q.split(/[\s,.;:!?()«»"]+/).filter((x) => x.length >= 3 && /\d/.test(x)).slice(0, 3)) {

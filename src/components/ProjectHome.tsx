@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Icon from "./Icon";
+import ProjectAdvisor from "./ProjectAdvisor";
 import { useApp } from "./App";
 import { tx, type Lang } from "@/lib/i18n";
 import { tone, saveBlob } from "@/lib/format";
@@ -17,7 +18,7 @@ import Discussion from "./Discussion";
 
 type T4 = { en: string; ru: string; uk: string; ar: string };
 const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk, ar });
-type Tab = "overview" | "tasks" | "milestones" | "team" | "documents" | "discussion" | "timeline" | "activity";
+type Tab = "advisor" | "overview" | "tasks" | "milestones" | "team" | "documents" | "discussion" | "timeline" | "activity";
 
 export default function ProjectHome({ id }: { id: string }) {
   const { lang, people, me, access, toast, reload, openAi, rules, tick } = useApp(); const T = (x: T4) => tx(x, lang as Lang);
@@ -59,7 +60,7 @@ export default function ProjectHome({ id }: { id: string }) {
     "", `## ${T(L("Open tasks", "Открытые задачи", "Відкриті задачі", "المهام المفتوحة"))}`, ...tasks.filter(isOpenTask).map((t) => `- ${t.title} · ${t.data?.assignee || "—"} · ${t.status}${t.data?.due ? ` · ${t.data.due}` : ""}`),
     "", `## ${T(L("Waiting for decisions", "Ждут решений", "Чекають рішень", "بانتظار القرارات"))}`, ...decisions.filter((d) => d.status === "Proposed").map((d) => `- ${d.title}`), ...pendingAppr.map((a) => `- ${[...tasks, ...ms, ...docs].find((x) => x.id === a.record_id)?.title || "—"} → ${who(a.approver_id)}`),
   ].join("\n");
-  const TABS: [Tab, string, T4, number?][] = [["overview", "grid", L("Overview", "Обзор", "Огляд", "نظرة عامة")], ["tasks", "bell", L("Tasks", "Задачи", "Задачі", "المهام"), s.open], ["milestones", "flag", L("Milestones", "Вехи", "Віхи", "المراحل"), ms.length], ["team", "users", L("Team", "Команда", "Команда", "الفريق"), team.length], ["documents", "file", L("Documents", "Документы", "Документи", "المستندات"), docs.length], ["discussion", "send", L("Discussion", "Обсуждение", "Обговорення", "النقاش"), nCmt], ["timeline", "calendar", L("Timeline", "График", "Графік", "الجدول الزمني")], ["activity", "clock", L("Activity", "История", "Історія", "النشاط")]];
+  const TABS: [Tab, string, T4, number?][] = [["overview", "grid", L("Overview", "Обзор", "Огляд", "نظرة عامة")], ["advisor", "spark", L("Advisor", "Советник", "Порадник", "المستشار")], ["tasks", "bell", L("Tasks", "Задачи", "Задачі", "المهام"), s.open], ["milestones", "flag", L("Milestones", "Вехи", "Віхи", "المراحل"), ms.length], ["team", "users", L("Team", "Команда", "Команда", "الفريق"), team.length], ["documents", "file", L("Documents", "Документы", "Документи", "المستندات"), docs.length], ["discussion", "send", L("Discussion", "Обсуждение", "Обговорення", "النقاش"), nCmt], ["timeline", "calendar", L("Timeline", "График", "Графік", "الجدول الزمني")], ["activity", "clock", L("Activity", "История", "Історія", "النشاط")]];
   const H = { late: ["c-bad", L("Delayed", "Задержка", "Затримка", "متأخر")], risk: ["c-warn", L("Overdue tasks", "Есть просрочки", "Є прострочення", "مهام متأخرة")], ok: ["c-ok", L("On track", "По плану", "За планом", "وفق الخطة")] } as const;
   const openDecisions = decisions.filter((d) => d.status === "Proposed").length + pendingAppr.length;
   const span = (() => { const dates = [p.data?.start, p.data?.target, ...ms.map((m) => m.data?.due), ...tasks.map((t) => t.data?.due)].filter((x) => typeof x === "string" && /^\d{4}-\d{2}-\d{2}/.test(x)).sort() as string[]; return dates.length ? [dates[0], dates[dates.length - 1] > today ? dates[dates.length - 1] : today] : [today, today]; })();
@@ -75,6 +76,7 @@ export default function ProjectHome({ id }: { id: string }) {
       <div className="stats"><Link className="btn" href={rec(p)}><Icon n="edit" />{T(L("Edit project", "Изменить проект", "Змінити проєкт", "تعديل المشروع"))}</Link></div></section>
     <nav className="tabs card proj-tabs" role="tablist">{TABS.map(([k, ic, l, n]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "on" : ""} onClick={() => go(k)} data-tab={k}><Icon n={ic} />{T(l)}{n ? <b className="mono"> {n}</b> : null}</button>)}</nav>
 
+    {tab === "advisor" && <ProjectAdvisor project={p} />}
     {tab === "overview" && <>
       <div className="kpis">
         <div className="kpi"><small>{T(L("Progress", "Прогресс", "Прогрес", "التقدم"))}</small><b className="mono">{s.progress}%</b><span className="faint">{s.done}/{s.tasks} {T(L("tasks done", "задач выполнено", "задач виконано", "مهام منجزة"))}</span></div>

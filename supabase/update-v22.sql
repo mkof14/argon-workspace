@@ -981,6 +981,11 @@ begin
 end $$;
 revoke execute on function public._alert_conditions(uuid) from public, anon, authenticated;
 
+create or replace function public.mgmt_alert_text(p_kind text) returns text language sql immutable set search_path = '' as $$
+  select case p_kind when 'project_critical' then 'Project became CRITICAL' when 'project_no_owner' then 'Project has no owner' when 'milestone_overdue' then 'Milestone is overdue'
+    when 'critical_blocker' then 'Critical task is blocked' when 'critical_task_overdue' then 'Critical task is overdue' when 'approval_sla' then 'Approval is over its time limit'
+    when 'decision_sla' then 'Decision is over its time limit' else p_kind end
+$$;
 -- evaluate for one person (p_user) or, from the scheduler, for every owner / manager / project manager
 create or replace function public.mgmt_alert_scan(p_user uuid default null) returns jsonb
 language plpgsql security definer set search_path = public as $$
@@ -1001,7 +1006,7 @@ begin
       if not found then
         insert into public.management_alerts(user_id, key, kind, record_id, project_id, severity, title, detail, notified_at)
           values (u, cond.key, cond.kind, cond.record_id, cond.project_id, cond.severity, cond.title, cond.detail, now()) returning * into al;
-        perform public.notify_user(u, 'mgmt_alert', cond.record_id, 'alert:' || al.id || ':1', cond.title, cond.kind, null, null);
+        perform public.notify_user(u, 'mgmt_alert', cond.record_id, 'alert:' || al.id || ':1', cond.title, public.mgmt_alert_text(cond.kind), null, (select public.mgmt_link(r.section, r.id) from public.records r where r.id = cond.record_id));
         opened := opened + 1;
       elsif al.resolved_at is null then
         update public.management_alerts set last_seen_at = now(), detail = cond.detail, title = cond.title, severity = cond.severity where id = al.id;
@@ -1009,7 +1014,7 @@ begin
         update public.management_alerts set resolved_at = null, last_seen_at = now(), opened_at = now(), times_opened = al.times_opened + 1, detail = cond.detail,
           notified_at = case when al.resolved_at < now() - cool then now() else al.notified_at end where id = al.id;
         if al.resolved_at < now() - cool then
-          perform public.notify_user(u, 'mgmt_alert', cond.record_id, 'alert:' || al.id || ':' || (al.times_opened + 1), cond.title, cond.kind, null, null);
+          perform public.notify_user(u, 'mgmt_alert', cond.record_id, 'alert:' || al.id || ':' || (al.times_opened + 1), cond.title, public.mgmt_alert_text(cond.kind), null, (select public.mgmt_link(r.section, r.id) from public.records r where r.id = cond.record_id));
           opened := opened + 1;
         else reopened := reopened + 1; end if;
       end if;

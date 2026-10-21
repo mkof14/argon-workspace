@@ -17,6 +17,8 @@ const T: Record<string, Record<string, string>> = {
   settings: { en: "Choose what reaches you by e-mail in My profile → Notifications.", ru: "Что приходит на почту, можно выбрать в «Мой профиль» → «Уведомления».", uk: "Що надходить поштою, можна вибрати в «Мій профіль» → «Сповіщення».", ar: "اختر ما يصلك بالبريد من ملفي ← الإشعارات." },
 };
 const K: Record<string, Record<string, string>> = {
+  mgmt_alert: { en: "Management alert", ru: "Оповещение руководства", uk: "Сповіщення керівництва", ar: "تنبيه إداري" }, waiting_remind: { en: "Someone is waiting for this", ru: "Этого ждут от вас", uk: "Цього чекають від вас", ar: "شخص ينتظر هذا" },
+  waiting_escalated: { en: "Escalated", ru: "Эскалировано", uk: "Ескальовано", ar: "تم التصعيد" },
   assigned: { en: "Assigned to you", ru: "Назначено вам", uk: "Призначено вам", ar: "أُسند إليك" }, reassigned: { en: "Reassigned to you", ru: "Переназначено вам", uk: "Перепризначено вам", ar: "أُعيد إسناده إليك" },
   unassigned: { en: "No longer assigned to you", ru: "Снято с вас", uk: "Знято з вас", ar: "لم يعد مسنداً إليك" }, status: { en: "Status changed", ru: "Статус изменён", uk: "Статус змінено", ar: "تغيّرت الحالة" },
   mention: { en: "Mentioned you", ru: "Вас упомянули", uk: "Вас згадали", ar: "ذُكرت" }, comment: { en: "New comment", ru: "Новый комментарий", uk: "Новий коментар", ar: "تعليق جديد" },

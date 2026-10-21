@@ -49,6 +49,9 @@ const Assistant = dynamic(() => import("./Assistant"), { ssr: false });
 const People = dynamic(() => import("./People"), { ssr: false });
 const ProjectHome = dynamic(() => import("./ProjectHome"), { ssr: false });
 const Management = dynamic(() => import("./Management"), { ssr: false });
+const Portfolio = dynamic(() => import("./Portfolio"), { ssr: false });
+const ExecControl = dynamic(() => import("./ExecControl"), { ssr: false });
+const TeamStatus = dynamic(() => import("./TeamStatus"), { ssr: false });
 const Notices = dynamic(() => import("./Notices"), { ssr: false });
 const QuickCreate = dynamic(() => import("./QuickCreate"), { ssr: false });
 export const VERSION = "2.37";
@@ -200,16 +203,17 @@ export default function App({ slug }: { slug: string[] }) {
     projects: tx({ en: "Projects", ru: "Проекты", uk: "Проєкти", ar: "المشاريع" }, lang), documents: tx({ en: "Documents", ru: "Документы", uk: "Документи", ar: "المستندات" }, lang),
     calendar: tx({ en: "Calendar", ru: "Календарь", uk: "Календар", ar: "التقويم" }, lang), assistant: tx({ en: "Assistant", ru: "Ассистент", uk: "Асистент", ar: "المساعد" }, lang),
     company: tx({ en: "Company", ru: "Компания", uk: "Компанія", ar: "الشركة" }, lang), people: tx({ en: "People", ru: "Сотрудники", uk: "Співробітники", ar: "الموظفون" }, lang),
-    management: tx({ en: "Management dashboard", ru: "Панель руководства", uk: "Панель керівництва", ar: "لوحة الإدارة" }, lang), tasks: tx({ en: "Tasks", ru: "Задачи", uk: "Задачі", ar: "المهام" }, lang),
+    management: tx({ en: "Management dashboard", ru: "Панель руководства", uk: "Панель керівництва", ar: "لوحة الإدارة" }, lang), portfolio: tx({ en: "Portfolio", ru: "Портфель", uk: "Портфель", ar: "المحفظة" }, lang), tasks: tx({ en: "Tasks", ru: "Задачи", uk: "Задачі", ar: "المهام" }, lang),
     decide: tx({ en: "Approvals & decisions", ru: "Согласования и решения", uk: "Погодження та рішення", ar: "الموافقات والقرارات" }, lang), help: tx({ en: "Help", ru: "Помощь", uk: "Допомога", ar: "المساعدة" }, lang),
     more: tx({ en: "More", ru: "Ещё", uk: "Ще", ar: "المزيد" }, lang),
   };
   const ext = isExternal(me.role);
   const PRIMARY: [string, string, string, string][] = ext ? [["/", "", "grid", t("overview", lang)], ["/messages", "messages", "send", N.messages], ["/reports", "reports", "pie", t("reports", lang)]]
-    : [["/", "", "sun", N.today], ["/messages", "messages", "send", N.messages], ["/projects", "projects", "layers", N.projects], ["/documents", "documents", "file", N.documents], ["/calendar", "calendar", "calendar", N.calendar], ["/assistant", "assistant", "spark", N.assistant]];
+    : [["/", "", "sun", N.today], ["/messages", "messages", "send", N.messages], ["/projects", "projects", "layers", N.projects], ["/portfolio", "portfolio", "grid", N.portfolio], ["/documents", "documents", "file", N.documents], ["/calendar", "calendar", "calendar", N.calendar], ["/assistant", "assistant", "spark", N.assistant]];
   const isOn = (r: string) => (r === "" ? !route || route === "today" : route === r || route.startsWith(r + "/"));
   const special: Record<string, [string, string]> = { trash: [t("workspace", lang), t("trash", lang)], today: [t("workspace", lang), tx({ en: "Today", ru: "Сегодня", uk: "Сьогодні", ar: "اليوم" }, lang)], stardome: [t("workspace", lang), t("sd_title", lang)], projects: [t("workspace", lang), tx({ en: "Projects", ru: "Проекты", uk: "Проєкти", ar: "المشاريع" }, lang)], decide: [t("workspace", lang), tx({ en: "Decisions", ru: "Решения", uk: "Рішення", ar: "القرارات" }, lang)], "admin/users": [t("admin", lang), t("users", lang)], "admin/roles": [t("admin", lang), t("roles", lang)], "admin/system": [t("admin", lang), t("sys_title", lang)], me: [t("workspace", lang), t("my_profile", lang)], learn: [t("workspace", lang), t("learn", lang)], guide: [t("workspace", lang), tx({ en: "User guide", ru: "Руководство", uk: "Посібник", ar: "دليل المستخدم" }, lang)], reports: [t("workspace", lang), t("reports", lang)], templates: [t("workspace", lang), t("templates", lang)], ask: [t("workspace", lang), t("ask_docs", lang)],
     messages: [t("workspace", lang), N.messages], documents: [t("workspace", lang), N.documents], calendar: [t("workspace", lang), N.calendar], assistant: [t("workspace", lang), N.assistant],
+    portfolio: [t("workspace", lang), N.portfolio], control: [t("workspace", lang), tx({ en: "What needs attention", ru: "Что требует внимания", uk: "Що потребує уваги", ar: "ما يحتاج انتباهًا" }, lang)], team: [N.company, tx({ en: "Team status", ru: "Статус команды", uk: "Статус команди", ar: "حالة الفريق" }, lang)],
     people: [N.company, N.people], management: [N.company, N.management], "company-overview": [N.company, t("overview", lang)], knowledge: [N.company, tx({ en: "Knowledge", ru: "Знания", uk: "Знання", ar: "المعرفة" }, lang)], decisions: [N.company, tx({ en: "Decision log", ru: "Журнал решений", uk: "Журнал рішень", ar: "سجل القرارات" }, lang)], notifications: [t("workspace", lang), t("notifications", lang)] };
   if (route.startsWith("projects/")) special[route] = [tx({ en: "Projects", ru: "Проекты", uk: "Проєкти", ar: "المشاريع" }, lang), tx({ en: "Project", ru: "Проект", uk: "Проєкт", ar: "مشروع" }, lang)];
   const hubD = hubDept ? DEPARTMENTS.find((d: any) => d.key === hubDept) : null;
@@ -233,6 +237,9 @@ export default function App({ slug }: { slug: string[] }) {
   else if (route === "decisions" && !ext) body = <DecisionLog />;
   else if (route === "assistant" && !ext) body = <Assistant />;
   else if (route === "people" && !ext) body = <People />;
+  else if (route === "portfolio" && !ext) body = <Portfolio />;
+  else if (route === "control" && !ext) body = <ExecControl />;
+  else if (route === "team" && !ext) body = <TeamStatus />;
   else if (route === "notifications") body = <Notices />;
   else if (route === "management") body = MANAGERS.includes(me.role) ? <Management /> : <div className="card empty">{t("no_access", lang)}</div>;
   else if (route.startsWith("projects/") && slug.length === 2 && !ext) body = <ProjectHome id={slug[1]} />;

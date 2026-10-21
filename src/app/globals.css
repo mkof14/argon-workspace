@@ -1475,3 +1475,27 @@ tr.grp td b{margin-inline-end:6px}
   .doc-table .col-dept,.doc-table .col-upd{display:none}
   .ver{grid-template-columns:22px minmax(0,1fr)}.ver-act{grid-column:2}
 }
+/* Phase 5 — executive control */
+.lvl-critical{background:var(--bad);color:#fff}
+.lvl-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:4px 12px 10px}
+.lvl-tile{display:grid;gap:2px;padding:10px 12px;border-radius:12px;text-decoration:none;text-align:center;border:1px solid transparent}
+.lvl-tile b{font-size:22px;font-family:var(--f-display)}.lvl-tile small{font-weight:600}
+.lvl-tile:hover{border-color:currentColor}
+.why{margin:4px 0 0;padding:0;list-style:none;display:grid;gap:3px}
+.why li{display:flex;gap:8px;justify-content:space-between;font-size:13.5px;color:var(--ink-2)}
+.hub-row.attn .linkish{display:grid;gap:2px;font-size:inherit}
+.form-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px 14px}
+.form-grid .field>span{font-size:13px;font-weight:600;color:var(--ink-2)}
+.review-packet{border:1px solid var(--line);border-radius:12px;padding:14px 18px;background:var(--surface)}
+.review-packet h3{margin:12px 0 4px;font-size:15px}.review-packet ul{margin:0;padding-inline-start:18px;display:grid;gap:3px}
+.vox{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.vox .input{flex:1;min-width:200px}
+.vox .rec{background:var(--bad);border-color:var(--bad);color:#fff}
+.team-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.team-card{padding:12px 14px;display:grid;gap:6px}
+.team-card .who{display:flex;gap:10px;align-items:center}
+@media (max-width:720px){.lvl-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media print{body:has(.print-area) .nav,body:has(.print-area) header{display:none}}
+.seg span.on,.seg a{display:inline-flex;align-items:center;gap:6px;border-radius:6px;font-size:13.5px}
+.seg span.on{background:var(--accent);color:var(--accent-ink)}
+.seg svg{flex:none}

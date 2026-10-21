@@ -10,6 +10,7 @@ import { saveBlob, tone } from "@/lib/format";
 import { DEMO, store, type Activity, type Rec } from "@/lib/store";
 import { ORG_DEPTS } from "@/config/workspace.config.mjs";
 import { useWork } from "./useWork";
+import ExecControl from "./ExecControl";
 import { csv, daysTo, isOpenTask, MS_CLOSED, projectStats, todayIso, workload } from "@/lib/work";
 import { deptLabel, personName, deptChoices, deptObjs, useDepartments } from "./PeopleFields";
 
@@ -20,7 +21,21 @@ const CAT: Record<string, T4> = { "finance.expenses": L("Financial", "Финан
   "operations.procurement": L("Procurement", "Закупки", "Закупівлі", "المشتريات"), "legal.contracts": L("Contracts", "Договоры", "Договори", "العقود"), "company.documents": L("Documents", "Документы", "Документи", "المستندات") };
 const OTHER = L("Other", "Другое", "Інше", "أخرى");
 
+/** Management: Executive Control (Phase 5, computed in the database for the viewer) and the operations dashboard. */
 export default function Management() {
+  const { lang } = useApp(); const T = (x: T4) => tx(x, lang as Lang);
+  const [v, setV] = useState<"exec" | "ops">(() => { try { return (sessionStorage.getItem("mgmt_view") as any) || "exec"; } catch { return "exec"; } });
+  const pick = (x: "exec" | "ops") => { setV(x); try { sessionStorage.setItem("mgmt_view", x); } catch {} };
+  return <div style={{ display: "grid", gap: 16, ["--dc" as any]: "#E5484D" }}>
+    <nav className="seg" aria-label={T(L("View", "Вид", "Вигляд", "العرض"))}>
+      <button className={v === "exec" ? "on" : ""} onClick={() => pick("exec")}><Icon n="target" />{T(L("Executive control", "Управление", "Керування", "التحكم التنفيذي"))}</button>
+      <button className={v === "ops" ? "on" : ""} onClick={() => pick("ops")}><Icon n="pie" />{T(L("Operations dashboard", "Операционная панель", "Операційна панель", "لوحة العمليات"))}</button>
+    </nav>
+    {v === "exec" ? <ExecControl /> : <OperationsDashboard />}
+  </div>;
+}
+
+function OperationsDashboard() {
   const { lang, people, access, tick } = useApp(); const T = (x: T4) => tx(x, lang as Lang);
   const depts = useDepartments();
   const w = useWork(["company.decisions"]); const today = todayIso();

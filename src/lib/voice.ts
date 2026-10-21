@@ -17,8 +17,8 @@ export type Parsed = {
 };
 
 export const READ_ROUTES: Partial<Record<Intent, string>> = {
-  show_today: "/", show_attention: "/management?view=attention", show_risks: "/portfolio?filter=risk", show_blocked: "/management?view=blocked",
-  show_overdue: "/management?view=overdue", show_waiting: "/management?view=waiting", show_decisions: "/management?view=decisions", show_notifications: "/notifications",
+  show_today: "/", show_attention: "/control?view=attention", show_risks: "/portfolio?tab=risk", show_blocked: "/control?view=blocked",
+  show_overdue: "/control?view=overdue", show_waiting: "/control?view=waiting", show_decisions: "/control?view=decisions", show_notifications: "/notifications",
 };
 
 const norm = (s: string) => s.toLowerCase().replace(/[«»"“”„'`]/g, "").replace(/[.,!?;:]+(\s|$)/g, " ").replace(/\s+/g, " ").trim();

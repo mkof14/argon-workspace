@@ -13,6 +13,7 @@ import InstallApp from "./InstallApp";
 import { ROLES, ROLE_COLORS } from "@/config/workspace.config.mjs";
 import { t, tx } from "@/lib/i18n";
 import { DEMO, sb, store } from "@/lib/store";
+import { AVAILABILITY } from "@/lib/mgmt";
 
 export default function MyProfile() {
   const { lang, me, toast, reload } = useApp();
@@ -20,6 +21,8 @@ export default function MyProfile() {
   const [title, setTitle] = useState(me.title || "");
   const [phone, setPhone] = useState(me.phone || "");
   const [tz, setTz] = useState(me.timezone || (typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "") || "America/New_York");
+  const [loc, setLoc] = useState(me.location || ""); const [av, setAv] = useState(me.availability || ""); const [avNote, setAvNote] = useState(me.availability_note || ""); const [avUntil, setAvUntil] = useState((me.availability_until || "").slice(0, 10));
+  const saveAv = async () => { try { await store.updateProfile(me.id, { location: loc.trim() || null, availability: av || null, availability_note: avNote.trim() || null, availability_until: avUntil ? `${avUntil}T23:59:59Z` : null }); toast(t("saved", lang)); reload(); } catch (e: any) { toast(e.message || "Error", true); } };
   const [pw, setPw] = useState(""); const [pw2, setPw2] = useState("");
   const c = (ROLE_COLORS as any)[me.role];
   const save = async () => { try { await store.updateProfile(me.id, { full_name: name.trim(), title: title.trim() || null, phone: phone.trim() || null, timezone: tz || null }); toast(t("saved", lang)); reload(); } catch (e: any) { toast(e.message || "Error", true); } };
@@ -50,6 +53,16 @@ export default function MyProfile() {
               <span className="hint">{tx({ en: "The morning digest comes at about 8:00 your time; colleagues see your local time.", ru: "Утренняя сводка приходит около 8:00 по вашему времени; коллеги видят ваше местное время.", uk: "Ранкове зведення надходить близько 8:00 за вашим часом; колеги бачать ваш місцевий час.", ar: "يصل ملخص الصباح نحو الساعة 8:00 بتوقيتك؛ ويرى زملاؤك وقتك المحلي." }, lang)}</span></div>
             <div><button className="btn primary" onClick={save}>{t("save", lang)}</button></div>
             <p className="faint" style={{ margin: 0, fontSize: 14 }}><Icon n="mail" className="lockico" /> {t("company_sig", lang)}</p>
+          </div></div>
+        <div className="card" id="availability"><div className="card-h"><h2><Icon n="clock" />{tx({ en: "Where I work and availability", ru: "Где я работаю и доступность", uk: "Де я працюю і доступність", ar: "مكان عملي وتوفري" }, lang)}</h2></div>
+          <div className="card-b" style={{ display: "grid", gap: 12 }}>
+            <div className="field"><label htmlFor="p-loc">{tx({ en: "Location (city, office)", ru: "Местоположение (город, офис)", uk: "Місце (місто, офіс)", ar: "الموقع (المدينة، المكتب)" }, lang)}</label><input id="p-loc" className="input" maxLength={120} value={loc} onChange={(e) => setLoc(e.target.value)} placeholder="Monroe, NC" /></div>
+            <div className="field"><label htmlFor="p-av">{tx({ en: "Availability", ru: "Доступность", uk: "Доступність", ar: "التوفر" }, lang)}</label>
+              <select id="p-av" className="input" value={av} onChange={(e) => setAv(e.target.value)}><option value="">{tx({ en: "Not set", ru: "Не указано", uk: "Не вказано", ar: "غير محدد" }, lang)}</option>{Object.entries(AVAILABILITY).map(([k, v]) => <option key={k} value={k}>{tx(v, lang)}</option>)}</select></div>
+            <div className="field"><label htmlFor="p-avn">{tx({ en: "Note (optional)", ru: "Пояснение (необязательно)", uk: "Пояснення (необов'язково)", ar: "ملاحظة (اختياري)" }, lang)}</label><input id="p-avn" className="input" maxLength={200} value={avNote} onChange={(e) => setAvNote(e.target.value)} /></div>
+            <div className="field"><label htmlFor="p-avu">{tx({ en: "Until (optional)", ru: "До (необязательно)", uk: "До (необов'язково)", ar: "حتى (اختياري)" }, lang)}</label><input id="p-avu" type="date" className="input" value={avUntil} onChange={(e) => setAvUntil(e.target.value)} /></div>
+            <span className="hint faint" style={{ fontSize: 13 }}>{tx({ en: "Colleagues see this in Team status. It is what you set — nothing is measured.", ru: "Коллеги видят это в «Статусе команды». Это то, что вы указали сами, — ничего не измеряется.", uk: "Колеги бачать це в «Статусі команди». Це те, що ви вказали самі, — нічого не вимірюється.", ar: "يرى الزملاء هذا في حالة الفريق. هو ما تحدده أنت ولا يُقاس شيء." }, lang)}</span>
+            <div><button className="btn primary" onClick={saveAv}>{t("save", lang)}</button></div>
           </div></div>
         <div className="card"><div className="card-h"><h2><Icon n="key" />{t("set_pw", lang)}</h2></div>
           <form className="card-b" style={{ display: "grid", gap: 12 }} onSubmit={savePw}>

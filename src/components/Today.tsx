@@ -3,6 +3,8 @@ import { NotifyHint } from "./Notify";
 import SinceLast, { TeamClock } from "./SinceLast";
 import Link from "next/link";
 import Announcements from "./Announcements";
+import VoiceInbox from "./VoiceInbox";
+import { WaitingFor } from "./ExecControl";
 import Icon from "./Icon";
 import { useTr } from "@/lib/useTr";
 import { useApp, findSection } from "./App";
@@ -82,8 +84,11 @@ export default function Today() {
         {access.write.has("company.documents") && <Link href="/company/documents?new=1" className="btn sm"><Icon n="upload" />{T(L("Upload document", "Загрузить документ", "Завантажити документ", "رفع مستند"))}</Link>}
         {access.write.has("company.meetings") && <Link href="/company/meetings?new=1" className="btn sm"><Icon n="calendar" />{T(L("Create meeting", "Создать встречу", "Створити зустріч", "إنشاء اجتماع"))}</Link>}
         <Link href="/decide" className="btn ghost sm"><Icon n="check" />{T(L("Approvals", "Согласования", "Погодження", "الموافقات"))}</Link>
+        <Link href="/control" className="btn ghost sm"><Icon n="target" />{T(L("What needs attention", "Что требует внимания", "Що потребує уваги", "ما يحتاج انتباهًا"))}</Link>
+        <Link href="/portfolio" className="btn ghost sm"><Icon n="grid" />{T(L("Portfolio", "Портфель", "Портфель", "المحفظة"))}</Link>
         <Link href="/assistant" className="btn ghost sm"><Icon n="spark" />{T(L("Ask Assistant", "Спросить ассистента", "Запитати асистента", "اسأل المساعد"))}</Link>
       </div>
+      <VoiceInbox compact />
       <TeamClock />
       <NotifyHint />
       <section className="card" id="tasks">
@@ -100,6 +105,7 @@ export default function Today() {
         <div id="cal"><Box icon="calendar" title={L("My calendar", "Мой календарь", "Мій календар", "تقويمي")} n={meetings.length + deadlines.length} more="/calendar" empty={L("No meetings or deadlines this week.", "На этой неделе встреч и сроков нет.", "Цього тижня зустрічей і термінів немає.", "لا اجتماعات ولا مواعيد هذا الأسبوع.")}>
           {meetings.map((m) => <Link key={m.id} href={href(m)} className="hub-row"><span><b>{m.title}</b><small>{m.data?.place || ""}</small></span><span className={`chip ${m.data?.date === today ? "c-warn" : "c-info"}`}>{m.data?.date === today ? T(L("today", "сегодня", "сьогодні", "اليوم")) : m.data?.date} {m.data?.time || ""}</span></Link>)}
           {deadlines.map((x) => <Link key={x.r.id + x.k} href={href(x.r)} className="hub-row"><span><b>{x.r.title}</b><small>{tx(findSection(x.r.section)?.label, lang as Lang)}</small></span><span className={`chip ${x.d < 0 ? "c-bad" : x.d <= 2 ? "c-warn" : "c-info"}`}>{rel(x.d)}</span></Link>)}</Box></div>
+        <div id="waiting" className="card hub-card"><div className="card-h"><h2><Icon n="clock" />{T(L("Waiting for", "Ждём", "Чекаємо", "بانتظار"))}</h2><Link className="btn ghost sm" style={{ marginInlineStart: "auto" }} href="/control?view=waiting">{T(L("All", "Все", "Усі", "الكل"))}</Link></div><div style={{ padding: "0 8px 8px" }}><WaitingFor compact /></div></div>
         <div id="notes"><Box icon="bell" title={L("Notifications", "Уведомления", "Сповіщення", "الإشعارات")} n={nt.unread.length} more="/notifications" empty={L("Nothing new.", "Ничего нового.", "Нічого нового.", "لا جديد.")}>
           {nt.unread.slice(0, 6).map((n) => <Link key={n.id} href={noticeHref(n)} className="hub-row" onClick={() => store.markNotices([n.id]).catch(() => {})}><span><small>{tx(KINDS[n.kind]?.label || L(n.kind, n.kind, n.kind, n.kind), lang as Lang)}</small><b>{n.title}</b>{n.body && <small>{commentText(n.body).slice(0, 110)}</small>}</span></Link>)}</Box></div>
         <div id="proj"><Box icon="layers" title={L("My projects", "Мои проекты", "Мої проєкти", "مشاريعي")} n={myProjects.length} more="/projects" empty={L("You are not in a project team yet.", "Вы пока не в команде проекта.", "Ви поки не в команді проєкту.", "لست في فريق مشروع بعد.")}>

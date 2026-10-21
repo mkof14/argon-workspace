@@ -17,6 +17,9 @@ export const KINDS: Record<string, { icon: string; label: T4 }> = {
   reassigned: { icon: "refresh", label: L("Reassigned to you", "Переназначено вам", "Перепризначено вам", "أُعيد إسناده إليك") },
   unassigned: { icon: "x", label: L("No longer yours", "Снято с вас", "Знято з вас", "لم يعد لك") },
   status: { icon: "check", label: L("Status changed", "Статус изменён", "Статус змінено", "تغيّرت الحالة") },
+  mgmt_alert: { icon: "alert", label: L("Management alert", "Оповещение руководства", "Сповіщення керівництва", "تنبيه إداري") },
+  waiting_remind: { icon: "clock", label: L("Someone is waiting for this", "Этого ждут от вас", "Цього чекають від вас", "شخص ينتظر هذا") },
+  waiting_escalated: { icon: "alert", label: L("Escalated", "Эскалировано", "Ескальовано", "تم التصعيد") },
   mention: { icon: "user", label: L("Mentioned you", "Упомянули вас", "Згадали вас", "ذُكرت") },
   comment: { icon: "send", label: L("New comment", "Новый комментарий", "Новий коментар", "تعليق جديد") },
   approval_requested: { icon: "check", label: L("Approval requested", "Нужно ваше согласование", "Потрібне ваше погодження", "مطلوب موافقتك") },
@@ -44,6 +47,7 @@ export const CATS: { k: string; label: T4; kinds?: string[] }[] = [
   { k: "documents", label: L("Documents", "Документы", "Документи", "المستندات"), kinds: ["doc_version"] },
   { k: "approvals", label: L("Approvals", "Согласования", "Погодження", "الموافقات"), kinds: ["approval_requested", "approval_done"] },
   { k: "company", label: L("Company", "Компания", "Компанія", "الشركة"), kinds: ["announcement", "announcement_critical", "security"] },
+  { k: "management", label: L("Management", "Руководство", "Керівництво", "الإدارة"), kinds: ["mgmt_alert", "waiting_remind", "waiting_escalated"] },
 ];
 export const noticeHref = (n: Notice) => n.link || (n.record_id && n.section ? `/${n.section.replace(".", "/")}?r=${n.record_id}` : "/notifications");
 const ago = (iso: string, lang: Lang) => { const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return m < 60 ? tx(L(`${Math.max(1, m)} min`, `${Math.max(1, m)} мин`, `${Math.max(1, m)} хв`, `${Math.max(1, m)} د`), lang) : m < 1440 ? tx(L(`${Math.round(m / 60)} h`, `${Math.round(m / 60)} ч`, `${Math.round(m / 60)} год`, `${Math.round(m / 60)} س`), lang) : iso.slice(0, 10); };
