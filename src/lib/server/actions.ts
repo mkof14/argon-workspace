@@ -186,7 +186,9 @@ export async function complete(c: Ctx, id: string, reported: Reported[]) {
       out.push({ op: "create", ok: true, id: rec.id, link: link(rec), title: rec.title }); undos.push({ op: "delete", id: rec.id, section: rec.section, version: rec.version });
     } else if (op.op === "update") {
       const rec = await recOf(c, op.id);
-      if (!rec || rec.version <= op.version) { allOk = false; errors.push("change not found"); out.push({ op: "update", ok: false, error: "not verified" }); continue; }
+      const same = rec && Object.entries(op.patch || {}).every(([k, v]) => JSON.stringify(rec.data?.[k] ?? null) === JSON.stringify(v ?? null)) && (rec.status ?? null) === (op.status ?? null);
+      if (rec && rec.version <= op.version && same && JSON.stringify(op.prev?.fields || {}) === JSON.stringify(op.patch || {}) && (op.prev?.status ?? null) === (op.status ?? null)) { out.push({ op: "update", ok: true, id: rec.id, link: link(rec), title: rec.title, unchanged: true }); continue; } // it already was so: nothing to undo
+      if (!rec || rec.version <= op.version || !same) { allOk = false; errors.push("change not found"); out.push({ op: "update", ok: false, error: "not verified" }); continue; }
       out.push({ op: "update", ok: true, id: rec.id, link: link(rec), title: rec.title });
       undos.push({ op: "set", id: rec.id, section: rec.section, version: rec.version, status: op.prev?.status ?? null, fields: op.prev?.fields || {} });
     } else if (op.op === "comment") {
