@@ -1078,4 +1078,9 @@ grant execute on function public.restore_load(text, jsonb) to service_role;
 -- those cannot carry a company)
 insert into public.section_access(section, role, can_write, external) values ('company.documents', 'partner', false, true) on conflict (section, role) do nothing;
 
+-- fixed search_path for the helper and guard functions (Supabase security advisor, lint 0011)
+alter function public.as_uuid(text) set search_path = '';
+alter function public.department_guard() set search_path = public;
+alter function public.document_version_guard() set search_path = public;
+
 commit;
