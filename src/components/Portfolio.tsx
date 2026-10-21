@@ -43,7 +43,7 @@ export default function Portfolio() {
       {access.write.has("company.portfolios") && <Link className="btn ghost sm" style={{ marginInlineStart: "auto" }} href="/company/portfolios"><Icon n="edit" />{T(L("Manage portfolios", "Управлять портфелями", "Керувати портфелями", "إدارة المحافظ"))}</Link>}
     </div>
     {groups.map((g) => { const list = (g.projects || []).filter((p: any) => fits(tab, p)); if (!list.length && tab !== "all") return null; const lv = g.levels || {};
-      return <section key={g.portfolio_id || "none"} className="card">
+      return <section key={g.portfolio_id || "none"} className="card" data-portfolio={g.portfolio_id || "none"}>
         <div className="card-h" style={{ flexWrap: "wrap", gap: 8 }}><h2><Icon n="layers" />{g.portfolio_id ? <Link href={g.link} style={{ color: "inherit" }}>{g.name}</Link> : T(L("Not in a portfolio", "Вне портфеля", "Поза портфелем", "خارج المحافظ"))}</h2>
           {g.portfolio_id && <LevelChip level={g.level} />}
           <span className="faint" style={{ fontSize: 13 }}>{[g.status, g.priority, name(g.owner_id), g.target ? `${T(L("target", "цель", "ціль", "الهدف"))} ${g.target}` : ""].filter(Boolean).join(" · ")}</span>
@@ -58,7 +58,7 @@ export default function Portfolio() {
         {(g.risks || []).length > 0 && <div style={{ padding: "0 16px 8px" }} className="faint">{T(L("Risks", "Риски", "Ризики", "المخاطر"))}: {(g.risks || []).slice(0, 4).map((r: any) => `${r.project} — ${r.reason ? healthReason(r.reason, lang) : say(LEVELS[r.level as Level], lang)}`).join("; ")}</div>}
         <div className="feed" style={{ padding: "0 8px 8px" }}>
           {!list.length ? <div className="empty" style={{ padding: 12 }}>{T(L("No projects you can open here.", "Здесь нет доступных вам проектов.", "Тут немає доступних вам проєктів.", "لا مشاريع متاحة لك هنا."))}</div>
-            : list.map((p: any) => { const on = openP === p.id; return <div key={p.id} className="hub-row" style={{ alignItems: "flex-start" }}>
+            : list.map((p: any) => { const on = openP === p.id; return <div key={p.id} className="hub-row" data-proj={p.id} data-level={p.level} style={{ alignItems: "flex-start" }}>
               <button className="linkish" style={{ minWidth: 0, flex: 1, display: "grid", gap: 2 }} onClick={() => setOpenP(on ? "" : p.id)} aria-expanded={on}>
                 <b>{p.title}</b>
                 <small>{[p.status, name(p.manager_id) || T(L("no owner", "нет руководителя", "немає керівника", "بلا مالك")), p.target ? `${T(L("deadline", "срок", "термін", "الموعد"))} ${p.target}` : "", p.next_milestone ? `${T(L("next", "далее", "далі", "التالي"))}: ${p.next_milestone.title} ${p.next_milestone.due}` : ""].filter(Boolean).join(" · ")}</small>

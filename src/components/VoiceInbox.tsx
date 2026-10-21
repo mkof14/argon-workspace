@@ -46,7 +46,7 @@ function Proposal({ p, onDone }: { p: any; onDone?: (r: any) => void }) {
   };
   const undo = async () => { const r = await undoAction(p.id, lang); if (r.ok) { setState("undone"); reload(); toast(T(L("Undone", "Отменено", "Скасовано", "تم التراجع"))); } else toast(r.error || "Error", true); };
   const [rc, rl] = RISK[p.risk] || RISK.read;
-  return <div className="proposal" style={{ display: "grid", gap: 6, padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 10 }}>
+  return <div className="proposal" data-proposal={p.status} data-risk={p.risk} data-state={state} style={{ display: "grid", gap: 6, padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 10 }}>
     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}><b>{p.summary}</b><span className={`chip ${rc}`}>{T(rl)}</span></div>
     {p.question && state === "ready" && <div className="faint"><Icon n="info" /> {p.question}</div>}
     {p.options?.length > 0 && state === "ready" && <div className="chipbar">{p.options.map((o: any) => <button key={o.id} onClick={() => go(p.intent === "assign_task" && !p.resolved?.task ? { taskId: o.id } : ["change_due_date", "complete_task"].includes(p.intent) ? { taskId: o.id } : { personId: o.id })}>{o.label}</button>)}</div>}
@@ -98,7 +98,7 @@ export default function VoiceInbox({ compact }: { compact?: boolean }) {
       {plan && <Proposal key={plan.id} p={plan} onDone={() => load()} />}
       {items && items.length > 0 && <>
         <div className="toolbar"><span className="eyebrow">{T(L("Captured", "Записано", "Записано", "الملتقط"))}</span><nav className="seg" style={{ marginInlineStart: "auto" }}><button className={show === "open" ? "on" : ""} onClick={() => setShow("open")}>{T(L("Open", "Открытые", "Відкриті", "مفتوحة"))}</button><button className={show === "all" ? "on" : ""} onClick={() => setShow("all")}>{T(L("All", "Все", "Усі", "الكل"))}</button></nav></div>
-        <div className="feed">{list.slice(0, compact ? 5 : 50).map((it) => { const [c, l] = ST[it.status] || ST.New; const open = !["Converted", "Dismissed"].includes(it.status); return <div key={it.id} className="hub-row" style={{ alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div className="feed">{list.slice(0, compact ? 5 : 50).map((it) => { const [c, l] = ST[it.status] || ST.New; const open = !["Converted", "Dismissed"].includes(it.status); return <div key={it.id} className="hub-row" data-vox={it.status} style={{ alignItems: "flex-start", flexWrap: "wrap" }}>
           <span style={{ minWidth: 0, flex: 1 }}><b>“{it.raw_text}”</b><small>{String(it.created_at).slice(0, 16).replace("T", " ")}{it.plan?.summary ? ` · ${it.plan.summary}` : ""}{it.question && open ? ` · ${it.question}` : ""}{it.error ? ` · ${it.error}` : ""}{it.converted_as ? ` · → ${it.converted_as}` : ""}</small></span>
           <span className={`chip ${c}`}>{T(l)}</span>
           {it.result_record_id && <Link className="btn ghost sm" href={`/company/tasks?r=${it.result_record_id}`}><Icon n="chev" /></Link>}

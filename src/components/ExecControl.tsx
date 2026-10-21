@@ -51,7 +51,7 @@ export default function ExecControl() {
   const ind = ov.indicators || {}; const ph = ov.portfolio_health || {};
   const I = ({ k, l, onClick, href, bad }: { k: string; l: T4; onClick?: () => void; href?: string; bad?: boolean }) => {
     const c = <><b className={`mono ${bad && ind[k] ? "neg" : ""}`} style={{ fontSize: 20 }}>{ind[k] ?? 0}</b><small>{T(l)}</small></>;
-    return href ? <Link className="stat" href={href}>{c}</Link> : <button className="stat" onClick={onClick}>{c}</button>;
+    return href ? <Link className="stat" data-ind={k} href={href}>{c}</Link> : <button className="stat" data-ind={k} onClick={onClick}>{c}</button>;
   };
   const rel = (n: number | null | undefined) => (n == null ? "" : n < 0 ? T(L("{n} d late", "просрочено {n} дн.", "прострочено {n} дн.", "متأخر {n} يوم"), { n: -n }) : n === 0 ? T(L("today", "сегодня", "сьогодні", "اليوم")) : T(L("in {n} d", "через {n} дн.", "через {n} дн.", "بعد {n} يوم"), { n }));
   const Card = ({ icon, title, n, more, children, empty }: { icon: string; title: T4; n?: number; more?: () => void; children: React.ReactNode; empty: T4 }) => (
@@ -82,7 +82,7 @@ export default function ExecControl() {
 
       <div className="hub-grid">
         <div className="wide"><Card icon="target" title={L("Needs attention", "Требует внимания", "Потребує уваги", "يحتاج انتباهًا")} n={ov.attention_total} empty={L("Nothing needs attention in the records you can open.", "В доступных вам записях ничего не требует внимания.", "У доступних вам записах нічого не потребує уваги.", "لا شيء يحتاج انتباهًا في السجلات المتاحة لك.")}>
-          {(ov.attention || []).map((a: any, i: number) => { const why = attentionWhy(a, lang); const on = open === a.item_key; const lab = attentionLabel(a.attention_score); return <div key={a.item_key} className="hub-row attn">
+          {(ov.attention || []).map((a: any, i: number) => { const why = attentionWhy(a, lang); const on = open === a.item_key; const lab = attentionLabel(a.attention_score); return <div key={a.item_key} className="hub-row attn" data-attn={a.record_id}>
             <span className="mono faint" style={{ width: 18 }}>{i + 1}</span>
             <button className="linkish" style={{ minWidth: 0, flex: 1, textAlign: "start" }} onClick={() => setOpen(on ? "" : a.item_key)} aria-expanded={on}>
               <b>{a.title}{a.project_title && a.project_title !== a.title ? <span className="faint"> · {a.project_title}</span> : null}</b>
@@ -95,7 +95,7 @@ export default function ExecControl() {
         </Card></div>
 
         <Card icon="pie" title={L("Portfolio health", "Состояние портфеля", "Стан портфеля", "صحة المحفظة")} empty={L("No active projects.", "Нет активных проектов.", "Немає активних проєктів.", "لا مشاريع نشطة.")}>
-          <div className="lvl-grid">{(["healthy", "attention", "risk", "critical"] as Level[]).map((k) => <Link key={k} href={`/portfolio?tab=${k}`} className={`lvl-tile ${lvlChip(k)}`}><b className="mono">{ph[k] ?? 0}</b><small>{T(LEVELS[k])}</small></Link>)}</div>
+          <div className="lvl-grid" data-health>{(["healthy", "attention", "risk", "critical"] as Level[]).map((k) => <Link key={k} href={`/portfolio?tab=${k}`} className={`lvl-tile ${lvlChip(k)}`}><b className="mono">{ph[k] ?? 0}</b><small>{T(LEVELS[k])}</small></Link>)}</div>
           {(ov.projects || []).filter((p: any) => ["critical", "risk"].includes(p.level)).slice(0, 4).map((p: any) => <Link key={p.id} href={`/projects/${p.id}`} className="hub-row"><span style={{ minWidth: 0 }}><b>{p.title}</b><small>{(p.reasons || []).slice(0, 2).map((r: any) => healthReason(r, lang)).join(" · ")}</small></span><LevelChip level={p.level} score={p.score} /></Link>)}
         </Card>
 
@@ -138,7 +138,7 @@ export default function ExecControl() {
 export function LoopList({ rows, name }: { rows: any[]; name: (id?: string | null) => string }) {
   const { lang } = useApp(); const T = (x: T4, v?: any) => say(x, lang, v);
   if (!rows.length) return <div className="empty" style={{ padding: 16 }}>{T(L("Nothing here.", "Здесь пусто.", "Тут порожньо.", "لا شيء هنا."))}</div>;
-  return <>{rows.slice(0, 200).map((l) => <div key={l.loop_key} className="hub-row">
+  return <>{rows.slice(0, 200).map((l) => <div key={l.loop_key} className="hub-row" data-loop={l.kind} data-rec={l.record_id}>
     <span className={`chip ${l.severity === "critical" || l.severity === "high" ? "c-bad" : l.severity === "medium" ? "c-warn" : "c-info"}`}>{T(SEVERITY[l.severity])}</span>
     <Link href={l.link} style={{ minWidth: 0, flex: 1, color: "inherit", textDecoration: "none" }}><b>{l.title}</b>
       <small>{loopText(l, lang)}{l.project_title && l.project_title !== l.title ? ` · ${l.project_title}` : ""}{name(l.owner_id) ? ` · ${name(l.owner_id)}` : ""} · {T(L("{n} d", "{n} дн.", "{n} дн.", "{n} يوم"), { n: l.age_days })}</small></Link>
@@ -175,7 +175,7 @@ export function WaitingFor({ compact }: { compact?: boolean }) {
   const groups = (["me", "team", "others", "external"] as const).map((b) => [b, rows.filter((r) => r.bucket === b)] as const).filter(([, l]) => l.length || !compact);
   return <div style={{ display: "grid", gap: 12 }}>{groups.map(([b, list]) => <div key={b}>
     <div className="eyebrow" style={{ padding: "6px 8px 2px" }}>{T(WAIT_BUCKET[b])} · {list.length}</div>
-    {!list.length ? <div className="faint" style={{ padding: "4px 8px" }}>—</div> : list.slice(0, compact ? 5 : 100).map((w) => <div key={w.item_key} className="hub-row">
+    {!list.length ? <div className="faint" style={{ padding: "4px 8px" }}>—</div> : list.slice(0, compact ? 5 : 100).map((w) => <div key={w.item_key} className="hub-row" data-wait={w.bucket} data-rec={w.record_id}>
       <Link href={w.link} style={{ minWidth: 0, flex: 1, color: "inherit", textDecoration: "none" }}><b>{b === "me" ? w.title : `${w.party_name || "—"} · ${w.title}`}</b>
         <small>{T(WAIT_KIND[w.kind])}{w.project_title ? ` · ${w.project_title}` : ""}{w.due ? ` · ${T(L("due", "срок", "термін", "الموعد"))} ${w.due}` : ""} · {T(L("waiting {n} d", "ждём {n} дн.", "чекаємо {n} дн.", "ننتظر {n} يوم"), { n: w.age_days })} · {w.state}{w.last_activity ? ` · ${T(L("last activity", "последняя активность", "остання активність", "آخر نشاط"))} ${String(w.last_activity).slice(0, 10)}` : ""}</small></Link>
       <span className={`chip ${w.escalation === "overdue" || w.escalation === "escalated" ? "c-bad" : w.escalation === "none" ? "c-info" : "c-warn"}`}>{T(ESCALATION[w.escalation])}</span>

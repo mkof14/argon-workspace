@@ -40,7 +40,7 @@ export default function ProjectAdvisor({ project }: { project: { id: string; tit
   if (!h) return <section className="card empty">{T(L("No health data for this project.", "Нет данных о состоянии проекта.", "Немає даних про стан проєкту.", "لا بيانات صحة لهذا المشروع."))}</section>;
   const actions = [...new Map(loops.filter((l) => l.severity !== "low").map((l) => [l.next_action, l])).values()].slice(0, 5);
   const ask = T(L("Project Advisor: what is happening with this project and what is blocking it? Use only the facts you are given, cite each one, then list the suggested management actions.", "Советник проекта: что происходит с этим проектом и что его блокирует? Используйте только данные факты, ссылайтесь на каждый, затем перечислите предлагаемые действия руководства.", "Порадник проєкту: що відбувається з цим проєктом і що його блокує? Використовуйте лише надані факти, посилайтеся на кожен, потім перелічіть запропоновані дії керівництва.", "مستشار المشروع: ما الذي يحدث في هذا المشروع وما الذي يعيقه؟ استخدم الحقائق المعطاة فقط واستشهد بكل منها، ثم اذكر الإجراءات الإدارية المقترحة."));
-  return <section className="card advisor print-area">
+  return <section className="card advisor print-area" data-advisor={h.level}>
     <div className="card-h" style={{ flexWrap: "wrap", gap: 8 }}><h2><Icon n="spark" />{T(L("Project Advisor", "Советник проекта", "Порадник проєкту", "مستشار المشروع"))}</h2><LevelChip level={h.level} score={h.score} />
       <span className="faint" style={{ fontSize: 13 }}>{T(L("Progress {p}% — {b}", "Прогресс {p}% — {b}", "Прогрес {p}% — {b}", "التقدم {p}% — {b}"), { p: h.progress ?? "—", b: T(BASIS[h.progress_basis] || BASIS.none) })}</span>
       <span className="toolbar" style={{ marginInlineStart: "auto", gap: 6 }}>

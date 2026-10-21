@@ -107,7 +107,7 @@ grant execute on function public.mgmt_config() to authenticated, service_role;
 
 -- only owners and management change company-wide logic; numbers only, within sane ranges; every change kept
 create or replace function public.mgmt_settings_save(p_config jsonb) returns jsonb
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
 declare me uuid := auth.uid(); old jsonb; k text; v jsonb; g text; clean jsonb := '{}'::jsonb; sub jsonb; d jsonb := public.mgmt_defaults();
 begin
   if me is null or not public.session_ok() or not exists (select 1 from public.profiles where id = me and not disabled and role in ('owner', 'management')) then
@@ -151,7 +151,7 @@ grant execute on function public.mgmt_settings_save(jsonb) to authenticated;
       changes only; Change Intelligence needs who-was-responsible and when-it-was-due as well
    --------------------------------------------------------------------------------------------- */
 create or replace function public.records_mgmt_changes() returns trigger
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
 declare f text; a text; o text; n text;
 begin
   if new.section not in ('company.projects', 'company.milestones', 'company.tasks', 'company.decisions', 'company.portfolios') then return null; end if;
@@ -176,7 +176,7 @@ create trigger records_mgmt_changes after update on public.records for each row
       security in the tests (identical sets for every role). Externals, pending and disabled accounts: nothing.
    --------------------------------------------------------------------------------------------- */
 create or replace function public.mgmt_visible(p_viewer uuid) returns setof public.records
-language plpgsql stable security definer set search_path = public as $$
+language plpgsql stable security definer set search_path = public set plan_cache_mode = force_custom_plan rows 20000 as $$
 declare p record; secs text[]; restricted text[];
 begin
   select pp.id, pp.role, coalesce(pp.us_person, false) us into p from public.profiles pp where pp.id = p_viewer and not pp.disabled;
@@ -206,6 +206,65 @@ language sql stable security definer set search_path = public as $$
 $$;
 revoke execute on function public.mgmt_viewer() from public, anon, authenticated;
 
+-- The working set of one request: the records the viewer may open (mgmt_visible), copied once per statement into a
+-- transaction-local temporary table with fresh statistics, so that every engine in the same request (health, open
+-- loops, attention, overview…) reads it instead of recomputing it, and the planner sees real row counts. Owned by
+-- the definer, never granted to anyone, dropped at commit. Rebuilt when the viewer or the statement changes.
+create or replace function public._mgmt_base(p_viewer uuid) returns void
+language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+declare p record; secs text[]; restricted text[];
+begin
+  if to_regclass('pg_temp.mgmt_meta') is null then
+    create temp table mgmt_meta (viewer uuid, at timestamptz, health boolean not null default false, loops boolean not null default false) on commit drop;
+    create temp table mgmt_v (like public.records) on commit drop;
+    alter table pg_temp.mgmt_v add column m_project uuid, add column m_assignee uuid, add column m_owner uuid, add column m_responsible uuid, add column m_manager uuid, add column m_reviewer uuid, add column m_requested_by uuid, add column m_organizer uuid, add column m_blocked_by uuid, add column m_portfolio uuid, add column m_made_by uuid, add column m_due date, add column m_date date, add column m_target date, add column m_review_due date, add column m_review_date date, add column m_reconsider date, add column m_expiration_date date, add column m_start date;
+  end if;
+  if exists (select 1 from pg_temp.mgmt_meta m where m.viewer is not distinct from p_viewer and m.at = statement_timestamp()) then return; end if;
+  truncate pg_temp.mgmt_v; delete from pg_temp.mgmt_meta;
+  -- the fields the engines join and filter on, read from the record once (as_uuid / mgmt_date semantics, inline)
+  select pp.id, pp.role, coalesce(pp.us_person, false) us into p from public.profiles pp where pp.id = p_viewer and not pp.disabled;
+  if found and p.role is not null and p.role not in ('partner', 'vendor', 'investor', 'pending') then
+    select coalesce(array_agg(a.section), '{}') into secs from public.section_access a where a.role = p.role;
+    select coalesce(array_agg(t.code), '{}') into restricted from public.taxonomy t where t.kind = 'classification' and coalesce((t.meta->>'restricted')::boolean, false);
+    -- exactly the rule of mgmt_visible (tested to equal row-level security), written inline so no row is copied twice
+    insert into pg_temp.mgmt_v select r.*,
+      case when r.data->>'project_ref' like '________-____-____-____-____________' and length(replace(r.data->>'project_ref', '-', '')) = 32 and r.data->>'project_ref' ~ '^[-0-9a-fA-F]+$' then (r.data->>'project_ref')::uuid end,
+      case when r.data->>'assignee_id' like '________-____-____-____-____________' and length(replace(r.data->>'assignee_id', '-', '')) = 32 and r.data->>'assignee_id' ~ '^[-0-9a-fA-F]+$' then (r.data->>'assignee_id')::uuid end,
+      case when r.data->>'owner_id' like '________-____-____-____-____________' and length(replace(r.data->>'owner_id', '-', '')) = 32 and r.data->>'owner_id' ~ '^[-0-9a-fA-F]+$' then (r.data->>'owner_id')::uuid end,
+      case when r.data->>'responsible_id' like '________-____-____-____-____________' and length(replace(r.data->>'responsible_id', '-', '')) = 32 and r.data->>'responsible_id' ~ '^[-0-9a-fA-F]+$' then (r.data->>'responsible_id')::uuid end,
+      case when r.data->>'manager_id' like '________-____-____-____-____________' and length(replace(r.data->>'manager_id', '-', '')) = 32 and r.data->>'manager_id' ~ '^[-0-9a-fA-F]+$' then (r.data->>'manager_id')::uuid end,
+      case when r.data->>'reviewer_id' like '________-____-____-____-____________' and length(replace(r.data->>'reviewer_id', '-', '')) = 32 and r.data->>'reviewer_id' ~ '^[-0-9a-fA-F]+$' then (r.data->>'reviewer_id')::uuid end,
+      case when r.data->>'requested_by' like '________-____-____-____-____________' and length(replace(r.data->>'requested_by', '-', '')) = 32 and r.data->>'requested_by' ~ '^[-0-9a-fA-F]+$' then (r.data->>'requested_by')::uuid end,
+      case when r.data->>'organizer_id' like '________-____-____-____-____________' and length(replace(r.data->>'organizer_id', '-', '')) = 32 and r.data->>'organizer_id' ~ '^[-0-9a-fA-F]+$' then (r.data->>'organizer_id')::uuid end,
+      case when r.data->>'blocked_by' like '________-____-____-____-____________' and length(replace(r.data->>'blocked_by', '-', '')) = 32 and r.data->>'blocked_by' ~ '^[-0-9a-fA-F]+$' then (r.data->>'blocked_by')::uuid end,
+      case when r.data->>'portfolio_ref' like '________-____-____-____-____________' and length(replace(r.data->>'portfolio_ref', '-', '')) = 32 and r.data->>'portfolio_ref' ~ '^[-0-9a-fA-F]+$' then (r.data->>'portfolio_ref')::uuid end,
+      case when r.data->>'made_by_id' like '________-____-____-____-____________' and length(replace(r.data->>'made_by_id', '-', '')) = 32 and r.data->>'made_by_id' ~ '^[-0-9a-fA-F]+$' then (r.data->>'made_by_id')::uuid end,
+      case when r.data->>'due' ~ '^\d{4}-\d{2}-\d{2}' then left(r.data->>'due', 10)::date end,
+      case when r.data->>'date' ~ '^\d{4}-\d{2}-\d{2}' then left(r.data->>'date', 10)::date end,
+      case when r.data->>'target' ~ '^\d{4}-\d{2}-\d{2}' then left(r.data->>'target', 10)::date end,
+      case when r.data->>'review_due' ~ '^\d{4}-\d{2}-\d{2}' then left(r.data->>'review_due', 10)::date end,
+      case when r.data->>'review_date' ~ '^\d{4}-\d{2}-\d{2}' then left(r.data->>'review_date', 10)::date end,
+      case when r.data->>'reconsider' ~ '^\d{4}-\d{2}-\d{2}' then left(r.data->>'reconsider', 10)::date end,
+      case when r.data->>'expiration_date' ~ '^\d{4}-\d{2}-\d{2}' then left(r.data->>'expiration_date', 10)::date end,
+      case when r.data->>'start' ~ '^\d{4}-\d{2}-\d{2}' then left(r.data->>'start', 10)::date end
+    from public.records r
+    where r.section in ('company.projects', 'company.tasks', 'company.milestones', 'company.decisions', 'company.documents', 'company.meetings', 'company.portfolios')
+      and (p.role in ('owner', 'admin') or r.section = any(secs))
+      and (coalesce(r.controlled, true) = false or p.us)
+      and case
+        when r.section = 'company.documents' then
+          p.id = r.created_by or coalesce(r.data->>'owner_id', '') = p.id::text or coalesce(r.data->>'reviewer_id', '') = p.id::text
+          or not coalesce(r.data->>'classification' = any(restricted), false)
+          or coalesce(r.data->'access_ids', '[]'::jsonb) ? p.id::text or coalesce(r.data->'contributors_ids', '[]'::jsonb) ? p.id::text
+          or p.role in ('owner', 'management')
+        when r.section = 'company.decisions' and coalesce(r.data->>'source_ref', '') ~ '^[0-9a-f-]{36}$' then coalesce(public.extra_visible(p.id, r), false)
+        else true end;
+  end if;
+  analyze pg_temp.mgmt_v (id, section, status, created_by, controlled, m_project, m_assignee, m_manager, m_owner, m_blocked_by, m_portfolio, m_due, m_target);
+  insert into pg_temp.mgmt_meta(viewer, at) values (p_viewer, statement_timestamp());
+end $$;
+revoke execute on function public._mgmt_base(uuid) from public, anon, authenticated;
+
 create or replace function public.mgmt_date(t text) returns date language sql immutable parallel safe set search_path = '' as $$
   select case when t ~ '^\d{4}-\d{2}-\d{2}' then left(t, 10)::date end
 $$;
@@ -214,25 +273,26 @@ $$;
    6. Project Health Engine — deterministic, 0–100, every point lost has a reason that names its records.
       Progress = completed tasks / tasks not cancelled; without tasks: milestones reached / milestones; else none.
    --------------------------------------------------------------------------------------------- */
-create or replace function public._project_health(p_viewer uuid, p_project uuid default null)
+create or replace function public._project_health_calc(p_viewer uuid, p_project uuid default null)
 returns table (project_id uuid, title text, status text, portfolio_id uuid, manager_id uuid, priority text, target date,
   score integer, level text, reasons jsonb, progress integer, progress_basis text, tasks_total integer, tasks_open integer, tasks_done integer,
   overdue integer, blocked integer, unassigned integer, next_milestone jsonb, pending_approvals integer, pending_decisions integer,
   docs_in_review integer, last_activity timestamptz)
-language plpgsql stable security definer set search_path = public as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
 #variable_conflict use_column
 declare c jsonb := public.mgmt_config(); w jsonb; h jsonb; today date := (now() at time zone 'utc')::date;
 begin
+  perform public._mgmt_base(p_viewer);
   w := c->'weights'; h := c->'health';
   return query
-  with v as materialized (select * from public.mgmt_visible(p_viewer)),
-  pr as (select * from v where v.section = 'company.projects' and (p_project is null or v.id = p_project)),
-  t0 as (select v.id, v.title, v.status, v.data, v.updated_at, public.as_uuid(v.data->>'project_ref') pid,
-           v.status is distinct from 'Completed' and v.status is distinct from 'Cancelled' is_open, public.mgmt_date(v.data->>'due') due
-         from v where v.section = 'company.tasks' and public.as_uuid(v.data->>'project_ref') in (select pr.id from pr)),
+  with v as materialized (select * from pg_temp.mgmt_v),
+  pr as materialized (select * from v where v.section = 'company.projects' and (p_project is null or v.id = p_project)),
+  t0 as (select v.id, v.title, v.status, v.data, v.updated_at, v.m_blocked_by, v.m_project pid,
+           v.status is distinct from 'Completed' and v.status is distinct from 'Cancelled' is_open, v.m_due due
+         from v where v.section = 'company.tasks' and v.m_project in (select pr.id from pr)),
   -- blocked: marked Blocked, or waiting for another open task the viewer can see (a hidden blocker never counts)
   ot as (select v.id from v where v.section = 'company.tasks' and v.status is distinct from 'Completed' and v.status is distinct from 'Cancelled'),
-  t as (select t0.*, (t0.is_open and (t0.status = 'Blocked' or ot.id is not null)) blocked from t0 left join ot on ot.id = public.as_uuid(t0.data->>'blocked_by')),
+  t as (select t0.*, (t0.is_open and (t0.status = 'Blocked' or ot.id is not null)) blocked from t0 left join ot on ot.id = t0.m_blocked_by),
   ta as (select t.pid, count(*) filter (where t.status is distinct from 'Cancelled') total, count(*) filter (where not t.is_open and t.status = 'Completed') done,
            count(*) filter (where t.is_open) open, count(*) filter (where t.is_open and t.due < today) overdue,
            coalesce(jsonb_agg(t.id) filter (where t.is_open and t.due < today), '[]') overdue_ids,
@@ -240,25 +300,25 @@ begin
            count(*) filter (where t.is_open and coalesce(t.data->>'assignee_id', '') = '') unassigned, coalesce(jsonb_agg(t.id) filter (where t.is_open and coalesce(t.data->>'assignee_id', '') = ''), '[]') unassigned_ids,
            count(*) filter (where t.is_open and t.data->>'priority' = 'Critical' and (t.blocked or t.due < today)) critical, coalesce(jsonb_agg(t.id) filter (where t.is_open and t.data->>'priority' = 'Critical' and (t.blocked or t.due < today)), '[]') critical_ids,
            max(t.updated_at) last from t group by t.pid),
-  m as (select v.id, v.title, v.status, v.data, v.updated_at, public.as_uuid(v.data->>'project_ref') pid, public.mgmt_date(v.data->>'due') due,
+  m as (select v.id, v.title, v.status, v.data, v.updated_at, v.m_project pid, v.m_due due,
           v.status is distinct from 'Reached' and v.status is distinct from 'Missed' is_open
-        from v where v.section = 'company.milestones' and public.as_uuid(v.data->>'project_ref') in (select pr.id from pr)),
+        from v where v.section = 'company.milestones' and v.m_project in (select pr.id from pr)),
   ma as (select m.pid, count(*) total, count(*) filter (where m.status = 'Reached') reached,
            count(*) filter (where (m.is_open and m.due < today) or m.status = 'Missed') late, coalesce(jsonb_agg(m.id) filter (where (m.is_open and m.due < today) or m.status = 'Missed'), '[]') late_ids,
            count(*) filter (where m.is_open and coalesce(m.data->>'owner_id', '') = '') no_owner, coalesce(jsonb_agg(m.id) filter (where m.is_open and coalesce(m.data->>'owner_id', '') = ''), '[]') no_owner_ids,
            max(m.updated_at) last from m group by m.pid),
   mn as (select distinct on (m.pid) m.pid, m.id, m.title, m.due, m.data->>'owner_id' owner_id from m where m.is_open and m.due >= today order by m.pid, m.due, m.id),
   -- approvals waiting on records of the project (the project itself, its tasks, documents, milestones) that the viewer may open
-  ap as (select coalesce(public.as_uuid(rv.data->>'project_ref'), case when rv.section = 'company.projects' then rv.id end) pid, a.id, a.record_id, a.created_at
+  ap as (select coalesce(rv.m_project, case when rv.section = 'company.projects' then rv.id end) pid, a.id, a.record_id, a.created_at
          from public.approvals a join v rv on rv.id = a.record_id where a.status = 'pending'),
   apa as (select ap.pid, count(*) total, count(*) filter (where ap.created_at < now() - make_interval(days => (c->>'approval_age_days')::int)) old,
             coalesce(jsonb_agg(distinct ap.record_id) filter (where ap.created_at < now() - make_interval(days => (c->>'approval_age_days')::int)), '[]') old_ids,
             max(extract(day from now() - ap.created_at))::int max_age from ap group by ap.pid),
-  de as (select public.as_uuid(v.data->>'project_ref') pid, count(*) total,
-           count(*) filter (where coalesce(public.mgmt_date(v.data->>'date'), v.created_at::date) < today - (c->>'decision_age_days')::int) old,
-           coalesce(jsonb_agg(v.id) filter (where coalesce(public.mgmt_date(v.data->>'date'), v.created_at::date) < today - (c->>'decision_age_days')::int), '[]') old_ids
+  de as (select v.m_project pid, count(*) total,
+           count(*) filter (where coalesce(v.m_date, v.created_at::date) < today - (c->>'decision_age_days')::int) old,
+           coalesce(jsonb_agg(v.id) filter (where coalesce(v.m_date, v.created_at::date) < today - (c->>'decision_age_days')::int), '[]') old_ids
          from v where v.section = 'company.decisions' and v.status in ('Proposed', 'In review') group by 1),
-  dr as (select public.as_uuid(v.data->>'project_ref') pid, count(*) total, coalesce(jsonb_agg(v.id), '[]') ids
+  dr as (select v.m_project pid, count(*) total, coalesce(jsonb_agg(v.id), '[]') ids
          from v where v.section = 'company.documents' and v.status = 'In review' group by 1),
   cm as (select c2.record_id pid, max(c2.created_at) last from public.comments c2 where c2.record_id in (select pr.id from pr) and c2.deleted_at is null group by 1),
   base as (
@@ -271,7 +331,7 @@ begin
       coalesce(apa.total, 0) ap_total, coalesce(apa.old, 0) ap_old, coalesce(apa.old_ids, '[]') ap_old_ids, coalesce(apa.max_age, 0) ap_max_age,
       coalesce(de.total, 0) d_total, coalesce(de.old, 0) d_old, coalesce(de.old_ids, '[]') d_old_ids,
       coalesce(dr.total, 0) dr_total, coalesce(dr.ids, '[]') dr_ids,
-      greatest(pr.updated_at, ta.last, ma.last, cm.last) last_act, public.mgmt_date(pr.data->>'target') tgt,
+      greatest(pr.updated_at, ta.last, ma.last, cm.last) last_act, pr.m_target tgt,
       pr.status is distinct from 'Completed' and pr.status is distinct from 'Cancelled' p_open
     from pr left join ta on ta.pid = pr.id left join ma on ma.pid = pr.id left join mn on mn.pid = pr.id
       left join apa on apa.pid = pr.id left join de on de.pid = pr.id left join dr on dr.pid = pr.id left join cm on cm.pid = pr.id),
@@ -302,7 +362,7 @@ begin
   sc as (select b.id pid, greatest(0, 100 - coalesce(sum(sig.pen), 0))::int score,
            coalesce(jsonb_agg(jsonb_build_object('code', sig.code, 'penalty', sig.pen, 'n', sig.n, 'refs', sig.refs) || coalesce(sig.extra, '{}'::jsonb) order by sig.pen desc, sig.code) filter (where sig.code is not null), '[]') reasons
          from base b left join sig on sig.pid = b.id group by b.id)
-  select b.id, b.title, b.status, public.as_uuid(b.data->>'portfolio_ref'), public.as_uuid(b.data->>'manager_id'), b.data->>'priority', b.tgt,
+  select b.id, b.title, b.status, b.m_portfolio, b.m_manager, b.data->>'priority', b.tgt,
     case when b.p_open then sc.score end,
     case when not b.p_open then 'closed' when sc.score >= (h->>'attention')::int then 'healthy' when sc.score >= (h->>'risk')::int then 'attention' when sc.score >= (h->>'critical')::int then 'risk' else 'critical' end,
     sc.reasons,
@@ -314,6 +374,26 @@ begin
   from base b join sc on sc.pid = b.id
   order by case when not b.p_open then 1 else 0 end, sc.score, b.title, b.id;
 end $$;
+revoke execute on function public._project_health_calc(uuid, uuid) from public, anon, authenticated;
+create or replace function public._project_health(p_viewer uuid, p_project uuid default null)
+returns table (project_id uuid, title text, status text, portfolio_id uuid, manager_id uuid, priority text, target date,
+  score integer, level text, reasons jsonb, progress integer, progress_basis text, tasks_total integer, tasks_open integer, tasks_done integer,
+  overdue integer, blocked integer, unassigned integer, next_milestone jsonb, pending_approvals integer, pending_decisions integer,
+  docs_in_review integer, last_activity timestamptz)
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+begin
+  perform public._mgmt_base(p_viewer);
+  if not exists (select 1 from pg_temp.mgmt_meta where health) then
+    if p_project is not null and not exists (select 1 from pg_temp.mgmt_meta where health) and '_project_health' = '_project_health' then
+      return query select * from public._project_health_calc(p_viewer, p_project);  -- one project: cheaper than all of them
+      return;
+    end if;
+    if to_regclass('pg_temp.mgmt_h') is not null then drop table pg_temp.mgmt_h; end if;
+    create temp table mgmt_h on commit drop as select * from public._project_health_calc(p_viewer, null);
+    update pg_temp.mgmt_meta set health = true;
+  end if;
+  return query select * from pg_temp.mgmt_h x where p_project is null or x.project_id = p_project;
+end $$;
 revoke execute on function public._project_health(uuid, uuid) from public, anon, authenticated;
 
 create or replace function public.project_health(p_project uuid default null)
@@ -321,7 +401,7 @@ returns table (project_id uuid, title text, status text, portfolio_id uuid, mana
   score integer, level text, reasons jsonb, progress integer, progress_basis text, tasks_total integer, tasks_open integer, tasks_done integer,
   overdue integer, blocked integer, unassigned integer, next_milestone jsonb, pending_approvals integer, pending_decisions integer,
   docs_in_review integer, last_activity timestamptz)
-language sql stable security definer set search_path = public as $$
+language sql volatile security definer set search_path = public as $$
   select * from public._project_health(public.mgmt_viewer(), p_project) where public.mgmt_viewer() is not null
 $$;
 revoke execute on function public.project_health(uuid) from public, anon;
@@ -340,22 +420,23 @@ $$;
       stored, so a scan can never duplicate one). key = kind + record: the same loop has the same key every time.
       "since" is when the condition began (the due date that passed, the request, the last change).
    --------------------------------------------------------------------------------------------- */
-create or replace function public._open_loops(p_viewer uuid, p_project uuid default null)
+create or replace function public._open_loops_calc(p_viewer uuid, p_project uuid default null)
 returns table (loop_key text, kind text, category text, severity text, record_id uuid, section text, title text, project_id uuid, project_title text,
   owner_id uuid, since timestamptz, age_days integer, reason jsonb, next_action text, link text)
-language plpgsql stable security definer set search_path = public as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
 #variable_conflict use_column
 declare c jsonb := public.mgmt_config(); today date := (now() at time zone 'utc')::date;
 begin
+  perform public._mgmt_base(p_viewer);
   return query
-  with v as materialized (select * from public.mgmt_visible(p_viewer)),
-  pr as (select v.id, v.title, v.status, v.data from v where v.section = 'company.projects'),
-  t0 as (select v.*, public.as_uuid(v.data->>'project_ref') pid, public.mgmt_date(v.data->>'due') due
+  with v as materialized (select * from pg_temp.mgmt_v),
+  pr as materialized (select v.id, v.title, v.status, v.data from v where v.section = 'company.projects'),
+  t0 as (select v.*, v.m_project pid, v.m_due due
         from v where v.section = 'company.tasks' and v.status is distinct from 'Completed' and v.status is distinct from 'Cancelled'),
-  t as (select t0.*, (t0.status = 'Blocked' or b.id is not null) blocked from t0 left join t0 b on b.id = public.as_uuid(t0.data->>'blocked_by')),
+  t as (select t0.*, (t0.status = 'Blocked' or b.id is not null) blocked from t0 left join t0 b on b.id = t0.m_blocked_by),
   h0 as (select * from public._project_health(p_viewer) hh where hh.level <> 'closed'),
   tb as (select t.pid, min(t.updated_at) first_blocked from t where t.blocked group by t.pid),
-  om as (select distinct public.as_uuid(m.data->>'project_ref') pid from v m where m.section = 'company.milestones' and m.status in ('Planned', 'In progress')),
+  om as (select distinct m.m_project pid from v m where m.section = 'company.milestones' and m.status in ('Planned', 'In progress')),
   na as (select distinct t.pid from t where coalesce(t.data->>'assignee_id', '') <> '' and t.due is not null),
   h as (select h0.*, pc.created_at p_created, tb.first_blocked, (om.pid is not null) has_ms, (na.pid is not null) has_next
         from h0 join v pc on pc.id = h0.project_id left join tb on tb.pid = h0.project_id left join om on om.pid = h0.project_id left join na on na.pid = h0.project_id),
@@ -364,19 +445,19 @@ begin
     select 'task_no_owner' kind, 'task' cat, case when t.data->>'priority' in ('High', 'Critical') then 'high' else 'medium' end sev, t.id rid, t.section sec, t.title ttl, t.pid,
       t.created_by own, t.created_at since, jsonb_build_object('code', 'task_no_owner') rsn, 'assign_owner' nxt
       from t where coalesce(t.data->>'assignee_id', '') = ''
-    union all select 'task_no_due', 'task', 'low', t.id, t.section, t.title, t.pid, public.as_uuid(t.data->>'assignee_id'), t.created_at, jsonb_build_object('code', 'task_no_due'), 'set_due_date'
+    union all select 'task_no_due', 'task', 'low', t.id, t.section, t.title, t.pid, t.m_assignee, t.created_at, jsonb_build_object('code', 'task_no_due'), 'set_due_date'
       from t where coalesce(t.data->>'assignee_id', '') <> '' and t.due is null
     union all select 'task_overdue', 'task',
         case when t.data->>'priority' = 'Critical' and today - t.due > 7 then 'critical' when t.data->>'priority' in ('High', 'Critical') or today - t.due > 7 then 'high' else 'medium' end,
-        t.id, t.section, t.title, t.pid, public.as_uuid(t.data->>'assignee_id'), t.due::timestamptz, jsonb_build_object('code', 'task_overdue', 'days', today - t.due, 'due', t.due), 'follow_up'
+        t.id, t.section, t.title, t.pid, t.m_assignee, t.due::timestamptz, jsonb_build_object('code', 'task_overdue', 'days', today - t.due, 'due', t.due), 'follow_up'
       from t where t.due < today
     union all select 'task_blocked', 'task', case when t.data->>'priority' = 'Critical' then 'critical' else 'high' end, t.id, t.section, t.title, t.pid,
-        public.as_uuid(t.data->>'assignee_id'), t.updated_at, jsonb_build_object('code', 'task_blocked', 'blocker', t.data->>'blocker', 'blocked_by', t.data->>'blocked_by'), 'resolve_blocker'
+        t.m_assignee, t.updated_at, jsonb_build_object('code', 'task_blocked', 'blocker', t.data->>'blocker', 'blocked_by', t.data->>'blocked_by'), 'resolve_blocker'
       from t where t.blocked
     union all select 'task_review', 'task', case when t.updated_at < now() - make_interval(days => (c->>'review_age_days')::int) then 'medium' else 'low' end, t.id, t.section, t.title, t.pid,
-        coalesce(public.as_uuid(t.data->>'requested_by'), t.created_by), t.updated_at, jsonb_build_object('code', 'task_review'), 'review'
+        coalesce(t.m_requested_by, t.created_by), t.updated_at, jsonb_build_object('code', 'task_review'), 'review'
       from t where t.status = 'Review'
-    union all select 'task_stale', 'task', 'low', t.id, t.section, t.title, t.pid, public.as_uuid(t.data->>'assignee_id'), t.updated_at,
+    union all select 'task_stale', 'task', 'low', t.id, t.section, t.title, t.pid, t.m_assignee, t.updated_at,
         jsonb_build_object('code', 'task_stale', 'days', extract(day from now() - t.updated_at)::int), 'update_status'
       from t where t.updated_at < now() - make_interval(days => (c->>'task_stale_days')::int) and not t.blocked and (t.due is null or t.due >= today) and t.status <> 'Review'
     -- projects (from the health engine, so the same facts as the score)
@@ -398,54 +479,54 @@ begin
         jsonb_build_object('code', 'project_no_next_action'), 'define_next_action' from h where h.status = 'Active' and not h.has_next
     -- decisions
     union all select 'decision_pending', 'decision',
-        case when coalesce(public.mgmt_date(d.data->>'date'), d.created_at::date) < today - (c->>'decision_age_days')::int then 'high' else 'medium' end,
-        d.id, d.section, d.title, public.as_uuid(d.data->>'project_ref'), coalesce(public.as_uuid(d.data->>'responsible_id'), public.as_uuid(d.data->>'made_by_id'), d.created_by),
-        coalesce(public.mgmt_date(d.data->>'date')::timestamptz, d.created_at), jsonb_build_object('code', 'decision_pending'), 'decide'
+        case when coalesce(d.m_date, d.created_at::date) < today - (c->>'decision_age_days')::int then 'high' else 'medium' end,
+        d.id, d.section, d.title, d.m_project, coalesce(d.m_responsible, d.m_made_by, d.created_by),
+        coalesce(d.m_date::timestamptz, d.created_at), jsonb_build_object('code', 'decision_pending'), 'decide'
       from v d where d.section = 'company.decisions' and d.status = 'Proposed'
-    union all select 'decision_review_long', 'decision', 'high', d.id, d.section, d.title, public.as_uuid(d.data->>'project_ref'),
-        coalesce(public.as_uuid(d.data->>'responsible_id'), d.created_by), d.updated_at, jsonb_build_object('code', 'decision_review_long', 'days', extract(day from now() - d.updated_at)::int), 'finish_review'
+    union all select 'decision_review_long', 'decision', 'high', d.id, d.section, d.title, d.m_project,
+        coalesce(d.m_responsible, d.created_by), d.updated_at, jsonb_build_object('code', 'decision_review_long', 'days', extract(day from now() - d.updated_at)::int), 'finish_review'
       from v d where d.section = 'company.decisions' and d.status = 'In review' and d.updated_at < now() - make_interval(days => (c->>'decision_age_days')::int)
-    union all select 'decision_deferred_due', 'decision', 'medium', d.id, d.section, d.title, public.as_uuid(d.data->>'project_ref'),
-        coalesce(public.as_uuid(d.data->>'responsible_id'), d.created_by), public.mgmt_date(d.data->>'reconsider')::timestamptz, jsonb_build_object('code', 'decision_deferred_due', 'reconsider', d.data->>'reconsider'), 'revisit'
-      from v d where d.section = 'company.decisions' and d.status = 'Deferred' and public.mgmt_date(d.data->>'reconsider') <= today
+    union all select 'decision_deferred_due', 'decision', 'medium', d.id, d.section, d.title, d.m_project,
+        coalesce(d.m_responsible, d.created_by), d.m_reconsider::timestamptz, jsonb_build_object('code', 'decision_deferred_due', 'reconsider', d.data->>'reconsider'), 'revisit'
+      from v d where d.section = 'company.decisions' and d.status = 'Deferred' and d.m_reconsider <= today
     -- approvals on records the viewer may open
     union all select 'approval_waiting', 'approval', case when a.created_at < now() - make_interval(days => 2 * (c->>'approval_age_days')::int) then 'high' else 'medium' end,
-        a.record_id, rv.section, rv.title, coalesce(public.as_uuid(rv.data->>'project_ref'), case when rv.section = 'company.projects' then rv.id end), a.approver_id, a.created_at,
+        a.record_id, rv.section, rv.title, coalesce(rv.m_project, case when rv.section = 'company.projects' then rv.id end), a.approver_id, a.created_at,
         jsonb_build_object('code', 'approval_waiting', 'days', extract(day from now() - a.created_at)::int, 'approval', a.id), 'review_approval'
       from public.approvals a join v rv on rv.id = a.record_id where a.status = 'pending' and a.created_at < now() - make_interval(days => (c->>'approval_age_days')::int)
-    union all select 'approval_approver_inactive', 'approval', 'high', a.record_id, rv.section, rv.title, coalesce(public.as_uuid(rv.data->>'project_ref'), case when rv.section = 'company.projects' then rv.id end),
+    union all select 'approval_approver_inactive', 'approval', 'high', a.record_id, rv.section, rv.title, coalesce(rv.m_project, case when rv.section = 'company.projects' then rv.id end),
         a.requested_by, a.created_at, jsonb_build_object('code', 'approval_approver_inactive', 'approval', a.id, 'approver', a.approver_id), 'reassign_approver'
       from public.approvals a join v rv on rv.id = a.record_id where a.status = 'pending' and not public.is_active_employee(a.approver_id)
-    union all select distinct on (a.chain_id) 'approval_chain_blocked', 'approval', 'high', a.record_id, rv.section, rv.title, coalesce(public.as_uuid(rv.data->>'project_ref'), case when rv.section = 'company.projects' then rv.id end),
+    union all select distinct on (a.chain_id) 'approval_chain_blocked', 'approval', 'high', a.record_id, rv.section, rv.title, coalesce(rv.m_project, case when rv.section = 'company.projects' then rv.id end),
         a.approver_id, a.created_at, jsonb_build_object('code', 'approval_chain_blocked', 'step', a.step, 'waiting', (select count(*) from public.approvals q where q.chain_id = a.chain_id and q.status = 'queued')), 'review_approval'
       from public.approvals a join v rv on rv.id = a.record_id
       where a.status = 'pending' and a.chain_id is not null and a.created_at < now() - make_interval(days => (c->>'approval_age_days')::int)
         and exists (select 1 from public.approvals q where q.chain_id = a.chain_id and q.status = 'queued')
     -- documents
-    union all select 'document_review', 'document', case when public.mgmt_date(d.data->>'review_due') < today or d.updated_at < now() - make_interval(days => (c->>'review_age_days')::int) then 'medium' else 'low' end,
-        d.id, d.section, d.title, public.as_uuid(d.data->>'project_ref'), public.as_uuid(d.data->>'reviewer_id'), d.updated_at, jsonb_build_object('code', 'document_review', 'review_due', d.data->>'review_due'), 'review_document'
+    union all select 'document_review', 'document', case when d.m_review_due < today or d.updated_at < now() - make_interval(days => (c->>'review_age_days')::int) then 'medium' else 'low' end,
+        d.id, d.section, d.title, d.m_project, d.m_reviewer, d.updated_at, jsonb_build_object('code', 'document_review', 'review_due', d.data->>'review_due'), 'review_document'
       from v d where d.section = 'company.documents' and d.status = 'In review'
-    union all select 'document_approval', 'document', 'low', d.id, d.section, d.title, public.as_uuid(d.data->>'project_ref'), a.approver_id, a.created_at,
+    union all select 'document_approval', 'document', 'low', d.id, d.section, d.title, d.m_project, a.approver_id, a.created_at,
         jsonb_build_object('code', 'document_approval', 'approval', a.id), 'complete_approval'
       from public.approvals a join v d on d.id = a.record_id
       where d.section = 'company.documents' and a.status = 'pending' and a.created_at >= now() - make_interval(days => (c->>'approval_age_days')::int)
-    union all select 'document_expiring', 'document', case when coalesce(public.mgmt_date(d.data->>'expiration_date'), public.mgmt_date(d.data->>'review_date')) < today then 'high' else 'medium' end,
-        d.id, d.section, d.title, public.as_uuid(d.data->>'project_ref'), public.as_uuid(d.data->>'owner_id'),
-        least(public.mgmt_date(d.data->>'expiration_date'), public.mgmt_date(d.data->>'review_date'))::timestamptz,
+    union all select 'document_expiring', 'document', case when coalesce(d.m_expiration_date, d.m_review_date) < today then 'high' else 'medium' end,
+        d.id, d.section, d.title, d.m_project, d.m_owner,
+        least(d.m_expiration_date, d.m_review_date)::timestamptz,
         jsonb_build_object('code', 'document_expiring', 'expires', d.data->>'expiration_date', 'review', d.data->>'review_date'), 'renew_document'
       from v d where d.section = 'company.documents' and d.status in ('Approved', 'Effective')
-        and (public.mgmt_date(d.data->>'expiration_date') <= today + (c->>'expiry_warn_days')::int or public.mgmt_date(d.data->>'review_date') <= today)
+        and (d.m_expiration_date <= today + (c->>'expiry_warn_days')::int or d.m_review_date <= today)
     -- meetings that ended with loose ends
-    union all select 'meeting_decision_no_followup', 'meeting', 'medium', mt.id, mt.section, mt.title, public.as_uuid(mt.data->>'project_ref'),
-        coalesce(public.as_uuid(mt.data->>'organizer_id'), mt.created_by), public.mgmt_date(mt.data->>'date')::timestamptz, jsonb_build_object('code', 'meeting_decision_no_followup'), 'log_decisions'
-      from v mt where mt.section = 'company.meetings' and mt.status is distinct from 'Cancelled' and public.mgmt_date(mt.data->>'date') < today
+    union all select 'meeting_decision_no_followup', 'meeting', 'medium', mt.id, mt.section, mt.title, mt.m_project,
+        coalesce(mt.m_organizer, mt.created_by), mt.m_date::timestamptz, jsonb_build_object('code', 'meeting_decision_no_followup'), 'log_decisions'
+      from v mt where mt.section = 'company.meetings' and mt.status is distinct from 'Cancelled' and mt.m_date < today
         and length(trim(coalesce(mt.data->>'decisions', ''))) > 0
         and not exists (select 1 from v dd where dd.section = 'company.decisions' and dd.data->>'source_ref' = mt.id::text)
-    union all select 'meeting_action_no_task', 'meeting', 'medium', mt.id, mt.section, mt.title || ' — ' || coalesce(it->>'title', ''), public.as_uuid(mt.data->>'project_ref'),
-        coalesce(public.as_uuid(it->>'assignee_id'), public.as_uuid(mt.data->>'organizer_id'), mt.created_by), public.mgmt_date(mt.data->>'date')::timestamptz,
+    union all select 'meeting_action_no_task', 'meeting', 'medium', mt.id, mt.section, mt.title || ' — ' || coalesce(it->>'title', ''), mt.m_project,
+        coalesce(public.as_uuid(it->>'assignee_id'), mt.m_organizer, mt.created_by), mt.m_date::timestamptz,
         jsonb_build_object('code', 'meeting_action_no_task', 'item', it->>'id'), 'create_task'
       from v mt cross join lateral jsonb_array_elements(case when jsonb_typeof(mt.data->'action_items') = 'array' then mt.data->'action_items' else '[]'::jsonb end) it
-      where mt.section = 'company.meetings' and mt.status is distinct from 'Cancelled' and public.mgmt_date(mt.data->>'date') < today and coalesce(it->>'task_id', '') = ''
+      where mt.section = 'company.meetings' and mt.status is distinct from 'Cancelled' and mt.m_date < today and coalesce(it->>'task_id', '') = ''
     union all select 'meeting_task_no_owner', 'meeting', 'medium', t.id, t.section, t.title, t.pid, t.created_by, t.created_at,
         jsonb_build_object('code', 'meeting_task_no_owner', 'meeting', t.data->>'meeting_ref'), 'assign_owner'
       from t where coalesce(t.data->>'meeting_ref', '') <> '' and coalesce(t.data->>'assignee_id', '') = ''
@@ -456,12 +537,30 @@ begin
   where p_project is null or l.pid = p_project
   order by case l.sev when 'critical' then 0 when 'high' then 1 when 'medium' then 2 else 3 end, l.since nulls last, 1;
 end $$;
+revoke execute on function public._open_loops_calc(uuid, uuid) from public, anon, authenticated;
+create or replace function public._open_loops(p_viewer uuid, p_project uuid default null)
+returns table (loop_key text, kind text, category text, severity text, record_id uuid, section text, title text, project_id uuid, project_title text,
+  owner_id uuid, since timestamptz, age_days integer, reason jsonb, next_action text, link text)
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+begin
+  perform public._mgmt_base(p_viewer);
+  if not exists (select 1 from pg_temp.mgmt_meta where loops) then
+    if p_project is not null and not exists (select 1 from pg_temp.mgmt_meta where loops) and '_open_loops' = '_project_health' then
+      return query select * from public._open_loops_calc(p_viewer, p_project);  -- one project: cheaper than all of them
+      return;
+    end if;
+    if to_regclass('pg_temp.mgmt_l') is not null then drop table pg_temp.mgmt_l; end if;
+    create temp table mgmt_l on commit drop as select * from public._open_loops_calc(p_viewer, null);
+    update pg_temp.mgmt_meta set loops = true;
+  end if;
+  return query select * from pg_temp.mgmt_l x where p_project is null or x.project_id = p_project;
+end $$;
 revoke execute on function public._open_loops(uuid, uuid) from public, anon, authenticated;
 
 create or replace function public.open_loops(p_project uuid default null)
 returns table (loop_key text, kind text, category text, severity text, record_id uuid, section text, title text, project_id uuid, project_title text,
   owner_id uuid, since timestamptz, age_days integer, reason jsonb, next_action text, link text)
-language sql stable security definer set search_path = public as $$
+language sql volatile security definer set search_path = public as $$
   select * from public._open_loops(public.mgmt_viewer(), p_project) where public.mgmt_viewer() is not null
 $$;
 revoke execute on function public.open_loops(uuid) from public, anon;
@@ -476,39 +575,40 @@ create or replace function public._waiting_for(p_viewer uuid)
 returns table (item_key text, bucket text, kind text, record_id uuid, section text, title text, project_id uuid, project_title text,
   party_type text, party_id uuid, party_name text, requested_at timestamptz, due date, age_days integer, state text, last_activity timestamptz,
   escalation text, link text, approval_id uuid)
-language plpgsql stable security definer set search_path = public as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
 #variable_conflict use_column
 declare c jsonb := public.mgmt_config(); today date := (now() at time zone 'utc')::date; me uuid := p_viewer;
 begin
+  perform public._mgmt_base(p_viewer);
   return query
-  with v as materialized (select * from public.mgmt_visible(p_viewer)),
-  pr as (select v.id, v.title, v.data from v where v.section = 'company.projects'),
+  with v as materialized (select * from pg_temp.mgmt_v),
+  pr as materialized (select v.id, v.title, v.data from v where v.section = 'company.projects'),
   esc as (select x.record_id, max(x.created_at) at from public.activity x where x.action = 'mgmt_escalated' and x.created_at > now() - interval '90 days' group by x.record_id),
   team as (select p.id from public.profiles p join public.departments d on d.id = p.department_id where d.manager_id = me and p.id <> me and not p.disabled
            union select public.as_uuid(x) from pr, jsonb_array_elements_text(coalesce(pr.data->'members_ids', '[]')) x where pr.data->>'manager_id' = me::text),
-  t as (select v.*, public.as_uuid(v.data->>'project_ref') pid, public.mgmt_date(v.data->>'due') due, public.as_uuid(v.data->>'assignee_id') asg,
-          coalesce(public.as_uuid(v.data->>'requested_by'), v.created_by) req
+  t as (select v.*, v.m_project pid, v.m_due due, v.m_assignee asg,
+          coalesce(v.m_requested_by, v.created_by) req
         from v where v.section = 'company.tasks' and v.status is distinct from 'Completed' and v.status is distinct from 'Cancelled'),
   items as (
     -- someone waits for me
     select 'me' b, 'task' k, t.id rid, t.section sec, t.title ttl, t.pid, 'person' pt, t.req party, null::text pname, t.created_at req_at, t.due, t.status st, t.updated_at last_act,
       null::text esc, null::uuid aid from t where t.asg = me and t.req is distinct from me
-    union all select 'me', 'approval', a.record_id, rv.section, rv.title, coalesce(public.as_uuid(rv.data->>'project_ref'), case when rv.section = 'company.projects' then rv.id end),
+    union all select 'me', 'approval', a.record_id, rv.section, rv.title, coalesce(rv.m_project, case when rv.section = 'company.projects' then rv.id end),
       'person', a.requested_by, null, a.created_at, null::date, 'pending', a.created_at, null, a.id
       from public.approvals a join v rv on rv.id = a.record_id where a.status = 'pending' and a.approver_id = me
-    union all select 'me', 'review', d.id, d.section, d.title, public.as_uuid(d.data->>'project_ref'), 'person', coalesce(public.as_uuid(d.data->>'owner_id'), d.created_by), null,
-      d.updated_at, public.mgmt_date(d.data->>'review_due'), d.status, d.updated_at, null, null
+    union all select 'me', 'review', d.id, d.section, d.title, d.m_project, 'person', coalesce(d.m_owner, d.created_by), null,
+      d.updated_at, d.m_review_due, d.status, d.updated_at, null, null
       from v d where d.section = 'company.documents' and d.status = 'In review' and d.data->>'reviewer_id' = me::text
-    union all select 'me', 'decision', d.id, d.section, d.title, public.as_uuid(d.data->>'project_ref'), 'person', d.created_by, null, d.created_at, public.mgmt_date(d.data->>'due'), d.status, d.updated_at, null, null
+    union all select 'me', 'decision', d.id, d.section, d.title, d.m_project, 'person', d.created_by, null, d.created_at, d.m_due, d.status, d.updated_at, null, null
       from v d where d.section = 'company.decisions' and d.status in ('Proposed', 'In review') and d.data->>'responsible_id' = me::text and d.created_by is distinct from me
     -- I wait for a colleague
     union all select 'others', 'task', t.id, t.section, t.title, t.pid, 'person', t.asg, null, t.created_at, t.due, t.status, t.updated_at, null, null
       from t where t.req = me and t.asg is not null and t.asg <> me and not (t.status = 'Waiting' and coalesce(t.data->>'waiting_kind', 'Colleague') <> 'Colleague')
-    union all select 'others', 'approval', a.record_id, rv.section, rv.title, coalesce(public.as_uuid(rv.data->>'project_ref'), case when rv.section = 'company.projects' then rv.id end),
+    union all select 'others', 'approval', a.record_id, rv.section, rv.title, coalesce(rv.m_project, case when rv.section = 'company.projects' then rv.id end),
       'person', a.approver_id, null, a.created_at, null, 'pending', a.created_at, null, a.id
       from public.approvals a join v rv on rv.id = a.record_id where a.status = 'pending' and a.requested_by = me and a.approver_id <> me
-    union all select 'others', 'review', d.id, d.section, d.title, public.as_uuid(d.data->>'project_ref'), 'person', public.as_uuid(d.data->>'reviewer_id'), null, d.updated_at,
-      public.mgmt_date(d.data->>'review_due'), d.status, d.updated_at, null, null
+    union all select 'others', 'review', d.id, d.section, d.title, d.m_project, 'person', d.m_reviewer, null, d.updated_at,
+      d.m_review_due, d.status, d.updated_at, null, null
       from v d where d.section = 'company.documents' and d.status = 'In review' and (d.data->>'owner_id' = me::text or d.created_by = me) and coalesce(d.data->>'reviewer_id', '') not in ('', me::text)
     -- my team owes it (late, blocked or due within two days)
     union all select 'team', 'task', t.id, t.section, t.title, t.pid, 'person', t.asg, null, t.created_at, t.due, t.status, t.updated_at, null, null
@@ -536,7 +636,7 @@ create or replace function public.waiting_for()
 returns table (item_key text, bucket text, kind text, record_id uuid, section text, title text, project_id uuid, project_title text,
   party_type text, party_id uuid, party_name text, requested_at timestamptz, due date, age_days integer, state text, last_activity timestamptz,
   escalation text, link text, approval_id uuid)
-language sql stable security definer set search_path = public as $$
+language sql volatile security definer set search_path = public as $$
   select * from public._waiting_for(public.mgmt_viewer()) where public.mgmt_viewer() is not null
 $$;
 revoke execute on function public.waiting_for() from public, anon;
@@ -550,16 +650,17 @@ grant execute on function public.waiting_for() to authenticated;
 create or replace function public._attention(p_viewer uuid, p_limit integer default 50)
 returns table (item_key text, kind text, record_id uuid, section text, title text, project_id uuid, project_title text, owner_id uuid,
   severity text, attention_score integer, why jsonb, next_action text, link text, since timestamptz)
-language plpgsql stable security definer set search_path = public as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
 #variable_conflict use_column
 declare c jsonb := public.mgmt_config(); sw jsonb; pw jsonb; today date := (now() at time zone 'utc')::date; lead boolean;
 begin
+  perform public._mgmt_base(p_viewer);
   sw := c->'severity_weight'; pw := c->'priority_weight';
   select p.role in ('owner', 'admin', 'management') into lead from public.profiles p where p.id = p_viewer;
   return query
   with h as materialized (select * from public._project_health(p_viewer) hh where hh.level <> 'closed'),
   l as materialized (select * from public._open_loops(p_viewer)),
-  v as materialized (select * from public.mgmt_visible(p_viewer) where section = 'company.tasks'),
+  v as materialized (select * from pg_temp.mgmt_v where section = 'company.tasks'),
   cand as (
     select l.loop_key k, l.kind kd, l.record_id rid, l.section sec, l.title ttl, l.project_id pid, l.project_title ptitle, l.owner_id own, l.severity sev, l.reason rsn,
       l.next_action nxt, l.link lnk, l.since sn, l.age_days age
@@ -572,38 +673,41 @@ begin
     from h where h.level in ('risk', 'critical')
   ),
   bc as (select b.data->>'blocked_by' bid, count(*) n from v b where coalesce(b.data->>'blocked_by', '') <> '' and b.status is distinct from 'Completed' and b.status is distinct from 'Cancelled' group by 1),
-  scored as (
+  scored as materialized (
     select cand.*, hp.level plevel, hp.priority ppri, coalesce(hp.overdue, 0) p_overdue, coalesce(hp.blocked, 0) p_blocked,
       public.mgmt_date(coalesce(cand.rsn->>'due', cand.rsn->>'target', tk.data->>'due', case when cand.kd = 'project_health' then hp.next_milestone->>'due' end)) due,
       coalesce(bc.n, 0) downstream, tk.data->>'priority' tpri, coalesce(tk.data->>'blocked_by', '') <> '' dep
     from cand left join h hp on hp.project_id = cand.pid left join v tk on tk.id = cand.rid left join bc on bc.bid = cand.rid::text),
-  parts as (
-    select s.*, x.code, x.pts, x.n from scored s cross join lateral (values
-      ('severity', (sw->>s.sev)::int, null::int),
-      ('deadline', case when s.due is null then null when s.due < today then least(30, 10 + (today - s.due) * 2) when s.due - today <= 3 then 15 when s.due - today <= 7 then 8 end, s.due - today),
-      ('priority', case when coalesce(s.tpri, s.ppri) = 'Critical' then 20 when coalesce(s.tpri, s.ppri) = 'High' then 12 end, null),
-      ('downstream', case when s.downstream > 0 then least(20, s.downstream * 5) end, s.downstream::int),
-      ('affected', case when s.kd = 'project_health' and s.p_overdue + s.p_blocked > 0 then least(20, (s.p_overdue + s.p_blocked) * 2) end, (s.p_overdue + s.p_blocked)),
-      ('executive', case when s.kd in ('decision_pending', 'decision_review_long', 'decision_deferred_due') and lead then 15
-                         when s.kd in ('approval_waiting', 'approval_chain_blocked') and s.own = p_viewer then 15 end, null),
-      ('aging', case when s.age > 0 then least(20, s.age) end, s.age),
-      ('critical_project', case when s.plevel = 'critical' then 15 when s.plevel = 'risk' then 8 end, null),
-      ('dependency', case when s.dep and s.kd = 'task_blocked' then 10 end, null)
-    ) x(code, pts, n) where x.pts is not null and x.pts > 0)
-  select p.k, p.kd, p.rid, p.sec, p.ttl, p.pid, p.ptitle, p.own, p.sev, sum(p.pts)::int,
-    jsonb_build_object('reason', (array_agg(p.rsn))[1], 'parts', jsonb_agg(jsonb_build_object('code', p.code, 'points', p.pts, 'n', p.n) order by p.pts desc, p.code), 'project_level', (array_agg(p.plevel))[1]),
-    (array_agg(p.nxt))[1], (array_agg(p.lnk))[1], (array_agg(p.sn))[1]
-  from parts p
-  group by p.k, p.kd, p.rid, p.sec, p.ttl, p.pid, p.ptitle, p.own, p.sev
-  having sum(p.pts) >= (c->'attention'->>'threshold')::int
-  order by 10 desc, (array_agg(p.sn))[1] nulls last, 1
-  limit least(greatest(coalesce(p_limit, 50), 1), 500);
+  -- every part of the score is a column; the total decides the order; the explanation is built only for what is shown
+  pts as materialized (
+    select s.*,
+      (sw->>s.sev)::int p_severity,
+      case when s.due is null then null when s.due < today then least(30, 10 + (today - s.due) * 2) when s.due - today <= 3 then 15 when s.due - today <= 7 then 8 end p_deadline,
+      case when coalesce(s.tpri, s.ppri) = 'Critical' then 20 when coalesce(s.tpri, s.ppri) = 'High' then 12 end p_priority,
+      case when s.downstream > 0 then least(20, s.downstream * 5) end p_downstream,
+      case when s.kd = 'project_health' and s.p_overdue + s.p_blocked > 0 then least(20, (s.p_overdue + s.p_blocked) * 2) end p_affected,
+      case when s.kd in ('decision_pending', 'decision_review_long', 'decision_deferred_due') and lead then 15
+           when s.kd in ('approval_waiting', 'approval_chain_blocked') and s.own = p_viewer then 15 end p_executive,
+      case when s.age > 0 then least(20, s.age) end p_aging,
+      case when s.plevel = 'critical' then 15 when s.plevel = 'risk' then 8 end p_critical,
+      case when s.dep and s.kd = 'task_blocked' then 10 end p_dependency
+    from scored s),
+  tot as (select p.*, (coalesce(case when p.p_severity > 0 then p.p_severity end, 0) + coalesce(case when p.p_deadline > 0 then p.p_deadline end, 0) + coalesce(case when p.p_priority > 0 then p.p_priority end, 0) + coalesce(case when p.p_downstream > 0 then p.p_downstream end, 0) + coalesce(case when p.p_affected > 0 then p.p_affected end, 0) + coalesce(case when p.p_executive > 0 then p.p_executive end, 0) + coalesce(case when p.p_aging > 0 then p.p_aging end, 0) + coalesce(case when p.p_critical > 0 then p.p_critical end, 0) + coalesce(case when p.p_dependency > 0 then p.p_dependency end, 0)) total from pts p),
+  top as (select * from tot where total > 0 and total >= (c->'attention'->>'threshold')::int order by total desc, sn nulls last, k limit least(greatest(coalesce(p_limit, 50), 1), 500))
+  select t.k, t.kd, t.rid, t.sec, t.ttl, t.pid, t.ptitle, t.own, t.sev, t.total::int,
+    jsonb_build_object('reason', t.rsn, 'parts', (select jsonb_agg(jsonb_build_object('code', x.code, 'points', x.pts, 'n', x.n) order by x.pts desc, x.code) from (values
+      ('severity', t.p_severity, null::int), ('deadline', t.p_deadline, t.due - today), ('priority', t.p_priority, null), ('downstream', t.p_downstream, t.downstream::int),
+      ('affected', t.p_affected, (t.p_overdue + t.p_blocked)), ('executive', t.p_executive, null), ('aging', t.p_aging, t.age), ('critical_project', t.p_critical, null), ('dependency', t.p_dependency, null)
+    ) x(code, pts, n) where x.pts is not null and x.pts > 0), 'project_level', t.plevel),
+    t.nxt, t.lnk, t.sn
+  from top t
+  order by t.total desc, t.sn nulls last, t.k;
 end $$;
 revoke execute on function public._attention(uuid, integer) from public, anon, authenticated;
 create or replace function public.attention_items(p_limit integer default 50)
 returns table (item_key text, kind text, record_id uuid, section text, title text, project_id uuid, project_title text, owner_id uuid,
   severity text, attention_score integer, why jsonb, next_action text, link text, since timestamptz)
-language sql stable security definer set search_path = public as $$
+language sql volatile security definer set search_path = public as $$
   select * from public._attention(public.mgmt_viewer(), p_limit) where public.mgmt_viewer() is not null
 $$;
 revoke execute on function public.attention_items(integer) from public, anon;
@@ -618,12 +722,13 @@ create or replace function public._portfolio(p_viewer uuid)
 returns table (portfolio_id uuid, name text, description text, owner_id uuid, status text, priority text, start date, target date,
   level text, progress integer, project_count integer, open_projects integer, levels jsonb, overdue integer, blocked integer,
   pending_decisions integer, pending_approvals integer, next_milestone jsonb, risks jsonb, projects jsonb, link text)
-language plpgsql stable security definer set search_path = public as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
 #variable_conflict use_column
 begin
+  perform public._mgmt_base(p_viewer);
   return query
   with h as materialized (select * from public._project_health(p_viewer)),
-  pf as (select v.* from public.mgmt_visible(p_viewer) v where v.section = 'company.portfolios'),
+  pf as (select v.* from pg_temp.mgmt_v v where v.section = 'company.portfolios'),
   grp as (select coalesce(case when h.portfolio_id in (select pf.id from pf) then h.portfolio_id end, '00000000-0000-0000-0000-000000000000'::uuid) gid, h.* from h),
   agg as (select g.gid, count(*) n, count(*) filter (where g.level <> 'closed') n_open,
       jsonb_build_object('healthy', count(*) filter (where g.level = 'healthy'), 'attention', count(*) filter (where g.level = 'attention'),
@@ -633,18 +738,18 @@ begin
       case when sum(g.tasks_total) > 0 then (sum(g.tasks_done) * 100 / sum(g.tasks_total))::int end prog,
       sum(g.overdue)::int ov, sum(g.blocked)::int bl, sum(g.pending_decisions)::int pd, sum(g.pending_approvals)::int pa,
       (array_agg(g.next_milestone || jsonb_build_object('project_id', g.project_id, 'project', g.title) order by g.next_milestone->>'due') filter (where g.next_milestone is not null))[1] nm,
-      coalesce(jsonb_agg(jsonb_build_object('project_id', g.project_id, 'project', g.title, 'level', g.level, 'reason', g.reasons->0) order by g.score) filter (where g.level in ('risk', 'critical')), '[]') rk,
+      coalesce(jsonb_agg(jsonb_build_object('project_id', g.project_id, 'project', g.title, 'level', g.level, 'reason', (g.reasons->0) - 'refs') order by g.score) filter (where g.level in ('risk', 'critical')), '[]') rk,
       jsonb_agg(jsonb_build_object('id', g.project_id, 'title', g.title, 'status', g.status, 'level', g.level, 'score', g.score, 'progress', g.progress, 'progress_basis', g.progress_basis,
-        'manager_id', g.manager_id, 'target', g.target, 'overdue', g.overdue, 'blocked', g.blocked, 'next_milestone', g.next_milestone, 'reasons', g.reasons,
+        'manager_id', g.manager_id, 'target', g.target, 'overdue', g.overdue, 'blocked', g.blocked, 'next_milestone', g.next_milestone, 'reasons', (select coalesce(jsonb_agg(r - 'refs'), '[]'::jsonb) from jsonb_array_elements(g.reasons) r),
         'pending_decisions', g.pending_decisions, 'pending_approvals', g.pending_approvals) order by g.score nulls last, g.title) pj
     from grp g group by g.gid)
   select case when a.gid = '00000000-0000-0000-0000-000000000000' then null else a.gid end, coalesce(pf.title, null), pf.data->>'description',
-    public.as_uuid(pf.data->>'owner_id'), pf.status, pf.data->>'priority', public.mgmt_date(pf.data->>'start'), public.mgmt_date(pf.data->>'target'),
+    pf.m_owner, pf.status, pf.data->>'priority', pf.m_start, pf.m_target,
     a.lvl, a.prog, a.n::int, a.n_open::int, a.lv, a.ov, a.bl, a.pd, a.pa, a.nm, a.rk, a.pj,
     case when pf.id is not null then public.mgmt_link('company.portfolios', pf.id) end
   from agg a left join pf on pf.id = a.gid
   union all  -- portfolios with no project the viewer can see are shown empty (their own record is visible to the viewer)
-  select pf.id, pf.title, pf.data->>'description', public.as_uuid(pf.data->>'owner_id'), pf.status, pf.data->>'priority', public.mgmt_date(pf.data->>'start'), public.mgmt_date(pf.data->>'target'),
+  select pf.id, pf.title, pf.data->>'description', pf.m_owner, pf.status, pf.data->>'priority', pf.m_start, pf.m_target,
     'closed', null, 0, 0, '{"healthy":0,"attention":0,"risk":0,"critical":0,"closed":0}'::jsonb, 0, 0, 0, 0, null, '[]'::jsonb, '[]'::jsonb, public.mgmt_link('company.portfolios', pf.id)
   from pf where not exists (select 1 from agg a where a.gid = pf.id)
   order by 1 nulls last, 2;
@@ -654,7 +759,7 @@ create or replace function public.portfolio_overview()
 returns table (portfolio_id uuid, name text, description text, owner_id uuid, status text, priority text, start date, target date,
   level text, progress integer, project_count integer, open_projects integer, levels jsonb, overdue integer, blocked integer,
   pending_decisions integer, pending_approvals integer, next_milestone jsonb, risks jsonb, projects jsonb, link text)
-language sql stable security definer set search_path = public as $$
+language sql volatile security definer set search_path = public as $$
   select * from public._portfolio(public.mgmt_viewer()) where public.mgmt_viewer() is not null
 $$;
 revoke execute on function public.portfolio_overview() from public, anon;
@@ -666,24 +771,25 @@ grant execute on function public.portfolio_overview() to authenticated;
    --------------------------------------------------------------------------------------------- */
 create or replace function public._deadlines(p_viewer uuid, p_days integer default 30)
 returns table (kind text, record_id uuid, section text, title text, project_id uuid, project_title text, owner_id uuid, due date, days integer, status text, priority text, link text)
-language plpgsql stable security definer set search_path = public as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
 #variable_conflict use_column
 declare today date := (now() at time zone 'utc')::date;
 begin
+  perform public._mgmt_base(p_viewer);
   return query
-  with v as materialized (select * from public.mgmt_visible(p_viewer)),
-  pr as (select v.id, v.title from v where v.section = 'company.projects'),
+  with v as materialized (select * from pg_temp.mgmt_v),
+  pr as materialized (select v.id, v.title from v where v.section = 'company.projects'),
   d as (
-    select 'task' k, v.id, v.section, v.title, public.as_uuid(v.data->>'project_ref') pid, public.as_uuid(v.data->>'assignee_id') own, public.mgmt_date(v.data->>'due') dd, v.status, v.data->>'priority' pri
+    select 'task' k, v.id, v.section, v.title, v.m_project pid, v.m_assignee own, v.m_due dd, v.status, v.data->>'priority' pri
       from v where v.section = 'company.tasks' and v.status not in ('Completed', 'Cancelled')
-    union all select 'milestone', v.id, v.section, v.title, public.as_uuid(v.data->>'project_ref'), public.as_uuid(v.data->>'owner_id'), public.mgmt_date(v.data->>'due'), v.status, null
+    union all select 'milestone', v.id, v.section, v.title, v.m_project, v.m_owner, v.m_due, v.status, null
       from v where v.section = 'company.milestones' and v.status not in ('Reached', 'Missed')
-    union all select 'project', v.id, v.section, v.title, v.id, public.as_uuid(v.data->>'manager_id'), public.mgmt_date(v.data->>'target'), v.status, v.data->>'priority'
+    union all select 'project', v.id, v.section, v.title, v.id, v.m_manager, v.m_target, v.status, v.data->>'priority'
       from v where v.section = 'company.projects' and v.status not in ('Completed', 'Cancelled')
-    union all select 'decision', v.id, v.section, v.title, public.as_uuid(v.data->>'project_ref'), public.as_uuid(v.data->>'responsible_id'), coalesce(public.mgmt_date(v.data->>'due'), public.mgmt_date(v.data->>'reconsider')), v.status, null
+    union all select 'decision', v.id, v.section, v.title, v.m_project, v.m_responsible, coalesce(v.m_due, v.m_reconsider), v.status, null
       from v where v.section = 'company.decisions' and v.status in ('Proposed', 'In review', 'Deferred')
-    union all select 'document', v.id, v.section, v.title, public.as_uuid(v.data->>'project_ref'), public.as_uuid(v.data->>'owner_id'),
-      least(public.mgmt_date(v.data->>'expiration_date'), public.mgmt_date(v.data->>'review_due'), public.mgmt_date(v.data->>'review_date')), v.status, null
+    union all select 'document', v.id, v.section, v.title, v.m_project, v.m_owner,
+      least(v.m_expiration_date, v.m_review_due, v.m_review_date), v.status, null
       from v where v.section = 'company.documents' and v.status not in ('Superseded', 'Archived'))
   select d.k, d.id, d.section, d.title, d.pid, pr.title, d.own, d.dd, d.dd - today, d.status, d.pri, public.mgmt_link(d.section, d.id)
   from d left join pr on pr.id = d.pid
@@ -693,7 +799,7 @@ end $$;
 revoke execute on function public._deadlines(uuid, integer) from public, anon, authenticated;
 create or replace function public.mgmt_deadlines(p_days integer default 30)
 returns table (kind text, record_id uuid, section text, title text, project_id uuid, project_title text, owner_id uuid, due date, days integer, status text, priority text, link text)
-language sql stable security definer set search_path = public as $$
+language sql volatile security definer set search_path = public as $$
   select * from public._deadlines(public.mgmt_viewer(), p_days) where public.mgmt_viewer() is not null
 $$;
 revoke execute on function public.mgmt_deadlines(integer) from public, anon;
@@ -720,7 +826,7 @@ create policy p_session_mgmt_snapshots on public.management_snapshots as restric
 revoke insert, update, delete on public.management_snapshots from anon, authenticated;
 
 create or replace function public._mgmt_snapshot(p_viewer uuid, p_kind text, p_title text default null) returns uuid
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
 declare sid uuid; d jsonb;
 begin
   if p_viewer is null or p_kind not in ('daily', 'review') then return null; end if;
@@ -746,14 +852,15 @@ grant execute on function public.mgmt_snapshot(text, text) to authenticated;
    --------------------------------------------------------------------------------------------- */
 create or replace function public._changes(p_viewer uuid, p_since timestamptz, p_snapshot uuid default null)
 returns table (change_key text, at timestamptz, kind text, project_id uuid, project_title text, record_id uuid, section text, title text, detail jsonb, link text, source text, source_id text)
-language plpgsql stable security definer set search_path = public as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
 #variable_conflict use_column
 declare today date := (now() at time zone 'utc')::date; snap jsonb;
 begin
+  perform public._mgmt_base(p_viewer);
   if p_snapshot is not null then select s.data into snap from public.management_snapshots s where s.id = p_snapshot and s.user_id = p_viewer; end if;
   return query
-  with v as materialized (select * from public.mgmt_visible(p_viewer)),
-  pr as (select v.id, v.title from v where v.section = 'company.projects'),
+  with v as materialized (select * from pg_temp.mgmt_v),
+  pr as materialized (select v.id, v.title from v where v.section = 'company.projects'),
   act as (select a.*, rv.title rtitle, rv.data rdata, rv.section rsec from public.activity a join v rv on rv.id = a.record_id where a.created_at >= p_since),
   ch as (
     select 'project_status' k, a.created_at at, rv_pid.pid, a.record_id rid, a.rsec sec, a.rtitle ttl, jsonb_build_object('from', a.detail->>'from', 'to', a.detail->>'to') det, 'activity' src, a.id::text sid
@@ -785,18 +892,18 @@ begin
         jsonb_build_object('field', a.detail->>'field', 'from', a.detail->>'from', 'to', a.detail->>'to'), 'activity', a.id::text
       from act a where a.action = 'owner_changed' and (a.rsec in ('company.projects', 'company.milestones', 'company.portfolios') or (a.rsec = 'company.tasks' and a.rdata->>'priority' in ('High', 'Critical')))
     -- approvals decided in the window on records the viewer may open
-    union all select 'approval_completed', ap.decided_at, coalesce(public.as_uuid(rv.data->>'project_ref'), case when rv.section = 'company.projects' then rv.id end), ap.record_id, rv.section, rv.title,
+    union all select 'approval_completed', ap.decided_at, coalesce(rv.m_project, case when rv.section = 'company.projects' then rv.id end), ap.record_id, rv.section, rv.title,
         jsonb_build_object('status', ap.status, 'by', ap.decided_by), 'approval', ap.id::text
       from public.approvals ap join v rv on rv.id = ap.record_id where ap.status in ('approved', 'rejected', 'changes_requested') and ap.decided_at >= p_since
     -- important work that became overdue in the window (no history row: the date itself is the source)
-    union all select 'task_overdue', (public.mgmt_date(v.data->>'due') + 1)::timestamptz, public.as_uuid(v.data->>'project_ref'), v.id, v.section, v.title,
+    union all select 'task_overdue', (v.m_due + 1)::timestamptz, v.m_project, v.id, v.section, v.title,
         jsonb_build_object('due', v.data->>'due', 'priority', v.data->>'priority'), 'due_date', v.id::text
       from v where v.section = 'company.tasks' and v.status not in ('Completed', 'Cancelled') and v.data->>'priority' in ('High', 'Critical')
-        and public.mgmt_date(v.data->>'due') >= p_since::date and public.mgmt_date(v.data->>'due') < today
-    union all select 'milestone_delayed', (public.mgmt_date(v.data->>'due') + 1)::timestamptz, public.as_uuid(v.data->>'project_ref'), v.id, v.section, v.title,
+        and v.m_due >= p_since::date and v.m_due < today
+    union all select 'milestone_delayed', (v.m_due + 1)::timestamptz, v.m_project, v.id, v.section, v.title,
         jsonb_build_object('due', v.data->>'due', 'overdue', true), 'due_date', v.id::text
       from v where v.section = 'company.milestones' and v.status not in ('Reached', 'Missed')
-        and public.mgmt_date(v.data->>'due') >= p_since::date and public.mgmt_date(v.data->>'due') < today
+        and v.m_due >= p_since::date and v.m_due < today
     -- health compared with the snapshot (only projects the viewer can still open)
     union all select 'health_changed', now(), h.project_id, h.project_id, 'company.projects', h.title,
         jsonb_build_object('from', snap->'projects'->h.project_id::text->>'level', 'to', h.level, 'score_from', (snap->'projects'->h.project_id::text->>'score')::int, 'score_to', h.score), 'snapshot', p_snapshot::text
@@ -812,7 +919,7 @@ revoke execute on function public._changes(uuid, timestamptz, uuid) from public,
 -- p_window: 'day' | 'week' | 'review'. Health changes compare with the person's snapshot from that time.
 create or replace function public.management_changes(p_window text default 'week')
 returns table (change_key text, at timestamptz, kind text, project_id uuid, project_title text, record_id uuid, section text, title text, detail jsonb, link text, source text, source_id text)
-language plpgsql stable security definer set search_path = public as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
 #variable_conflict use_column
 declare me uuid := public.mgmt_viewer(); since timestamptz; sid uuid;
 begin
@@ -838,17 +945,18 @@ drop function if exists public._team_status(uuid);
 create or replace function public._team_status(p_viewer uuid)
 returns table (person_id uuid, name text, title text, role text, department_id uuid, department text, location text, timezone text,
   availability text, availability_note text, availability_until timestamptz, projects jsonb, assignments jsonb, open_tasks integer, overdue_tasks integer, blocked_tasks integer, upcoming_14 integer)
-language plpgsql stable security definer set search_path = public as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
 #variable_conflict use_column
 declare today date := (now() at time zone 'utc')::date;
 begin
+  perform public._mgmt_base(p_viewer);
   if not public.is_active_employee(p_viewer) then return; end if;
   return query
-  with v as materialized (select * from public.mgmt_visible(p_viewer)),
-  pr as (select v.id, v.title, v.status, v.data from v where v.section = 'company.projects' and v.status not in ('Completed', 'Cancelled')),
-  pm as (select public.as_uuid(pr.data->>'manager_id') pid, pr.id, pr.title, 'manager' r from pr where coalesce(pr.data->>'manager_id', '') <> ''
+  with v as materialized (select * from pg_temp.mgmt_v),
+  pr as materialized (select v.id, v.title, v.status, v.data, v.m_manager from v where v.section = 'company.projects' and v.status not in ('Completed', 'Cancelled')),
+  pm as (select pr.m_manager pid, pr.id, pr.title, 'manager' r from pr where coalesce(pr.data->>'manager_id', '') <> ''
          union select public.as_uuid(x), pr.id, pr.title, 'member' from pr, jsonb_array_elements_text(coalesce(pr.data->'members_ids', '[]')) x where x <> coalesce(pr.data->>'manager_id', '')),
-  t as (select v.id, v.title, v.status, public.as_uuid(v.data->>'assignee_id') asg, public.mgmt_date(v.data->>'due') due, v.data->>'priority' pri, v.data->>'project_ref_title' ptitle
+  t as (select v.id, v.title, v.status, v.m_assignee asg, v.m_due due, v.data->>'priority' pri, v.data->>'project_ref_title' ptitle
         from v where v.section = 'company.tasks' and v.status not in ('Completed', 'Cancelled') and coalesce(v.data->>'assignee_id', '') <> ''),
   ta as (select t.asg, count(*) n, count(*) filter (where t.due < today) od, count(*) filter (where t.status = 'Blocked') bl, count(*) filter (where t.due between today and today + 14) up,
            jsonb_agg(jsonb_build_object('id', t.id, 'title', t.title, 'due', t.due, 'status', t.status, 'priority', t.priority, 'project', t.ptitle)
@@ -867,7 +975,7 @@ revoke execute on function public._team_status(uuid) from public, anon, authenti
 create or replace function public.team_status()
 returns table (person_id uuid, name text, title text, role text, department_id uuid, department text, location text, timezone text,
   availability text, availability_note text, availability_until timestamptz, projects jsonb, assignments jsonb, open_tasks integer, overdue_tasks integer, blocked_tasks integer, upcoming_14 integer)
-language sql stable security definer set search_path = public as $$
+language sql volatile security definer set search_path = public as $$
   select * from public._team_status(public.mgmt_viewer()) where public.mgmt_viewer() is not null
 $$;
 revoke execute on function public.team_status() from public, anon;
@@ -878,7 +986,7 @@ grant execute on function public.team_status() to authenticated;
        decisions, deadlines, and the indicators (each with the list it counts, so every number can be opened)
    --------------------------------------------------------------------------------------------- */
 create or replace function public.exec_overview() returns jsonb
-language plpgsql stable security definer set search_path = public as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
 declare me uuid := public.mgmt_viewer(); c jsonb := public.mgmt_config(); today date := (now() at time zone 'utc')::date; res jsonb; lead boolean;
 begin
   if me is null then return null; end if;
@@ -912,8 +1020,11 @@ begin
     'waiting_for_me', coalesce((select jsonb_agg(to_jsonb(x)) from (select * from w where w.bucket = 'me' order by w.due nulls last, w.age_days desc, w.item_key limit 8) x), '[]'),
     'decisions', coalesce((select jsonb_agg(to_jsonb(x)) from (select * from l where l.kind in ('decision_pending', 'decision_review_long', 'decision_deferred_due') order by l.since, l.loop_key limit 8) x), '[]'),
     'deadlines', coalesce((select jsonb_agg(to_jsonb(x)) from (select * from dl where dl.days between 0 and 30 and dl.kind in ('milestone', 'project', 'decision', 'document') order by dl.due, dl.title limit 10) x), '[]'),
-    'projects', coalesce((select jsonb_agg(jsonb_build_object('id', h.project_id, 'title', h.title, 'level', h.level, 'score', h.score, 'reasons', h.reasons, 'progress', h.progress,
-        'portfolio_id', h.portfolio_id, 'manager_id', h.manager_id, 'next_milestone', h.next_milestone, 'target', h.target) order by h.score nulls last, h.title) from h where h.level <> 'closed'), '[]'))
+    -- the projects at risk or critical, worst first (the full list is the Portfolio page); reasons without their record lists
+    'projects', coalesce((select jsonb_agg(x.o order by x.score nulls last, x.title) from (select h.score, h.title, jsonb_build_object('id', h.project_id, 'title', h.title, 'level', h.level, 'score', h.score,
+        'reasons', (select coalesce(jsonb_agg(r - 'refs'), '[]'::jsonb) from jsonb_array_elements(h.reasons) r), 'progress', h.progress,
+        'portfolio_id', h.portfolio_id, 'manager_id', h.manager_id, 'next_milestone', h.next_milestone, 'target', h.target) o
+        from h where h.level in ('risk', 'critical') order by h.score nulls last, h.title limit 20) x), '[]'))
   into res;
   return res;
 end $$;
@@ -951,33 +1062,34 @@ revoke insert, update, delete on public.management_alerts from anon, authenticat
 -- the conditions true now for one person (owners / management: everything they can open; a project manager: their projects)
 create or replace function public._alert_conditions(p_viewer uuid)
 returns table (key text, kind text, record_id uuid, project_id uuid, severity text, title text, detail jsonb)
-language plpgsql stable security definer set search_path = public as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
 #variable_conflict use_column
 declare c jsonb := public.mgmt_config(); today date := (now() at time zone 'utc')::date; lead boolean;
 begin
+  perform public._mgmt_base(p_viewer);
   select p.role in ('owner', 'admin', 'management') into lead from public.profiles p where p.id = p_viewer and not p.disabled;
   if lead is null then return; end if;
   return query
   with h as materialized (select * from public._project_health(p_viewer) hh where hh.level <> 'closed' and (lead or hh.manager_id = p_viewer)),
-  v as materialized (select * from public.mgmt_visible(p_viewer)),
+  v as materialized (select * from pg_temp.mgmt_v),
   mine as (select h.project_id from h)
   select 'project_critical:' || h.project_id, 'project_critical', h.project_id, h.project_id, 'critical', h.title, jsonb_build_object('score', h.score, 'reasons', h.reasons) from h where h.level = 'critical'
   union all select 'project_no_owner:' || h.project_id, 'project_no_owner', h.project_id, h.project_id, 'high', h.title, '{}'::jsonb from h where h.manager_id is null
-  union all select 'milestone_overdue:' || m.id, 'milestone_overdue', m.id, public.as_uuid(m.data->>'project_ref'), 'high', m.title, jsonb_build_object('due', m.data->>'due')
-    from v m where m.section = 'company.milestones' and m.status not in ('Reached', 'Missed') and public.mgmt_date(m.data->>'due') < today and public.as_uuid(m.data->>'project_ref') in (select mine.project_id from mine)
-  union all select 'critical_blocker:' || t.id, 'critical_blocker', t.id, public.as_uuid(t.data->>'project_ref'), 'critical', t.title, jsonb_build_object('blocker', t.data->>'blocker')
-    from v t where t.section = 'company.tasks' and t.status = 'Blocked' and t.data->>'priority' = 'Critical' and (lead or public.as_uuid(t.data->>'project_ref') in (select mine.project_id from mine))
-  union all select 'critical_task_overdue:' || t.id, 'critical_task_overdue', t.id, public.as_uuid(t.data->>'project_ref'), 'high', t.title, jsonb_build_object('due', t.data->>'due')
-    from v t where t.section = 'company.tasks' and t.status not in ('Completed', 'Cancelled') and t.data->>'priority' = 'Critical' and public.mgmt_date(t.data->>'due') < today
-      and (lead or public.as_uuid(t.data->>'project_ref') in (select mine.project_id from mine))
-  union all select 'approval_sla:' || a.id, 'approval_sla', a.record_id, coalesce(public.as_uuid(rv.data->>'project_ref'), case when rv.section = 'company.projects' then rv.id end), 'high', rv.title,
+  union all select 'milestone_overdue:' || m.id, 'milestone_overdue', m.id, m.m_project, 'high', m.title, jsonb_build_object('due', m.data->>'due')
+    from v m where m.section = 'company.milestones' and m.status not in ('Reached', 'Missed') and m.m_due < today and m.m_project in (select mine.project_id from mine)
+  union all select 'critical_blocker:' || t.id, 'critical_blocker', t.id, t.m_project, 'critical', t.title, jsonb_build_object('blocker', t.data->>'blocker')
+    from v t where t.section = 'company.tasks' and t.status = 'Blocked' and t.data->>'priority' = 'Critical' and (lead or t.m_project in (select mine.project_id from mine))
+  union all select 'critical_task_overdue:' || t.id, 'critical_task_overdue', t.id, t.m_project, 'high', t.title, jsonb_build_object('due', t.data->>'due')
+    from v t where t.section = 'company.tasks' and t.status not in ('Completed', 'Cancelled') and t.data->>'priority' = 'Critical' and t.m_due < today
+      and (lead or t.m_project in (select mine.project_id from mine))
+  union all select 'approval_sla:' || a.id, 'approval_sla', a.record_id, coalesce(rv.m_project, case when rv.section = 'company.projects' then rv.id end), 'high', rv.title,
       jsonb_build_object('days', extract(day from now() - a.created_at)::int, 'approver', a.approver_id)
     from public.approvals a join v rv on rv.id = a.record_id where a.status = 'pending' and a.created_at < now() - make_interval(days => (c->>'approval_sla_days')::int)
-      and (lead or coalesce(public.as_uuid(rv.data->>'project_ref'), rv.id) in (select mine.project_id from mine))
-  union all select 'decision_sla:' || d.id, 'decision_sla', d.id, public.as_uuid(d.data->>'project_ref'), 'high', d.title, jsonb_build_object('status', d.status)
+      and (lead or coalesce(rv.m_project, rv.id) in (select mine.project_id from mine))
+  union all select 'decision_sla:' || d.id, 'decision_sla', d.id, d.m_project, 'high', d.title, jsonb_build_object('status', d.status)
     from v d where d.section = 'company.decisions' and d.status in ('Proposed', 'In review')
-      and coalesce(public.mgmt_date(d.data->>'date'), d.created_at::date) < today - (c->>'decision_sla_days')::int
-      and (lead or public.as_uuid(d.data->>'project_ref') in (select mine.project_id from mine));
+      and coalesce(d.m_date, d.created_at::date) < today - (c->>'decision_sla_days')::int
+      and (lead or d.m_project in (select mine.project_id from mine));
 end $$;
 revoke execute on function public._alert_conditions(uuid) from public, anon, authenticated;
 
@@ -988,7 +1100,7 @@ create or replace function public.mgmt_alert_text(p_kind text) returns text lang
 $$;
 -- evaluate for one person (p_user) or, from the scheduler, for every owner / manager / project manager
 create or replace function public.mgmt_alert_scan(p_user uuid default null) returns jsonb
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
 declare c jsonb := public.mgmt_config(); u uuid; cond record; al public.management_alerts; opened int := 0; reopened int := 0; resolved int := 0; seen int := 0;
   cool interval; svc boolean := auth.uid() is null; keys text[]; n int;
 begin
@@ -1110,14 +1222,18 @@ create trigger action_audit_guard before update or delete on public.action_audit
    --------------------------------------------------------------------------------------------- */
 create or replace function public.mgmt_decisions_report()
 returns table (record_id uuid, number text, title text, status text, project_id uuid, project_title text, responsible_id uuid, date date, due date, reconsider date, age_days integer, link text)
-language sql stable security definer set search_path = public as $$
-  with v as (select * from public.mgmt_visible(public.mgmt_viewer())), pr as (select v.id, v.title from v where v.section = 'company.projects')
-  select d.id, d.data->>'doc_number', d.title, d.status, public.as_uuid(d.data->>'project_ref'), pr.title, public.as_uuid(d.data->>'responsible_id'),
-    coalesce(public.mgmt_date(d.data->>'date'), d.created_at::date), public.mgmt_date(d.data->>'due'), public.mgmt_date(d.data->>'reconsider'),
-    ((now() at time zone 'utc')::date - coalesce(public.mgmt_date(d.data->>'date'), d.created_at::date))::int, public.mgmt_link(d.section, d.id)
-  from v d left join pr on pr.id = public.as_uuid(d.data->>'project_ref') where d.section = 'company.decisions'
-  order by case d.status when 'Proposed' then 0 when 'In review' then 1 when 'Deferred' then 2 else 3 end, 8 desc, d.id
-$$;
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+begin
+  if public.mgmt_viewer() is null then return; end if;
+  perform public._mgmt_base(public.mgmt_viewer());
+  return query
+  with v as (select * from pg_temp.mgmt_v), pr as materialized (select v.id, v.title from v where v.section = 'company.projects')
+  select d.id, d.data->>'doc_number', d.title, d.status, d.m_project, pr.title, d.m_responsible,
+    coalesce(d.m_date, d.created_at::date), d.m_due, d.m_reconsider,
+    ((now() at time zone 'utc')::date - coalesce(d.m_date, d.created_at::date))::int, public.mgmt_link(d.section, d.id)
+  from v d left join pr on pr.id = d.m_project where d.section = 'company.decisions'
+  order by case d.status when 'Proposed' then 0 when 'In review' then 1 when 'Deferred' then 2 else 3 end, 8 desc, d.id;
+end $$;
 revoke execute on function public.mgmt_decisions_report() from public, anon;
 grant execute on function public.mgmt_decisions_report() to authenticated;
 
@@ -1137,7 +1253,7 @@ $$;
 revoke execute on function public._waiting_target(uuid, uuid, uuid) from public, anon, authenticated;
 
 create or replace function public.waiting_remind(p_record uuid, p_approval uuid default null) returns jsonb
-language plpgsql volatile security definer set search_path = public as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
 declare me uuid := public.mgmt_viewer(); w record; who uuid; last timestamptz; sent boolean;
 begin
   if me is null then raise exception 'Not allowed' using errcode = '42501'; end if;
@@ -1157,7 +1273,7 @@ revoke execute on function public.waiting_remind(uuid, uuid) from public, anon;
 grant execute on function public.waiting_remind(uuid, uuid) to authenticated;
 
 create or replace function public.waiting_escalate(p_record uuid, p_approval uuid default null, p_note text default null) returns jsonb
-language plpgsql volatile security definer set search_path = public as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
 declare me uuid := public.mgmt_viewer(); w record; r record; up uuid; party uuid; n int := 0; last timestamptz;
 begin
   if me is null then raise exception 'Not allowed' using errcode = '42501'; end if;
@@ -1189,7 +1305,7 @@ grant execute on function public.waiting_escalate(uuid, uuid, text) to authentic
        yesterday") — service role only. The alert scan is mgmt_alert_scan(null).
    --------------------------------------------------------------------------------------------- */
 create or replace function public.mgmt_daily_snapshots() returns integer
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
 declare u uuid; n int := 0;
 begin
   if auth.uid() is not null then raise exception 'Not allowed' using errcode = '42501'; end if;
