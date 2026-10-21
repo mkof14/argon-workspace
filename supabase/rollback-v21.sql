@@ -131,6 +131,20 @@ drop function if exists public.class_meta(text);
 drop function if exists public.profile_department_sync();
 drop function if exists public.department_guard();
 
+-- v6 suggestions (as the caller, under row-level security)
+create or replace function public.search_records(q text, n int default 25)
+returns setof public.records language sql stable security invoker set search_path = public as $$
+  select r.* from public.records r
+  where not exists (
+    select 1 from unnest(string_to_array(lower(trim(q)), ' ')) w
+    where w <> '' and position(w in lower(r.title || ' ' || coalesce(r.data::text, ''))) = 0)
+  order by (lower(r.title) like '%' || lower(trim(q)) || '%') desc, r.updated_at desc
+  limit least(greatest(coalesce(n, 25), 1), 50);
+$$;
+revoke all on function public.search_records(text, int) from public, anon;
+grant execute on function public.search_records(text, int) to authenticated;
+drop index if exists public.records_alltext_trgm_idx;
+
 -- v20 message search
 create or replace function public.search_messages(p_q text, p_project uuid default null, p_author uuid default null, p_from date default null, p_to date default null,
   p_kind text default null, p_mentions_me boolean default false, p_decisions boolean default false, p_limit integer default 30)

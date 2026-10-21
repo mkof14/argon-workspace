@@ -17,13 +17,14 @@ const only = process.argv.slice(2);
 const suites = fs.readdirSync(path.join(ROOT, "tests/integration")).filter((f) => f.endsWith(".test.ts")).filter((f) => !only.length || only.includes(f.replace(/\.test\.ts$/, ""))).map((f) => `tests/integration/${f}`);
 const log = (...a) => console.error("[integration]", ...a);
 const env = { ...process.env, ...ENV, NEXT_DIST_DIR: ".next-stack", NEXT_TELEMETRY_DISABLED: "1" };
-let app;
-const stop = () => { try { if (app?.pid) process.kill(-app.pid, "SIGTERM"); } catch {} down(); }; // the whole group: npx, next and its server
+let app, app2;
+const PORT2 = 3126, APP2 = `http://127.0.0.1:${PORT2}`, MODEL = "http://127.0.0.1:54391";
+const stop = () => { for (const a of [app, app2]) try { if (a?.pid) process.kill(-a.pid, "SIGTERM"); } catch {} down(); }; // the whole group: npx, next and its server
 process.on("SIGINT", () => { stop(); process.exit(130); });
 
 try {
   await up();
-  const needApp = suites.some((s) => /\/(api|e2e|docapi|e2e4)\.test\.ts$/.test(s));
+  const needApp = suites.some((s) => /\/(api|e2e|docapi|e2e4|p4accept)\.test\.ts$/.test(s));
   if (needApp) {
     if (!process.env.SKIP_BUILD) { log("build"); const b = spawnSync("npx", ["next", "build"], { cwd: ROOT, env, stdio: "inherit" }); if (b.status) throw new Error("build failed"); }
     try { await fetch(APP); throw new Error(`port ${PORT} is already in use — stop the old app first`); } catch (e) { if (/already in use/.test(e.message)) throw e; }
@@ -31,7 +32,15 @@ try {
     app = spawn("npx", ["next", "start", "-p", String(PORT), "-H", "127.0.0.1"], { cwd: ROOT, env, stdio: ["ignore", out, out], detached: true });
     const t = Date.now(); while (Date.now() - t < 60000) { try { if ((await fetch(`${APP}/api/health`)).status < 500) break; } catch {} await new Promise((r) => setTimeout(r, 500)); }
     log("app:", APP);
+    // the Assistant acceptance test needs the app with a model configured: a second instance of the same build whose
+    // model endpoint is a deterministic stand-in run by the test (it records what reaches the model); never a real key
+    if (suites.some((s) => s.endsWith("/p4accept.test.ts"))) {
+      const out2 = fs.openSync(path.join(ROOT, ".stack", "app2.log"), "w");
+      app2 = spawn("npx", ["next", "start", "-p", String(PORT2), "-H", "127.0.0.1"], { cwd: ROOT, env: { ...env, ANTHROPIC_API_KEY: "stack-standin-not-a-key", ANTHROPIC_BASE_URL: MODEL }, stdio: ["ignore", out2, out2], detached: true });
+      const t2 = Date.now(); while (Date.now() - t2 < 60000) { try { if ((await fetch(`${APP2}/api/health`)).status < 500) break; } catch {} await new Promise((r) => setTimeout(r, 500)); }
+      log("app with model stand-in:", APP2);
+    }
   }
-  const r = spawnSync(process.execPath, ["--experimental-strip-types", "--disable-warning=ExperimentalWarning", "--import", "./scripts/guide/reg.mjs", "--test", "--test-concurrency=1", ...suites], { cwd: ROOT, env: { ...env, STACK_APP_URL: needApp ? APP : "" }, stdio: "inherit" });
+  const r = spawnSync(process.execPath, ["--experimental-strip-types", "--disable-warning=ExperimentalWarning", "--import", "./scripts/guide/reg.mjs", "--test", "--test-concurrency=1", ...suites], { cwd: ROOT, env: { ...env, STACK_APP_URL: needApp ? APP : "", STACK_AI_APP_URL: app2 ? APP2 : "", STACK_MODEL_PORT: "54391" }, stdio: "inherit" });
   stop(); process.exit(r.status ?? 1);
 } catch (e) { log("failed:", e.message); stop(); process.exit(1); }

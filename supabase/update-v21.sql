@@ -854,6 +854,32 @@ end $$;
 revoke execute on function public.search_messages(text, uuid, uuid, date, date, text, boolean, boolean, integer) from public, anon;
 grant execute on function public.search_messages(text, uuid, uuid, date, date, text, boolean, boolean, integer) to authenticated;
 
+-- v21: suggestions while typing (search_records) — candidates from a trigram index first, then the reading rules
+-- for those only. v6 ran as the caller under row-level security, where the text match cannot use an index
+-- (LIKE is not leakproof), so every record was checked: 0.6–1.2 s at 10,000 documents (measured).
+create index if not exists records_alltext_trgm_idx on public.records using gin ((lower(title || ' ' || coalesce(data::text, ''))) extensions.gin_trgm_ops);
+create or replace function public.search_records(q text, n int default 25)
+returns setof public.records language plpgsql stable security definer set search_path = public as $$
+declare lq text := lower(trim(coalesce(q, ''))); w1 text;
+begin
+  if auth.uid() is null or not public.session_ok() or lq = '' then return; end if;
+  w1 := replace(replace(replace(split_part(lq, ' ', 1), '\', '\\'), '%', '\%'), '_', '\_');
+  return query
+  with cand as materialized (
+    select r.id from public.records r
+    where lower(r.title || ' ' || coalesce(r.data::text, '')) like '%' || w1 || '%'
+    order by (lower(r.title) like '%' || lq || '%') desc, r.updated_at desc
+    limit 2000)
+  select r.* from cand c join public.records r on r.id = c.id
+  -- the same rules as reading the record (p_records_read, p_records_announcements, p_session_records)
+  where public.record_visible(r) and public.announcement_visible(r)
+    and not exists (select 1 from unnest(string_to_array(lq, ' ')) w where w <> '' and position(w in lower(r.title || ' ' || coalesce(r.data::text, ''))) = 0)
+  order by (lower(r.title) like '%' || lq || '%') desc, r.updated_at desc
+  limit least(greatest(coalesce(n, 25), 1), 50);
+end $$;
+revoke all on function public.search_records(text, int) from public, anon;
+grant execute on function public.search_records(text, int) to authenticated;
+
 create or replace function public.corp_search(p_q text, p_types text[] default null, p_project uuid default null, p_department text default null, p_person uuid default null,
   p_doc_type text default null, p_from date default null, p_to date default null, p_classification text default null, p_status text default null, p_limit integer default 40)
 returns table (kind text, id uuid, record_id uuid, section text, title text, excerpt text, project_ref text, version text, owner_id text, updated_at timestamptz, link text, rank real)
@@ -895,7 +921,12 @@ begin
     select p.record_id, p.path, p.page, p.content, p.rk, r2.title rtitle, r2.section rsection, r2.data rdata, r2.updated_at rupd
     from pcand p join public.records r2 on r2.id = p.record_id
     where (p_project is null or r2.data->>'project_ref' = p_project::text) and (p_doc_type is null or r2.data->>'doc_type' = p_doc_type)
-      and (p_classification is null or r2.data->>'classification' = p_classification) and public.record_visible(r2)
+      and (p_classification is null or r2.data->>'classification' = p_classification)
+      -- the other filters apply to text found inside files too (the record's own status, department, people, dates)
+      and (p_status is null or r2.status = p_status) and (p_department is null or r2.data->>'department' = p_department)
+      and (p_person is null or r2.created_by = p_person or p_person::text in (r2.data->>'owner_id', r2.data->>'assignee_id', r2.data->>'organizer_id'))
+      and (p_from is null or r2.updated_at >= p_from) and (p_to is null or r2.updated_at < p_to + 1)
+      and public.record_visible(r2)
     order by p.rk desc limit lim
   )
   select coalesce(x.k, 'record'), x.id, x.id, x.section, x.title,
