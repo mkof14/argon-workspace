@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { cancelAction, runAction, undoAction } from "@/lib/safeAction";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import Icon from "./Icon";
@@ -12,7 +13,7 @@ import { deskById } from "@/config/legal";
 import type { Op } from "@/lib/command";
 
 export type AiContext = { title: string; section?: string; record?: Rec; rows?: Rec[]; ask?: string; desk?: string; format?: "item"; onApply?: (text: string) => void };
-type Plan = { ops: Op[]; records: Record<string, Rec>; dropped: string[]; state: "ready" | "running" | "done" | "cancelled"; results?: { ok: boolean; text: string; href?: string }[] };
+type Plan = { ops: Op[]; records: Record<string, Rec>; dropped: string[]; state: "ready" | "running" | "done" | "cancelled" | "undone"; results?: { ok: boolean; text: string; href?: string }[]; action?: string; undoable?: boolean };
 type Msg = { role: "user" | "assistant"; content: string; src?: "faq" | "cache" | "ai"; faqId?: string; saved?: boolean; q?: string; plan?: Plan; sources?: { n: number; kind: string; title: string; link: string; suspicious?: boolean }[] };
 type T4 = { en: string; ru: string; uk: string; ar: string };
 const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk, ar });
@@ -105,12 +106,22 @@ export default function AiPanel({ ctx, onClose }: { ctx: AiContext; onClose: () 
       if (r.status === 429) { toast(t("ai_limit", lang), true); setMsgs(next.slice(0, -2)); return; }
       if (!r.ok) throw new Error(await r.text());
       const j = await r.json();
-      setMsgs([...next.slice(0, -1), { role: "assistant", content: j.reply || "", src: "ai", plan: j.ops?.length ? { ops: j.ops, records: j.records || {}, dropped: j.dropped || [], state: "ready" } : undefined }]);
+      setMsgs([...next.slice(0, -1), { role: "assistant", content: j.reply || "", src: "ai", plan: j.ops?.length ? { ops: j.ops, records: j.records || {}, dropped: j.dropped || [], state: "ready", action: j.action_id } : undefined }]);
     } catch (e: any) { toast(e.message || "Error", true); setMsgs(next.slice(0, -1)); } finally { setBusy(false); }
   };
   const setPlan = (i: number, p: Partial<Plan>) => setMsgs((m) => m.map((x, j) => (j === i && x.plan ? { ...x, plan: { ...x.plan, ...p } } : x)));
   const runPlan = async (i: number) => {
     const p = msgs[i].plan; if (!p) return; setPlan(i, { state: "running" }); const results: Plan["results"] = [];
+    // Phase 5: the confirmed plan is carried out on the server from the stored proposal (audited, undoable where exact)
+    if (p.action) {
+      try {
+        const j = await runAction(p.action, { confirm: true, lang });
+        if (!j.ok && !j.result) { setPlan(i, { state: "done", results: [{ ok: false, text: j.error || "error" }] }); return; }
+        for (const [k, o] of p.ops.entries()) { const x = j.result?.ops?.[k]; results.push({ ok: !!x?.ok, text: x?.ok ? opText(o) : `${opText(o)} — ${x?.error || "not done"}`, href: x?.link }); }
+        setPlan(i, { state: "done", results, undoable: !!j.undoable });
+      } catch (e: any) { setPlan(i, { state: "done", results: [{ ok: false, text: e?.message || "error" }] }); }
+      return;
+    }
     for (const o of p.ops) {
       try {
         if (o.op === "create") { const r = await store.save({ section: o.section, title: o.title, status: o.status, data: o.data }); results.push({ ok: true, text: opText(o), href: `/${r.section.replace(".", "/")}?r=${r.id}` }); }
@@ -155,8 +166,10 @@ export default function AiPanel({ ctx, onClose }: { ctx: AiContext; onClose: () 
               {m.plan && <div className="cmd-plan">
                 {(m.plan.results || m.plan.ops.map((o) => ({ ok: true, text: opText(o), href: undefined as string | undefined }))).map((r, k) => <div key={k} className={`cmd-op ${m.plan!.results ? (r.ok ? "ok" : "bad") : ""}`}><Icon n={m.plan!.results ? (r.ok ? "check" : "alert") : "edit"} />{r.href ? <a href={r.href}>{r.text}</a> : <span>{r.text}</span>}</div>)}
                 {m.plan.dropped.length > 0 && !m.plan.results && <div className="faint" style={{ fontSize: 12.5 }}>{T(L("Skipped", "Пропущено", "Пропущено", "تم تخطيه"))}: {m.plan.dropped.join("; ")}</div>}
-                {m.plan.state === "ready" && <div className="toolbar"><button className="btn primary sm" onClick={() => runPlan(i)}><Icon n="check" />{T(L("Yes, do it", "Да, выполнить", "Так, виконати", "نعم، نفّذ"))}</button><button className="btn ghost sm" onClick={() => setPlan(i, { state: "cancelled" })}><Icon n="x" />{T(L("Cancel", "Отмена", "Скасувати", "إلغاء"))}</button></div>}
+                {m.plan.state === "ready" && <div className="toolbar"><button className="btn primary sm" onClick={() => runPlan(i)}><Icon n="check" />{T(L("Yes, do it", "Да, выполнить", "Так, виконати", "نعم، نفّذ"))}</button><button className="btn ghost sm" onClick={() => { if (m.plan?.action) cancelAction(m.plan.action).catch(() => {}); setPlan(i, { state: "cancelled" }); }}><Icon n="x" />{T(L("Cancel", "Отмена", "Скасувати", "إلغاء"))}</button></div>}
                 {m.plan.state === "running" && <div className="faint">…</div>}
+                {m.plan.state === "done" && m.plan.undoable && m.plan.action && <div className="toolbar"><button className="btn ghost sm" onClick={async () => { const r = await undoAction(m.plan!.action!, lang); if (r.ok) setPlan(i, { state: "undone", undoable: false }); else toast(r.error || "Error", true); }}><Icon n="back" />{T(L("Undo", "Отменить действие", "Скасувати дію", "تراجع"))}</button></div>}
+                {m.plan.state === "undone" && <div className="faint" style={{ fontSize: 13 }}>{T(L("Undone — the records are back as they were.", "Отменено — записи вернулись в прежнее состояние.", "Скасовано — записи повернулися до попереднього стану.", "تم التراجع — عادت السجلات كما كانت."))}</div>}
                 {m.plan.state === "cancelled" && <div className="faint" style={{ fontSize: 13 }}>{T(L("Cancelled — nothing was changed.", "Отменено — ничего не изменено.", "Скасовано — нічого не змінено.", "أُلغي — لم يتغير شيء."))}</div>}
               </div>}
               {!!m.sources?.length && <div className="ai-sources" data-sources={m.sources.length}><b>{T(L("Sources", "Источники", "Джерела", "المصادر"))}</b>{m.sources.map((x) => <a key={x.n} href={x.link} className={x.suspicious ? "susp" : ""} title={x.suspicious ? T(L("This source contains instructions; they were not followed", "В источнике есть инструкции; они не выполнялись", "У джерелі є інструкції; їх не виконано", "يحتوي المصدر على تعليمات لم تُتّبع")) : x.kind}>[{x.n}] {x.title}{x.suspicious ? " ⚠" : ""}</a>)}</div>}

@@ -1032,6 +1032,7 @@ create table if not exists public.voice_inbox (
   action_id uuid,
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
+alter table public.voice_inbox add column if not exists converted_as text;
 create index if not exists voice_inbox_user_idx on public.voice_inbox (user_id, created_at desc);
 alter table public.voice_inbox enable row level security;
 drop policy if exists p_voice_inbox_own on public.voice_inbox;
@@ -1052,13 +1053,15 @@ create table if not exists public.action_audit (
   intent text not null,
   risk text not null check (risk in ('read', 'low', 'material', 'controlled')),
   interpreted jsonb not null default '{}'::jsonb,
-  status text not null default 'proposed' check (status in ('proposed', 'needs_clarification', 'rejected', 'executed', 'failed', 'cancelled', 'undone')),
+  status text not null default 'proposed',
   question text, error text,
   confirmed_at timestamptz, executed_at timestamptz,
   result_record_id uuid, result jsonb,
   undo jsonb, undone_at timestamptz,
   created_at timestamptz not null default now()
 );
+alter table public.action_audit drop constraint if exists action_audit_status_check;
+alter table public.action_audit add constraint action_audit_status_check check (status in ('proposed', 'needs_clarification', 'rejected', 'confirmed', 'executed', 'failed', 'cancelled', 'undone'));
 create index if not exists action_audit_user_idx on public.action_audit (user_id, created_at desc);
 alter table public.action_audit enable row level security;
 drop policy if exists p_action_audit_read on public.action_audit;
@@ -1075,6 +1078,17 @@ begin
   if tg_op = 'DELETE' then raise exception 'The action audit is kept'; end if;
   if new.user_id is distinct from old.user_id or new.command is distinct from old.command or new.created_at is distinct from old.created_at or new.source is distinct from old.source then
     raise exception 'An audit entry cannot be rewritten';
+  end if;
+  -- states only move forward: proposed / needs_clarification → confirmed | cancelled | rejected | executed | failed;
+  -- confirmed → executed | failed; executed | failed → undone (once). Closed entries stay closed.
+  if new.status is distinct from old.status and not (
+       (old.status in ('proposed', 'needs_clarification') and new.status in ('confirmed', 'cancelled', 'rejected', 'executed', 'failed'))
+    or (old.status = 'confirmed' and new.status in ('executed', 'failed'))
+    or (old.status in ('executed', 'failed') and new.status = 'undone')) then
+    raise exception 'Audit state % cannot become %', old.status, new.status;
+  end if;
+  if old.status in ('executed', 'failed', 'cancelled', 'rejected', 'undone') and (new.interpreted is distinct from old.interpreted or new.result is distinct from old.result or new.confirmed_at is distinct from old.confirmed_at) then
+    raise exception 'A closed audit entry cannot be rewritten';
   end if;
   return new;
 end $$;

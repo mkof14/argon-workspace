@@ -3,6 +3,7 @@ import { adminClient, currentProfile, userClient } from "@/lib/server/supabase";
 import { limit } from "@/lib/server/authz";
 import { allSections } from "@/config/workspace.config.mjs";
 import { searchWords, validatePlan } from "@/lib/command";
+import { planOps } from "@/lib/server/actions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,7 +15,7 @@ const LANGS: Record<string, string> = { en: "English", ru: "Russian", uk: "Ukrai
 
 /**
  * Commands in plain words. Returns a plan (create / update / comment) that the person sees and confirms;
- * the browser then carries it out with the person's own rights. Nothing changes here.
+ * on confirmation the server carries out the stored, audited proposal with the person's own rights. Nothing changes here.
  */
 export async function POST(req: Request) {
   const me = await currentProfile();
@@ -61,6 +62,8 @@ Return ONLY JSON: {"reply":"<one or two sentences in ${LANGS[b.lang] || "English
     const plan = validatePlan(raw, { sections: SECS, writable, candidates: cands });
     // The browser needs the current records to apply updates
     const records = Object.fromEntries(plan.ops.filter((o) => o.op === "update").map((o) => [o.id, found.get(o.id)]));
-    return Response.json({ reply: String(raw.reply || ""), ops: plan.ops, dropped: plan.dropped, records });
+    // Phase 5: the plan is stored as an audited proposal; confirming it runs it on the server (/api/voice execute)
+    const action_id = plan.ops.length ? await planOps({ user: sb, admin, me: me as any, lang: String(b.lang || "en") }, text, plan.ops, records) : null;
+    return Response.json({ reply: String(raw.reply || ""), ops: plan.ops, dropped: plan.dropped, records, action_id });
   } catch (e: any) { return new Response(e?.message || "AI request failed", { status: 502 }); }
 }
