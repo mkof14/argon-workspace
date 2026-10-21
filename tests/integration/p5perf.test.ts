@@ -18,6 +18,22 @@ async function time(n: number, f: () => Promise<any>) { const out: number[] = []
 
 before(async () => {
   const t0 = Date.now();
+  // P5PERF_REUSE=1: measure again on the volume an earlier run loaded (the counts below are still checked)
+  const prev = ENV.P5PERF_REUSE ? (await sql("select email, id from profiles where email like 'p5perf0-%' order by created_at desc limit 1"))[0] : null;
+  if (prev) {
+    const run0 = prev.email.replace(/^p5perf0-|@agron-stack\.test$/g, "");
+    mgmt = { id: prev.id, email: prev.email }; emp = (await sql("select id, email from profiles where email = $1", [`p5perf7-${run0}@agron-stack.test`]))[0];
+    onePid = (await sql("select id from records where section = 'company.projects' and title = $1", [`P5 project 13 ${run0}`]))[0].id;
+  } else await load();
+  M = (await signIn(mgmt.email)).c; E = (await signIn(emp.email)).c;
+  const vol = (await sql(`select (select count(*) from profiles)::int people, (select count(*) from records where section = 'company.projects')::int projects, (select count(*) from records where section = 'company.tasks')::int tasks,
+    (select count(*) from records where section = 'company.decisions')::int decisions, (select count(*) from approvals)::int approvals, (select count(*) from comments)::int comments,
+    (select count(*) from records where section in ('company.documents', 'company.wiki'))::int docs_articles, (select count(*) from activity)::int activity, (select count(*) from records where section = 'company.milestones')::int milestones`))[0];
+  R.volume = { ...vol, added: prev ? "reused" : N, seconds_to_load: Math.round((Date.now() - t0) / 1000) };
+  for (const [k, n] of [["people", 100], ["projects", 250], ["tasks", 10000], ["decisions", 2000], ["approvals", 2000], ["comments", 10000], ["docs_articles", 5000], ["activity", 100000]] as const) assert.ok(vol[k] >= n, `${k} ${vol[k]}`);
+});
+
+async function load() {
   const roles = ["engineering", "operations", "finance", "sales", "legal"]; const people: any[] = [];
   for (let i = 0; i < N.users; i++) people.push(await makeUser(`p5perf${i}-${run}@agron-stack.test`, i === 0 ? "management" : roles[i % roles.length], { us: i % 7 !== 0, name: `P5 Perf ${i} ${run}` }));
   const ids = people.map((p) => p.id); mgmt = people[0]; emp = people[7]; // emp: a non-US engineer
@@ -63,13 +79,7 @@ before(async () => {
         now() - make_interval(mins => g % 20000)
       from generate_series(1, ${N.activity}) g`, [tasks, ids]);
   await sql("analyze records"); await sql("analyze activity"); await sql("analyze approvals"); await sql("analyze comments");
-  M = (await signIn(mgmt.email)).c; E = (await signIn(emp.email)).c;
-  const vol = (await sql(`select (select count(*) from profiles)::int people, (select count(*) from records where section = 'company.projects')::int projects, (select count(*) from records where section = 'company.tasks')::int tasks,
-    (select count(*) from records where section = 'company.decisions')::int decisions, (select count(*) from approvals)::int approvals, (select count(*) from comments)::int comments,
-    (select count(*) from records where section in ('company.documents', 'company.wiki'))::int docs_articles, (select count(*) from activity)::int activity, (select count(*) from records where section = 'company.milestones')::int milestones`))[0];
-  R.volume = { ...vol, added: N, seconds_to_load: Math.round((Date.now() - t0) / 1000) };
-  for (const [k, n] of [["people", 100], ["projects", 250], ["tasks", 10000], ["decisions", 2000], ["approvals", 2000], ["comments", 10000], ["docs_articles", 5000], ["activity", 100000]] as const) assert.ok(vol[k] >= n, `${k} ${vol[k]}`);
-});
+}
 
 test("management views at volume: p95 under 1 s (normal views) and under 3 s (heavy reports), through the API with row-level security", async () => {
   const views: [string, () => Promise<any>, number, "normal" | "heavy"][] = [

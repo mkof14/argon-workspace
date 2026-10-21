@@ -32,11 +32,14 @@ drop function if exists public.waiting_for();
 drop function if exists public._waiting_for(uuid);
 drop function if exists public.open_loops(uuid);
 drop function if exists public._open_loops(uuid, uuid);
+drop function if exists public._open_loops_calc(uuid, uuid);
 drop function if exists public.project_health(uuid);
 drop function if exists public._project_health(uuid, uuid);
+drop function if exists public._project_health_calc(uuid, uuid);
 drop function if exists public.mgmt_link(text, uuid);
 drop function if exists public.mgmt_date(text);
 drop function if exists public.mgmt_viewer();
+drop function if exists public._mgmt_base(uuid);
 drop function if exists public.mgmt_visible(uuid);
 drop function if exists public.records_mgmt_changes();
 drop function if exists public.mgmt_settings_save(jsonb);
@@ -54,5 +57,7 @@ drop index if exists public.activity_mgmt_idx;
 
 -- portfolios leave the access map (records kept)
 delete from public.section_access where section = 'company.portfolios';
+
+notify pgrst, 'reload schema';
 
 commit;

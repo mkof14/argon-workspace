@@ -956,6 +956,7 @@ begin
   pr as materialized (select v.id, v.title, v.status, v.data, v.m_manager from v where v.section = 'company.projects' and v.status not in ('Completed', 'Cancelled')),
   pm as (select pr.m_manager pid, pr.id, pr.title, 'manager' r from pr where coalesce(pr.data->>'manager_id', '') <> ''
          union select public.as_uuid(x), pr.id, pr.title, 'member' from pr, jsonb_array_elements_text(coalesce(pr.data->'members_ids', '[]')) x where x <> coalesce(pr.data->>'manager_id', '')),
+  pma as materialized (select pm.pid, jsonb_agg(jsonb_build_object('id', pm.id, 'title', pm.title, 'as', pm.r) order by pm.r, pm.title) projects from pm group by pm.pid),
   t as (select v.id, v.title, v.status, v.m_assignee asg, v.m_due due, v.data->>'priority' pri, v.data->>'project_ref_title' ptitle
         from v where v.section = 'company.tasks' and v.status not in ('Completed', 'Cancelled') and coalesce(v.data->>'assignee_id', '') <> ''),
   ta as (select t.asg, count(*) n, count(*) filter (where t.due < today) od, count(*) filter (where t.status = 'Blocked') bl, count(*) filter (where t.due between today and today + 14) up,
@@ -965,9 +966,9 @@ begin
   select p.id, coalesce(nullif(p.full_name, ''), p.email), p.title, p.role, p.department_id, d.name, p.location, p.timezone,
     case when p.availability_until is not null and p.availability_until < now() then null else p.availability end, p.availability_note,
     case when p.availability_until is not null and p.availability_until < now() then null else p.availability_until end,
-    coalesce((select jsonb_agg(jsonb_build_object('id', pm.id, 'title', pm.title, 'as', pm.r) order by pm.r, pm.title) from pm where pm.pid = p.id), '[]'),
+    coalesce(pma.projects, '[]'),
     coalesce((select jsonb_path_query_array(ta.items, '$[0 to 4]')), '[]'), coalesce(ta.n, 0)::int, coalesce(ta.od, 0)::int, coalesce(ta.bl, 0)::int, coalesce(ta.up, 0)::int
-  from public.profiles p left join public.departments d on d.id = p.department_id left join ta on ta.asg = p.id
+  from public.profiles p left join public.departments d on d.id = p.department_id left join ta on ta.asg = p.id left join pma on pma.pid = p.id
   where not p.disabled and p.role not in ('partner', 'vendor', 'investor', 'pending')
   order by coalesce(nullif(p.full_name, ''), p.email);
 end $$;
@@ -1322,5 +1323,8 @@ begin
 end $$;
 revoke execute on function public.mgmt_daily_snapshots() from public, anon, authenticated;
 grant execute on function public.mgmt_daily_snapshots() to service_role;
+
+-- the API re-reads the functions (several became volatile: they run read-write)
+notify pgrst, 'reload schema';
 
 commit;

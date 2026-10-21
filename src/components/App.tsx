@@ -54,7 +54,7 @@ const ExecControl = dynamic(() => import("./ExecControl"), { ssr: false });
 const TeamStatus = dynamic(() => import("./TeamStatus"), { ssr: false });
 const Notices = dynamic(() => import("./Notices"), { ssr: false });
 const QuickCreate = dynamic(() => import("./QuickCreate"), { ssr: false });
-export const VERSION = "2.37";
+export const VERSION = "2.38";
 /** Roles that see the management dashboard (also checked on the server for the export). */
 export const MANAGERS = ["owner", "admin", "management"];
 
