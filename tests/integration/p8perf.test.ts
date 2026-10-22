@@ -49,7 +49,7 @@ before(async () => {
   const product = (await sql("select * from records where section = 'technical.products' and data->>'code' = 'C20'"))[0];
   // 25,000 items (the numbering trigger gives each its AGRON number); every 10th serialized; every 50th a subassembly
   const items: string[] = (await sql(`insert into records(section, title, status, data, created_by) select 'technical.items', '${tag} Item ' || g, 'Active',
-      jsonb_build_object('item_type', case when g % 50 = 0 then 'Subassembly' else 'Purchased Part' end, 'uom', 'ea', 'ref_cost', 10 + g % 90, 'currency', (array['USD','AED','EUR'])[1 + g % 3],
+      jsonb_build_object('item_type', case when g > 20000 then 'Subassembly' else 'Purchased Part' end, 'uom', 'ea', 'ref_cost', 10 + g % 90, 'currency', (array['USD','AED','EUR'])[1 + g % 3],
         'serialized', g % 10 = 0, 'manufacturer', 'Acme', 'mpn', 'ACM-${run}-' || g, 'inspection_required', false), $1::uuid from generate_series(1, ${N.items}) g returning id`, [U.eng.id])).map((r: any) => r.id);
   S.items = items;
   // routing: 100 steps (so 100 units make 10,000 work orders)
@@ -60,7 +60,7 @@ before(async () => {
     await call("eng", "mfg_def_submit", [cfg.id]); S.configs.push((await approveAll(cfg.id)).id);
     // 2,000 lines in two levels: 20 subassemblies with 99 parts each
     const lines: any[] = []; let n = 0;
-    for (let a = 0; a < 20; a++) { const ak = String(++n); lines.push({ key: ak, item: items[(c * 2000 + a * 50 + 49) % N.items], qty: 1 }); for (let p = 0; p < 99; p++) lines.push({ key: String(++n), parent: ak, item: items[(c * 2000 + a * 100 + p) % N.items], qty: 1 + (p % 4), position: `P${a}.${p}` }); }
+    for (let a = 0; a < 20; a++) { const ak = String(++n); lines.push({ key: ak, item: items[20000 + c * 20 + a], qty: 1 }); for (let p = 0; p < 99; p++) lines.push({ key: String(++n), parent: ak, item: items[c * 1980 + a * 99 + p], qty: 1 + (p % 4), position: `P${a}.${p}` }); }
     let bom = await call("eng", "mfg_bom_create", [S.configs[c]]); await call("eng", "mfg_bom_lines_save", [bom.id, lines]);
     await call("eng", "mfg_def_submit", [bom.id]); await approveAll(bom.id); S.boms.push(bom.id);
     for (let r = 1; r < N.revisions; r++) { // a quantity change on one line per revision
@@ -131,7 +131,8 @@ test("manufacturing screens under 1 s (p95), heavy ones under 3 s, at the B68 vo
   T.weekly_review = await time(5, () => rpc("mgmt", "mfg_weekly", { p_from: null, p_to: null }));
   T.today = await time(10, () => rpc("tech", "mfg_today"));
   T.assistant_building = await time(10, () => rpc("mfg", "mfg_assistant", { p_intent: "building", p_arg: null }));
-  T.assistant_blocking = await time(10, () => rpc("mfg", "mfg_assistant", { p_intent: "blocking", p_arg: (await get(unit)).data.number }));
+  const unitNo = (await get(unit)).data.number;
+  T.assistant_blocking = await time(10, () => rpc("mfg", "mfg_assistant", { p_intent: "blocking", p_arg: unitNo }));
   T.assistant_risks = await time(5, () => rpc("mgmt", "mfg_assistant", { p_intent: "risks", p_arg: null }));
   T.search = await time(10, (i) => rpc("mfg", "corp_search", { p_q: `ACM-${run}-${200 + i}`, p_limit: 20 }));
   T.dashboard_non_us = await time(10, () => rpc("nonus", "mfg_overview"));
