@@ -292,11 +292,11 @@ begin
     end if;
   end loop;
   for v in select x #>> '{}' from jsonb_path_query(d, 'strict $.**') x where jsonb_typeof(x) = 'string' loop
-    digits := regexp_replace(v, '[\s-]', '', 'g');
-    if digits ~ '^\d{13,19}$' and public._luhn(digits) then
-      raise exception 'A card number cannot be stored in Workspace' using errcode = '23514';
-    end if;
-    if upper(regexp_replace(v, '\s', '', 'g')) ~ '^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$' and v ~ '\d{6}' then
+    -- any run of 13–19 digits (spaces or dashes allowed) that passes the card checksum
+    for digits in select regexp_replace(m[1], '[ -]', '', 'g') from regexp_matches(v, '((?:\d[ -]?){12,18}\d)', 'g') m loop
+      if length(digits) between 13 and 19 and digits ~ '^[3-6]' and public._luhn(digits) then raise exception 'A card number cannot be stored in Workspace' using errcode = '23514'; end if;
+    end loop;
+    if upper(v) ~ '(^|[^A-Z0-9])[A-Z]{2}\d{2}( ?[A-Z0-9]){11,30}($|[^A-Z0-9])' and regexp_replace(v, '\s', '', 'g') ~ '\d{8}' then
       raise exception 'A bank account number (IBAN) cannot be stored in Workspace; keep it in the finance system' using errcode = '23514';
     end if;
   end loop;
@@ -978,7 +978,7 @@ declare u uuid; n int := 0;
 begin
   if p_uid is not null then if public.notify_user(p_uid, p_kind, r.id, p_key, p_title, p_body, p_actor, p_link) then n := 1; end if; return n; end if;
   if p_role is null then return 0; end if;
-  for u in select p.id from public.profiles p where p.role = p_role and not p.disabled order by p.created_at limit 200 loop
+  for u in select p.id from public.profiles p where p.role = p_role and not p.disabled order by p.created_at desc limit 200 loop
     exit when n >= 25;
     if public.record_visible_for(u, r) and public.notify_user(u, p_kind, r.id, p_key || ':' || u, p_title, p_body, p_actor, p_link) then n := n + 1; end if;
   end loop;
@@ -1266,13 +1266,13 @@ begin
   for ap in select * from jsonb_array_elements(tier->'steps') loop
     k := k + 1;
     if ap->>'kind' = 'role' then
-      cand := array(select p.id from public.profiles p where p.role = ap->>'role' and not p.disabled and p.id is distinct from i.requester and public._wf_could_see(p.id, r) order by p.created_at limit 25);
+      cand := array(select p.id from public.profiles p where p.role = ap->>'role' and not p.disabled and p.id is distinct from i.requester and public._wf_could_see(p.id, r) order by p.created_at desc limit 25);
     else
       select * into res from public._wf_resolve(ap, i.id, r, null);
       -- the requester never approves their own request: their lead's place is taken by the fallback
       if res.o_uid is not null and res.o_uid = i.requester and ap ? 'fallback' then select * into res from public._wf_resolve(ap->'fallback', i.id, r, null); end if;
       if res.o_uid is not null then cand := array_remove(array[res.o_uid], i.requester);
-      elsif res.o_role is not null then cand := array(select p.id from public.profiles p where p.role = res.o_role and not p.disabled and p.id is distinct from i.requester and public._wf_could_see(p.id, r) order by p.created_at limit 25);
+      elsif res.o_role is not null then cand := array(select p.id from public.profiles p where p.role = res.o_role and not p.disabled and p.id is distinct from i.requester and public._wf_could_see(p.id, r) order by p.created_at desc limit 25);
       else cand := '{}'; end if;
     end if;
     if coalesce(cardinality(cand), 0) = 0 then
@@ -1417,6 +1417,19 @@ begin
     select record_id into existing from public.wf_links where run_id = p_run and kind = 'purchase';
     if existing is not null then return 'purchase ' || existing; end if;
     if not public._wf_approval_current(i.id, r) then raise exception 'No valid approval for the current values of the request'; end if;
+    -- approved again after a change: the purchase record already exists and is never duplicated; a person amends the order
+    select l.record_id into existing from public.wf_links l join public.records x on x.id = l.record_id where l.instance_id = i.id and l.kind = 'purchase' and x.status <> 'Cancelled' limit 1;
+    if existing is not null then
+      select * into q from public.records where id = existing;
+      if public._num(q.data->'amount') is distinct from public._num(r.data->'selected_amount') or (q.data->>'currency') is distinct from coalesce(r.data->>'selected_currency', r.data->>'currency') then
+        update public.wf_step_runs set assignee = coalesce((select s2.assignee from public.wf_step_runs s2 join public.wf_links l2 on l2.run_id = s2.id where l2.instance_id = i.id and l2.kind = 'task' order by s2.seq desc limit 1), i.requester) where id = p_run;
+        t := public._wf_task(p_run, jsonb_build_object('type', 'TASK', 'name', 'Amend the purchase order to the newly approved amount (' || coalesce(r.data->>'selected_amount', '?') || ' ' || coalesce(r.data->>'selected_currency', '') || ')',
+          'instructions', 'The approval was given again on changed values. Agree the change with the vendor and update the purchase record; Workspace changes no order by itself.'), i, r, p_actor, 'task_auto');
+        perform public._wf_event(i.id, p_run, p_actor, 'purchase_amend_needed', st->>'id', null, null, jsonb_build_object('purchase', existing, 'approved', public._num(r.data->'selected_amount'), 'ordered', public._num(q.data->'amount')));
+      end if;
+      perform public._wf_rec_patch(r.id, null, jsonb_build_object('purchase_ref', existing));
+      return 'purchase exists ' || existing;
+    end if;
     select * into q from public.records where id = public.as_uuid(r.data->>'selected_quote_ref') and section = 'operations.quotations';
     if not found then raise exception 'No quotation is selected'; end if;
     select * into v from public.records where id = public.as_uuid(q.data->>'vendor_ref');
@@ -1841,6 +1854,18 @@ begin
     return null;
   end if;
   if new.data is not distinct from old.data then return null; end if;
+  -- the vendor revised the selected quotation: the request follows, so its approval becomes stale
+  if new.section = 'operations.quotations' then
+    if (public._num(new.data->'amount') is distinct from public._num(old.data->'amount') or (new.data->>'currency') is distinct from (old.data->>'currency')) then
+      for c in select x.id from public.records x where x.section = 'operations.requests' and x.id = public.as_uuid(new.data->>'request_ref') and x.data->>'selected_quote_ref' = new.id::text loop
+        perform public._wf_rec_patch(c.id, null, jsonb_build_object('selected_amount', public._num(new.data->'amount'), 'selected_currency', new.data->>'currency'));
+        insert into public.wf_events(instance_id, record_id, section, actor, kind, from_state, to_state, detail)
+        select i.id, c.id, 'operations.requests', auth.uid(), 'quote_revised', old.data->>'amount', new.data->>'amount', jsonb_build_object('quote', new.id, 'currency', new.data->>'currency')
+        from public.wf_instances i where i.record_id = c.id and i.status in ('active', 'waiting', 'blocked');
+      end loop;
+    end if;
+    return null;
+  end if;
   if public.ops_cfg()->'material' ? new.section and exists (select 1 from public.wf_instances i where i.record_id = new.id and i.status in ('active', 'waiting', 'blocked'))
      and public._wf_basis(old) is distinct from public._wf_basis(new) then
     perform public._wf_invalidate(new.id, 'Changed: ' || coalesce((select string_agg(k, ', ') from jsonb_array_elements_text(public.ops_cfg()->'material'->new.section) k where (old.data->k) is distinct from (new.data->k)), 'linked document'), auth.uid());
@@ -1855,7 +1880,7 @@ begin
 end $$;
 drop trigger if exists records_ops_after on public.records;
 create trigger records_ops_after after update on public.records for each row
-  when (new.section in ('company.tasks', 'company.documents', 'operations.requests', 'finance.payments', 'legal.contracts', 'technical.changes', 'company.travel', 'company.requests'))
+  when (new.section in ('company.tasks', 'company.documents', 'operations.requests', 'operations.quotations', 'finance.payments', 'legal.contracts', 'technical.changes', 'company.travel', 'company.requests'))
   execute function public.records_ops_after();
 
 /* ---------------------------------------------------------------------------------------------
@@ -2506,6 +2531,31 @@ end $$;
 revoke execute on function public.ops_record_processes(uuid) from public, anon;
 grant execute on function public.ops_record_processes(uuid) to authenticated;
 
+-- Phase 5 Deadlines: operations dates (obligations, contract ends, needed-by dates, deliveries, payments due, issues)
+create or replace function public.ops_deadlines(p_days integer default 30) returns jsonb
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
+declare me uuid := public.ops_viewer(); today date := (now() at time zone 'utc')::date;
+begin
+  if me is null then raise exception 'Not signed in' using errcode = '42501'; end if;
+  perform public._ops_base(me);
+  return coalesce((select jsonb_agg(jsonb_build_object('kind', x.kind, 'record_id', x.id, 'section', x.section, 'title', x.title, 'number', x.m_number, 'due', x.d, 'days', x.d - today, 'status', x.status) order by x.d, x.title) from (
+    select case v.section when 'legal.contract_obligations' then 'obligation' when 'operations.requests' then 'needed_by' when 'operations.procurement' then 'delivery'
+      when 'finance.payments' then 'payment_due' when 'company.issues' then 'issue_due' else 'date' end kind, v.id, v.section, v.title, v.m_number, v.m_due d, v.status
+    from pg_temp.ops_v v
+    where v.m_due is not null and v.m_due <= today + greatest(1, least(p_days, 366))
+      and ((v.section = 'legal.contract_obligations' and coalesce(v.status, 'Open') = 'Open')
+        or (v.section = 'operations.requests' and coalesce(v.status, '') not in ('Closed', 'Rejected', 'Cancelled'))
+        or (v.section = 'operations.procurement' and v.status in ('Approved', 'Ordered', 'Partially delivered'))
+        or (v.section = 'finance.payments' and coalesce(v.status, '') not in ('Paid', 'Reconciled', 'Closed', 'Rejected', 'Cancelled'))
+        or (v.section = 'company.issues' and coalesce(v.status, '') not in ('Closed', 'Cancelled')))
+    union all
+    select 'contract_end', v.id, v.section, v.title, v.m_number, (v.data->>'end_date')::date, v.status from pg_temp.ops_v v
+    where v.section = 'legal.contracts' and coalesce(v.data->>'end_date', '') ~ '^\d{4}-\d{2}-\d{2}$' and v.status in ('Active', 'Signed', 'Renewal')
+      and (v.data->>'end_date')::date between today and today + greatest(1, least(p_days, 366))) x), '[]'::jsonb);
+end $$;
+revoke execute on function public.ops_deadlines(integer) from public, anon;
+grant execute on function public.ops_deadlines(integer) to authenticated;
+
 /* ---------------------------------------------------------------------------------------------
    17. Project budgets without accounting: what is planned, requested (estimates), approved, committed, paid, left.
        Remaining = budget − committed − approved but not yet ordered. Estimates are shown apart and never subtracted.
@@ -2664,6 +2714,11 @@ begin
            order by s.due_at limit 2000 loop
     select * into r from public.records where id = x.record_id;
     st := public._wf_step(x.definition_id, x.step_id);
+    if x.step_type = 'APPROVAL' and x.soon_at is null then
+      perform public.notify_user(a.approver_id, case when x.due_at > now() then 'wf_due_soon' else 'wf_overdue' end, r.id, 'wf-ap:' || a.id, 'Approval ' || case when x.due_at > now() then 'due soon' else 'overdue' end || ': ' || coalesce(r.data->>'number', r.title),
+        'Due ' || to_char(x.due_at at time zone 'utc', 'YYYY-MM-DD HH24:MI') || ' UTC', null, '/ops?i=' || x.instance_id)
+      from public.approvals a where a.wf_run = x.id and a.status = 'pending';
+    end if;
     if x.due_at > now() and x.soon_at is null then
       perform public._wf_notify(x.assignee, x.assignee_role, 'wf_due_soon', r, 'wf-soon:' || x.id, 'Due soon: ' || x.step_name || ' — ' || coalesce(r.data->>'number', r.title),
         'Due ' || to_char(x.due_at at time zone 'utc', 'YYYY-MM-DD HH24:MI') || ' UTC', null, '/ops?i=' || x.instance_id);
