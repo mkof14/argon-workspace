@@ -117,6 +117,7 @@ export default function ExecControl() {
         </Card>
         <OpsCard />
         <CrmCard />
+        <MfgCard />
       </div>
 
       <section className="card" id="exec-tabs">
@@ -216,7 +217,8 @@ function Reports({ overview, name }: { overview: any; name: (id?: string | null)
   const review = () => run("r", async () => {
     const [health, attention, loops, waiting, deadlines, changes, operations] = await Promise.all([mgmt.health(), mgmt.attention(50), mgmt.loops(), mgmt.waiting(), mgmt.deadlines(30), mgmt.changes("review"), ops.weekly().catch(() => null)]);
     const commercial = await import("@/lib/crmApi").then((m) => m.crm.weekly()).catch(() => null);
-    const r = weeklyReview({ overview, health, attention, loops, waiting, deadlines, changes, sinceLabel: "", operations, commercial }, lang); setRev(r);
+    const manufacturing = await import("@/lib/mfgApi").then((m) => m.mfg.weekly()).catch(() => null);
+    const r = weeklyReview({ overview, health, attention, loops, waiting, deadlines, changes, sinceLabel: "", operations, commercial, manufacturing }, lang); setRev(r);
     setPacket(reviewText(r, `${T(L("Weekly Management Review", "Еженедельный обзор руководства", "Щотижневий огляд керівництва", "المراجعة الإدارية الأسبوعية"))} — ${today} — ${me.full_name || me.email}`));
   });
   const close = () => run("s", async () => { await mgmt.snapshot("review", `Review ${today}`); toast(T(L("Review saved — the next “since last review” starts now", "Обзор сохранён — «с прошлого обзора» начнётся отсюда", "Огляд збережено — «з попереднього огляду» почнеться звідси", "حُفظت المراجعة"))); });
@@ -317,4 +319,20 @@ function CrmCard() {
     <div className="feed">{!ov ? <div className="empty">…</div> : <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, padding: "0 8px 8px" }}>{K.map(([k, l]) => <Link key={k} className="stat" data-crm-kind={k} href="/crm?tab=dashboard">
       <b className={`mono ${["overdue", "stalled"].includes(k) && ov.blocks?.[k]?.count ? "neg" : ""}`}>{ov.blocks?.[k]?.count || 0}</b><small>{T(l)}</small></Link>)}</div>}</div>
     <small className="faint" style={{ padding: "0 12px 10px", display: "block" }}>{T(L("Weighted pipeline is a management estimate, not revenue.", "Взвешенная воронка — управленческая оценка, не выручка.", "Зважена воронка — управлінська оцінка, не виручка.", "المسار المرجح تقدير إداري وليس إيرادًا."))}</small></div>;
+}
+
+/** Phase 8: the manufacturing part of Executive Control — counts of the units and records this person may open; each opens the list */
+function MfgCard() {
+  const { lang, access } = useApp(); const T = (x: T4, v?: any) => say(x, lang, v);
+  const [ov, setOv] = useState<any>(null);
+  const ok = access.read.has("operations.builds");
+  useEffect(() => { if (ok) import("@/lib/mfgApi").then((m) => m.mfg.exec()).then(setOv).catch(() => setOv({ links: {} })); }, [ok]);
+  if (!ok) return null;
+  const K: [string, T4][] = [["active", L("Active units", "Активные изделия", "Активні вироби", "وحدات نشطة")], ["blocked", L("Blocked", "Заблокированы", "Заблоковані", "معطلة")],
+    ["shortages", L("Material shortage", "Нехватка материалов", "Нестача матеріалів", "نقص المواد")], ["critical_procurement", L("Late purchases", "Опаздывающие закупки", "Запізнілі закупівлі", "مشتريات متأخرة")],
+    ["nonconformances", L("Open nonconformances", "Несоответствия", "Невідповідності", "عدم مطابقة")], ["failed_tests", L("Failed tests", "Проваленные испытания", "Провалені випробування", "اختبارات فاشلة")],
+    ["late", L("Late units", "Опаздывающие изделия", "Запізнілі вироби", "وحدات متأخرة")], ["ready_acceptance", L("Ready for acceptance", "Готовы к приёмке", "Готові до приймання", "جاهزة للقبول")], ["ready_shipment", L("Ready for shipment", "Готовы к отгрузке", "Готові до відвантаження", "جاهزة للشحن")]];
+  return <div className="card hub-card" data-mfg-card><div className="card-h"><h2><Icon n="factory" />{T(L("Manufacturing", "Производство", "Виробництво", "التصنيع"))}</h2><Link className="btn ghost sm" style={{ marginInlineStart: "auto" }} href="/mfg">{T(L("All", "Все", "Усі", "الكل"))}</Link></div>
+    <div className="feed">{!ov ? <div className="empty">…</div> : <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, padding: "0 8px 8px" }}>{K.map(([k, l]) => <Link key={k} className="stat" data-mfg-kind={k} href={ov.links?.[k] || "/mfg"}>
+      <b className={`mono ${!["active", "ready_acceptance", "ready_shipment"].includes(k) && ov[k] ? "neg" : ""}`}>{ov[k] ?? 0}</b><small>{T(l)}</small></Link>)}</div>}</div></div>;
 }

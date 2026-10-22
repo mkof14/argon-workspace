@@ -38,6 +38,8 @@ const Projects = dynamic(() => import("./Projects"), { ssr: false });
 const Decisions = dynamic(() => import("./Decisions"), { ssr: false });
 const Processes = dynamic(() => import("./Processes"), { ssr: false });
 const Commercial = dynamic(() => import("./Commercial"), { ssr: false });
+const Manufacturing = dynamic(() => import("./Manufacturing"), { ssr: false });
+const ShopFloor = dynamic(() => import("./ShopFloor"), { ssr: false });
 const PhotoCapture = dynamic(() => import("./PhotoCapture"), { ssr: false });
 const OfflineBar = dynamic(() => import("./OfflineBar"), { ssr: false });
 const Guide = dynamic(() => import("./Guide"), { ssr: false });
@@ -56,7 +58,7 @@ const ExecControl = dynamic(() => import("./ExecControl"), { ssr: false });
 const TeamStatus = dynamic(() => import("./TeamStatus"), { ssr: false });
 const Notices = dynamic(() => import("./Notices"), { ssr: false });
 const QuickCreate = dynamic(() => import("./QuickCreate"), { ssr: false });
-export const VERSION = "2.40";
+export const VERSION = "2.41";
 /** Roles that see the management dashboard (also checked on the server for the export). */
 export const MANAGERS = ["owner", "admin", "management"];
 
@@ -206,17 +208,19 @@ export default function App({ slug }: { slug: string[] }) {
     calendar: tx({ en: "Calendar", ru: "Календарь", uk: "Календар", ar: "التقويم" }, lang), assistant: tx({ en: "Assistant", ru: "Ассистент", uk: "Асистент", ar: "المساعد" }, lang),
     company: tx({ en: "Company", ru: "Компания", uk: "Компанія", ar: "الشركة" }, lang), people: tx({ en: "People", ru: "Сотрудники", uk: "Співробітники", ar: "الموظفون" }, lang),
     management: tx({ en: "Management dashboard", ru: "Панель руководства", uk: "Панель керівництва", ar: "لوحة الإدارة" }, lang), portfolio: tx({ en: "Portfolio", ru: "Портфель", uk: "Портфель", ar: "المحفظة" }, lang), tasks: tx({ en: "Tasks", ru: "Задачи", uk: "Задачі", ar: "المهام" }, lang),
-    decide: tx({ en: "Approvals & decisions", ru: "Согласования и решения", uk: "Погодження та рішення", ar: "الموافقات والقرارات" }, lang), ops: tx({ en: "Requests & processes", ru: "Заявки и процессы", uk: "Заявки та процеси", ar: "الطلبات والعمليات" }, lang), crm: tx({ en: "Commercial", ru: "Коммерция", uk: "Комерція", ar: "التجاري" }, lang), help: tx({ en: "Help", ru: "Помощь", uk: "Допомога", ar: "المساعدة" }, lang),
+    decide: tx({ en: "Approvals & decisions", ru: "Согласования и решения", uk: "Погодження та рішення", ar: "الموافقات والقرارات" }, lang), ops: tx({ en: "Requests & processes", ru: "Заявки и процессы", uk: "Заявки та процеси", ar: "الطلبات والعمليات" }, lang), crm: tx({ en: "Commercial", ru: "Коммерция", uk: "Комерція", ar: "التجاري" }, lang), mfg: tx({ en: "Manufacturing", ru: "Производство", uk: "Виробництво", ar: "التصنيع" }, lang), build: tx({ en: "Shop floor", ru: "Цех", uk: "Цех", ar: "أرضية المصنع" }, lang), help: tx({ en: "Help", ru: "Помощь", uk: "Допомога", ar: "المساعدة" }, lang),
     more: tx({ en: "More", ru: "Ещё", uk: "Ще", ar: "المزيد" }, lang),
   };
   const ext = isExternal(me.role);
   const PRIMARY: [string, string, string, string][] = ext ? [["/", "", "grid", t("overview", lang)], ["/messages", "messages", "send", N.messages], ["/reports", "reports", "pie", t("reports", lang)]]
     : [["/", "", "sun", N.today], ["/messages", "messages", "send", N.messages], ["/projects", "projects", "layers", N.projects], ["/portfolio", "portfolio", "grid", N.portfolio], ["/documents", "documents", "file", N.documents], ["/calendar", "calendar", "calendar", N.calendar], ["/assistant", "assistant", "spark", N.assistant]];
+  const mfgOk = access.read.has("operations.builds");
+  const shopOk = access.read.has("operations.work_orders");
   const crmOk = ["sales.pipeline", "marketing.leads", "company.parties", "company.contacts"].some((s) => access.read.has(s));
   const isOn = (r: string) => (r === "" ? !route || route === "today" : route === r || route.startsWith(r + "/"));
   const special: Record<string, [string, string]> = { trash: [t("workspace", lang), t("trash", lang)], today: [t("workspace", lang), tx({ en: "Today", ru: "Сегодня", uk: "Сьогодні", ar: "اليوم" }, lang)], stardome: [t("workspace", lang), t("sd_title", lang)], projects: [t("workspace", lang), tx({ en: "Projects", ru: "Проекты", uk: "Проєкти", ar: "المشاريع" }, lang)], decide: [t("workspace", lang), tx({ en: "Decisions", ru: "Решения", uk: "Рішення", ar: "القرارات" }, lang)], "admin/users": [t("admin", lang), t("users", lang)], "admin/roles": [t("admin", lang), t("roles", lang)], "admin/system": [t("admin", lang), t("sys_title", lang)], me: [t("workspace", lang), t("my_profile", lang)], learn: [t("workspace", lang), t("learn", lang)], guide: [t("workspace", lang), tx({ en: "User guide", ru: "Руководство", uk: "Посібник", ar: "دليل المستخدم" }, lang)], reports: [t("workspace", lang), t("reports", lang)], templates: [t("workspace", lang), t("templates", lang)], ask: [t("workspace", lang), t("ask_docs", lang)],
     messages: [t("workspace", lang), N.messages], documents: [t("workspace", lang), N.documents], calendar: [t("workspace", lang), N.calendar], assistant: [t("workspace", lang), N.assistant],
-    portfolio: [t("workspace", lang), N.portfolio], ops: [N.company, N.ops], crm: [N.company, N.crm], control: [t("workspace", lang), tx({ en: "What needs attention", ru: "Что требует внимания", uk: "Що потребує уваги", ar: "ما يحتاج انتباهًا" }, lang)], team: [N.company, tx({ en: "Team status", ru: "Статус команды", uk: "Статус команди", ar: "حالة الفريق" }, lang)],
+    portfolio: [t("workspace", lang), N.portfolio], ops: [N.company, N.ops], crm: [N.company, N.crm], mfg: [N.company, N.mfg], build: [N.mfg, N.build], control: [t("workspace", lang), tx({ en: "What needs attention", ru: "Что требует внимания", uk: "Що потребує уваги", ar: "ما يحتاج انتباهًا" }, lang)], team: [N.company, tx({ en: "Team status", ru: "Статус команды", uk: "Статус команди", ar: "حالة الفريق" }, lang)],
     people: [N.company, N.people], management: [N.company, N.management], "company-overview": [N.company, t("overview", lang)], knowledge: [N.company, tx({ en: "Knowledge", ru: "Знания", uk: "Знання", ar: "المعرفة" }, lang)], decisions: [N.company, tx({ en: "Decision log", ru: "Журнал решений", uk: "Журнал рішень", ar: "سجل القرارات" }, lang)], notifications: [t("workspace", lang), t("notifications", lang)] };
   if (route.startsWith("projects/")) special[route] = [tx({ en: "Projects", ru: "Проекты", uk: "Проєкти", ar: "المشاريع" }, lang), tx({ en: "Project", ru: "Проект", uk: "Проєкт", ar: "مشروع" }, lang)];
   const hubD = hubDept ? DEPARTMENTS.find((d: any) => d.key === hubDept) : null;
@@ -244,6 +248,8 @@ export default function App({ slug }: { slug: string[] }) {
   else if (route === "control" && !ext) body = <ExecControl />;
   else if (route === "ops" && !ext) body = <Processes />;
   else if (route === "crm" && !ext) body = crmOk ? <Commercial /> : <div className="card empty">{t("no_access", lang)}</div>;
+  else if (route === "mfg" && !ext) body = mfgOk ? <Manufacturing /> : <div className="card empty">{t("no_access", lang)}</div>;
+  else if (route === "build" && !ext) body = shopOk ? <ShopFloor /> : <div className="card empty">{t("no_access", lang)}</div>;
   else if (route === "team" && !ext) body = <TeamStatus />;
   else if (route === "notifications") body = <Notices />;
   else if (route === "management") body = MANAGERS.includes(me.role) ? <Management /> : <div className="card empty">{t("no_access", lang)}</div>;
@@ -307,6 +313,8 @@ export default function App({ slug }: { slug: string[] }) {
               <Link href="/decide" className={`nav-item top ${route === "decide" ? "active" : ""}`} style={{ ["--dc" as any]: "#D9480F" }}><Icon n="check" /><span>{N.decide}</span></Link>
               <Link href="/ops" data-nav="ops" className={`nav-item top ${route === "ops" ? "active" : ""}`} style={{ ["--dc" as any]: "#F26B1D" }}><Icon n="git" /><span>{N.ops}</span></Link>
               {crmOk && <Link href="/crm" data-nav="crm" className={`nav-item top ${route === "crm" ? "active" : ""}`} style={{ ["--dc" as any]: "#1D7AF2" }}><Icon n="handshake" /><span>{N.crm}</span></Link>}
+              {mfgOk && <Link href="/mfg" data-nav="mfg" className={`nav-item top ${route === "mfg" ? "active" : ""}`} style={{ ["--dc" as any]: "#0F766E" }}><Icon n="factory" /><span>{N.mfg}</span></Link>}
+              {shopOk && <Link href="/build" data-nav="build" className={`nav-item top ${route === "build" ? "active" : ""}`} style={{ ["--dc" as any]: "#0F766E" }}><Icon n="cpu" /><span>{N.build}</span></Link>}
               <Link href="/people" className={`nav-item top ${route === "people" ? "active" : ""}`} style={{ ["--dc" as any]: "#0EA5E9" }}><Icon n="users" /><span>{N.people}</span></Link>
               <Link href="/knowledge" className={`nav-item top ${route === "knowledge" ? "active" : ""}`} style={{ ["--dc" as any]: "#0E9F6E" }}><Icon n="book" /><span>{tx({ en: "Knowledge", ru: "Знания", uk: "Знання", ar: "المعرفة" }, lang)}</span></Link>
               <Link href="/decisions" className={`nav-item top ${route === "decisions" ? "active" : ""}`} style={{ ["--dc" as any]: "#7C5CFF" }}><Icon n="stamp" /><span>{tx({ en: "Decision log", ru: "Журнал решений", uk: "Журнал рішень", ar: "سجل القرارات" }, lang)}</span></Link>

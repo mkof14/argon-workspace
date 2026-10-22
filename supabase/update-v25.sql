@@ -60,7 +60,7 @@ insert into public.mfg_settings(id, value) values (true, $j${
     {"status": "Engineering", "kind": "open"},
     {"status": "Material Planning", "kind": "open"},
     {"status": "Procurement", "kind": "open"},
-    {"status": "Ready for Build", "kind": "open", "requires": ["released"]},
+    {"status": "Ready for Build", "kind": "open", "requires": ["released", "build_ready"]},
     {"status": "Assembly", "kind": "build", "requires": ["released", "build_ready"]},
     {"status": "Integration", "kind": "build", "requires": ["released"]},
     {"status": "Inspection", "kind": "build", "requires": ["released"]},
@@ -730,7 +730,7 @@ begin
     if k = 'released' and coalesce(n.data->>'released_at', '') = '' then miss := array_append(miss, 'the release (configuration and BOM revision pinned)'::text);
     elsif k = 'build_ready' then
       rd := public._mfg_build_readiness(n);
-      if rd->>'status' <> 'Ready' then miss := array_append(miss, ('build readiness: ' || coalesce((select string_agg(x->>'text', '; ') from jsonb_array_elements(rd->'reasons') x where x->>'level' = 'block'), rd->>'status'))::text); end if;
+      if rd->>'status' = 'Not Ready' then miss := array_append(miss, ('build readiness: ' || coalesce((select string_agg(x->>'text', '; ') from jsonb_array_elements(rd->'reasons') x where x->>'level' = 'block'), rd->>'status'))::text); end if;
     elsif k = 'accepted' and not exists (select 1 from public.mfg_acceptance a where a.unit_id = n.id and a.status in ('Accepted', 'Accepted with exceptions')) then
       hard := array_append(hard, 'the unit acceptance (recorded by a Unit Acceptance Approver)'::text);
     elsif k = 'shipment_released' and not exists (select 1 from public.mfg_releases x where x.unit_id = n.id) then

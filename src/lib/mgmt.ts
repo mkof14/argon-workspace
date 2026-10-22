@@ -186,9 +186,10 @@ export const REVIEW_TITLES: Record<string, T4> = {
   completed: L("8. Completed work", "8. Выполненная работа", "8. Виконана робота", "8. العمل المنجز"), next: L("9. Next week", "9. Следующая неделя", "9. Наступний тиждень", "9. الأسبوع القادم"),
   operations: L("10. Operations", "10. Операции", "10. Операції", "10. العمليات"),
   commercial: L("11. Commercial", "11. Коммерция", "11. Комерція", "11. التجاري"),
+  manufacturing: L("12. Manufacturing", "12. Производство", "12. Виробництво", "12. التصنيع"),
 };
 /** The Weekly Management Review, assembled only from rows the database returned for this viewer. */
-export function weeklyReview(o: { overview: any; health: any[]; attention: any[]; loops: any[]; waiting: any[]; deadlines: any[]; changes: any[]; sinceLabel: string; operations?: any; commercial?: any }, lang: Lang | string): Review {
+export function weeklyReview(o: { overview: any; health: any[]; attention: any[]; loops: any[]; waiting: any[]; deadlines: any[]; changes: any[]; sinceLabel: string; operations?: any; commercial?: any; manufacturing?: any }, lang: Lang | string): Review {
   const ind = o.overview?.indicators || {}; const lv = (k: Level) => o.health.filter((h) => h.level === k).length;
   const S = (k: string, lines: { text: string; link?: string }[]) => ({ key: k, title: say(REVIEW_TITLES[k], lang), lines });
   const none = say(L("Nothing.", "Нет.", "Немає.", "لا شيء."), lang);
@@ -209,6 +210,7 @@ export function weeklyReview(o: { overview: any; health: any[]; attention: any[]
     ...(o.operations ? [S("operations", opsWeeklyText(o.operations, lang).split("\n").slice(1).map((t) => ({ text: t.replace(/^- /, ""), link: "/ops?tab=dashboard" })))] : []),
     // Phase 7: COMMERCIAL — crm_weekly for the viewer's opportunities only; weighted values are estimates, not revenue
     ...(o.commercial ? [S("commercial", crmWeeklyLines(o.commercial, lang))] : []),
+    ...(o.manufacturing ? [S("manufacturing", mfgWeeklyLines(o.manufacturing, lang))] : []),
   ], } as Review & { since?: string };
 }
 export const reviewText = (r: Review, head: string) => [head, "", ...r.sections.flatMap((s) => [s.title, ...s.lines.map((l) => `- ${l.text}`), ""])].join("\n");
@@ -225,4 +227,32 @@ export function crmWeeklyLines(w: any, lang: Lang | string): { text: string; lin
   add("decisions_expected", L("Decisions expected", "Ожидаются решения", "Очікуються рішення", "قرارات متوقعة")); add("major", L("Major opportunities", "Крупные возможности", "Великі можливості", "فرص كبرى"));
   out.push({ text: p(L("Weighted pipeline is a management estimate, not revenue.", "Взвешенная воронка — управленческая оценка, не выручка.", "Зважена воронка — управлінська оцінка, не виручка.", "المسار المرجح تقدير إداري وليس إيرادًا.")) });
   return out;
+}
+
+/** Phase 8: the manufacturing lines of the weekly review (twelve parts, B61) — each line names its unit or record; costs per currency, operational only */
+export const MFG_REVIEW_PARTS: [string, T4][] = [["active", L("Active units", "Активные изделия", "Активні вироби", "الوحدات النشطة")], ["progress", L("Build progress", "Ход сборки", "Хід збирання", "تقدم البناء")],
+  ["blockers", L("Blockers", "Блокеры", "Блокери", "العوائق")], ["shortages", L("Material shortages", "Нехватка материалов", "Нестача матеріалів", "نقص المواد")], ["procurement_risk", L("Procurement risk", "Риски закупок", "Ризики закупівель", "مخاطر المشتريات")],
+  ["nonconformance", L("Nonconformances", "Несоответствия", "Невідповідності", "عدم المطابقة")], ["testing", L("Testing", "Испытания", "Випробування", "الاختبار")], ["engineering_changes", L("Engineering changes", "Инженерные изменения", "Інженерні зміни", "التغييرات الهندسية")],
+  ["acceptance", L("Acceptance", "Приёмка", "Приймання", "القبول")], ["shipment", L("Shipment", "Отгрузка", "Відвантаження", "الشحن")], ["cost_variance", L("Operational cost variance", "Операционное отклонение затрат", "Операційне відхилення витрат", "فرق التكلفة التشغيلية")],
+  ["next_actions", L("Next actions", "Следующие шаги", "Наступні кроки", "الخطوات التالية")]];
+export function mfgWeeklyParts(w: any, lang: Lang | string): { key: string; title: string; lines: { text: string; link?: string }[] }[] {
+  const p = (x: any, v: any = {}) => say(x, lang as any, v); const none = p(L("Nothing.", "Нет.", "Немає.", "لا شيء."));
+  const unit = (r: any) => (r.id ? `/mfg?unit=${r.id}` : "/mfg?tab=units");
+  const kv = (o: any) => Object.entries(o || {}).map(([k, v]) => `${k.replace(/_/g, " ")} ${v}`).join(" · ");
+  const lines = (k: string): { text: string; link?: string }[] => {
+    const x = w?.[k];
+    if (k === "active") return (x || []).map((r: any) => ({ text: `${r.number} · ${r.product || ""} · ${r.status}${r.target ? ` · ${p(L("target", "срок", "строк", "الموعد"))} ${r.target}` : ""}`, link: unit(r) }));
+    if (k === "progress") return (x || []).filter((r: any) => r.total).map((r: any) => ({ text: `${r.unit}: ${r.completed}/${r.total} ${p(L("work orders", "нарядов", "нарядів", "أوامر عمل"))} (+${r.completed_this_week})`, link: unit(r) }));
+    if (k === "blockers" || k === "shortages") return (x || []).map((r: any) => ({ text: `${r.unit}: ${(r.reasons || r.items || []).slice(0, 3).join("; ")}`, link: unit(r) }));
+    if (k === "procurement_risk") return (x || []).filter(Boolean).map((r: any) => ({ text: `${r.number || ""} ${r.title || ""} ${r.eta ? `ETA ${r.eta}` : ""} ${r.unit || ""}`.trim() }));
+    if (k === "engineering_changes") return (x || []).map((r: any) => ({ text: `${r.number} · ${r.title} · ${r.status}`, link: "/mfg?tab=changes" }));
+    if (k === "cost_variance") return (x || []).map((r: any) => ({ text: `${r.unit}: ${(r.by_currency || []).map((c: any) => `${c.currency} ${p(L("variance", "отклонение", "відхилення", "الفرق"))} ${c.variance}`).join(" · ")}` }));
+    if (k === "next_actions") return (x || []).slice(0, 15).map((r: any) => ({ text: `${r.unit}: ${r.action}${r.owner ? ` — ${r.owner}` : ""}` }));
+    return x && typeof x === "object" && !Array.isArray(x) ? [{ text: kv(x) }] : [];
+  };
+  return MFG_REVIEW_PARTS.map(([k, l]) => { const ls = lines(k); return { key: k, title: p(l), lines: ls.length ? ls.slice(0, 20) : [{ text: none }] }; });
+}
+export function mfgWeeklyLines(w: any, lang: Lang | string): { text: string; link?: string }[] {
+  const parts = mfgWeeklyParts(w, lang);
+  return [...parts.flatMap((s) => [{ text: `${s.title}:` }, ...s.lines.slice(0, 6)]), { text: say(L("Costs are operational build costs, not accounting cost; acceptance is internal, not certification.", "Затраты — операционные, не бухгалтерские; приёмка — внутренняя, не сертификация.", "Витрати — операційні, не бухгалтерські; приймання — внутрішнє, не сертифікація.", "التكاليف تشغيلية وليست محاسبية."), lang as any) }];
 }

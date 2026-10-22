@@ -10,6 +10,10 @@ const rpc = async <T = any>(fn: string, args: Record<string, any> = {}): Promise
 };
 
 export const mfg = {
+  /** One record as row-level security lets the person read it (null when not open to them). */
+  record: async (id: string): Promise<any> => { if (DEMO) return null; const { data, error } = await sb().from("records").select("id, section, title, status, data, version").eq("id", id).maybeSingle(); if (error) throw new Error(error.message); return data; },
+  /** Records of one section the person may read (newest first). */
+  records: async (section: string, limit = 500): Promise<any[]> => { if (DEMO) return []; const { data, error } = await sb().from("records").select("id, section, title, status, data, version, updated_at").eq("section", section).order("updated_at", { ascending: false }).limit(limit); if (error) throw new Error(error.message); return data || []; },
   caps: () => rpc<Record<string, boolean>>("mfg_my_caps"),
   overview: () => rpc<any>("mfg_overview"),
   list: (kind: string, f: Record<string, any> = {}) => rpc<any[]>("mfg_list", { p_kind: kind, p_filter: f }),

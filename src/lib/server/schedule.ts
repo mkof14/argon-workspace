@@ -37,6 +37,13 @@ export const JOBS_FNS: Record<string, JobFn> = {
     do { const { data, error } = await db.rpc("crm_tick"); if (error) throw new Error(error.message); last = data; n += Number(data?.notices || 0); calls++; } while (last?.more && Date.now() - t0 < 20000);
     return { notices: n, calls, more: !!last?.more };
   },
+  // Phase 8: manufacturing notices (work assigned/overdue, unit late or blocked, shortage, late purchase, inspection
+  // required, change decision, ready for acceptance) — each once per occasion, bounded per call, repeated while more waits
+  manufacturing: async (db) => {
+    const t0 = Date.now(); let n = 0, calls = 0, last: any = null;
+    do { const { data, error } = await db.rpc("mfg_tick"); if (error) throw new Error(error.message); last = data; n += Number(data?.notices || 0); calls++; } while (last?.more && Date.now() - t0 < 20000);
+    return { notices: n, calls, more: !!last?.more };
+  },
   // Phase 6: process SLA (due soon, overdue, one escalation per step — never repeated) and automatic-step retries
   workflow: async (db) => {
     // each call is bounded in the database (about 2 s); repeat while more is waiting, within 20 s for this job

@@ -113,6 +113,7 @@ export default function Today() {
           {myProjects.slice(0, 8).map((p) => { const s = projectStats(p, w.all || [], today); return <Link key={p.id} href={`/projects/${p.id}`} className="hub-row"><span style={{ minWidth: 0 }}><b>{p.title}</b><small>{s.nextMilestone ? `${T(L("Next", "Далее", "Далі", "التالي"))}: ${s.nextMilestone.title} · ${s.nextMilestone.data?.due || ""}` : `${s.open} ${T(L("open tasks", "открытых задач", "відкритих задач", "مهام مفتوحة"))}`}</small>
             <span className="bar" style={{ display: "block", marginTop: 4 }}><span style={{ width: `${s.progress}%` }} /></span></span><span className={`chip ${s.health === "late" ? "c-bad" : s.health === "risk" ? "c-warn" : "c-ok"}`}>{s.progress}%</span></Link>; })}</Box></div>
         <CrmFollowups />
+        <MfgToday />
         {auto && auto.n > 0 && <div className="wide"><Box icon="cpu" title={L("Prepared by agents — approve in one click", "Подготовлено агентами — одобрите одним кликом", "Підготовлено агентами — схваліть одним кліком", "أعدّه الوكلاء — وافق بنقرة واحدة")} n={auto.n} empty={L("", "", "", "")}>
           {auto.items.map((q) => <Link key={q.id} href="/admin/system?tab=auto" className="hub-row"><span><b>{trA(q.title)}</b><small>{q.agent} · {q.at.slice(0, 10)}</small></span><span className="chip c-warn">{T(L("Review", "Посмотреть", "Переглянути", "مراجعة"))}</span></Link>)}</Box></div>}
         {d.company.length > 0 && <div className="wide"><Box icon="alert" title={L("Company: overdue items (leaders)", "Компания: просрочено (для руководства)", "Компанія: прострочено (для керівництва)", "الشركة: متأخرات")} n={d.company.length} more="/management" empty={L("", "", "", "")}>
@@ -136,4 +137,21 @@ function CrmFollowups() {
     <Link className="btn ghost sm" style={{ marginInlineStart: "auto" }} href="/crm?tab=review">{T({ en: "All", ru: "Все", uk: "Усі", ar: "الكل" })}</Link></div>
     <div className="feed">{!f ? <div className="empty">…</div> : items.length ? items.slice(0, 8).map((x) => <Link key={x.id} href={x.href} className="hub-row"><span style={{ minWidth: 0 }}><b>{x.title}</b><small>{x.sub}</small></span>{x.due ? <span className={`chip ${String(x.due) < todayIso() ? "c-bad" : "c-warn"}`}>{String(x.due).slice(0, 10)}</span> : null}</Link>)
       : <div className="empty" style={{ padding: 12 }}>{T({ en: "No one to follow up with today.", ru: "Сегодня связываться не с кем.", uk: "Сьогодні нема з ким зв'язуватися.", ar: "لا متابعات اليوم." })}</div>}</div></div>;
+}
+
+/** Phase 8: my manufacturing work today — work orders assigned to me, inspections waiting, my blocked units (mfg_today, mine only) */
+function MfgToday() {
+  const { lang, access } = useApp(); const T = (x: any) => tx(x, lang as Lang);
+  const ok = access.read.has("operations.work_orders") || access.read.has("operations.builds");
+  const [d, setD] = useState<any>(null);
+  useEffect(() => { if (ok && !DEMO) import("@/lib/mfgApi").then((m) => m.mfg.today()).then(setD).catch(() => setD({ work: [], my_units_blocked: [] })); }, [ok]);
+  if (!ok || DEMO) return null;
+  if (d && !(d.work || []).length && !(d.my_units_blocked || []).length && !d.inspections) return null;
+  return <div className="card hub-card" data-today-mfg><div className="card-h"><h2><Icon n="factory" />{T({ en: "Manufacturing today", ru: "Производство сегодня", uk: "Виробництво сьогодні", ar: "التصنيع اليوم" })}</h2>
+    <Link className="btn ghost sm" style={{ marginInlineStart: "auto" }} href="/build">{T({ en: "Shop floor", ru: "Цех", uk: "Цех", ar: "أرضية المصنع" })}</Link></div>
+    <div className="feed">{!d ? <div className="empty">…</div> : <>
+      {(d.work || []).slice(0, 6).map((w: any) => <Link key={w.id} href={`/build?wo=${w.id}`} className="hub-row"><span style={{ minWidth: 0 }}><b>{w.number} · {w.operation || w.title}</b><small>{[w.unit, w.status, w.planned].filter(Boolean).join(" · ")}</small></span></Link>)}
+      {(d.my_units_blocked || []).slice(0, 4).map((u: any) => <Link key={u.id} href={`/mfg?unit=${u.id}`} className="hub-row"><span style={{ minWidth: 0 }}><b>{u.number}</b><small className="neg">{(u.reasons || []).slice(0, 2).map((r: any) => (typeof r === "string" ? r : r.text)).join(" · ")}</small></span></Link>)}
+      {d.inspections ? <Link href="/mfg?tab=quality" className="hub-row"><span><b>{d.inspections}</b> <small>{T({ en: "inspection(s) waiting", ru: "инспекций ждут", uk: "інспекцій чекають", ar: "فحوص بالانتظار" })}</small></span></Link> : null}
+    </>}</div></div>;
 }

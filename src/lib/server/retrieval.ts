@@ -6,6 +6,7 @@
 
 import { opsIntent } from "@/lib/opsText";
 import { crmIntent } from "@/lib/crmText";
+import { mfgIntent } from "@/lib/mfgText";
 
 export type Source = { n: number; kind: string; id: string; title: string; link: string; excerpt: string; suspicious?: boolean; meta?: Record<string, any> };
 export type Retrieval = { sources: Source[]; intents: string[]; facts: string[]; empty: boolean };
@@ -69,6 +70,76 @@ export async function retrieve(sb: any, me: { id: string; role: string }, ask: A
                 it.estimate != null && `estimate: ${it.currency || ""} ${it.estimate}`, it.level && `approval level ${it.level}`, it.requester && `requested by ${it.requester}`, it.due && `due ${String(it.due).slice(0, 10)}`, it.reason].filter(Boolean).join(" · ") });
           }
         }
+      }
+    } }
+  // Phase 8: manufacturing questions — one allow-listed intent; the database answers from this person's records only
+  { const mi = mfgIntent(q, { unit: focus?.section === "operations.builds" ? focus.data?.number : undefined });
+    if (mi) {
+      const { data: a } = await sb.rpc("mfg_assistant", { p_intent: mi.intent, p_arg: mi.arg || null });
+      if (a) {
+        intents.push(`mfg_${mi.intent}`);
+        const unitSrc = (u: any, excerpt: string) => u?.id && add({ kind: "build unit", id: u.id, title: u.number || u.title, link: `/mfg?unit=${u.id}`, excerpt });
+        const recSrc = (r: any, kind: string, section: string) => add({ kind, id: r.id, title: `${r.number ? r.number + " · " : ""}${r.title || ""}`, link: section === "operations.builds" ? `/mfg?unit=${r.id}` : linkOf(section, r.id),
+          excerpt: [r.unit && `unit ${r.unit}`, r.kind, r.status, r.result || r.outcome, r.severity, r.date].filter(Boolean).join(" · ") });
+        if (a.kind === "unavailable") facts.push(`Manufacturing (${mi.intent}): unavailable — ${a.note || "nothing among the records the person can open"}`);
+        else if (a.kind === "units") {
+          facts.push(`Manufacturing (${mi.intent}, fact): ${(a.items || []).length} build unit(s)`);
+          for (const u of (a.items || []).slice(0, 20)) unitSrc(u, [u.product, u.config, u.status, u.target && `target ${u.target}`, u.blocks ? `${u.blocks} blocker(s)` : null, ...(u.reasons || [])].filter(Boolean).join(" · "));
+          for (const po of (a.open_purchases || []).slice(0, 10)) add({ kind: "purchase", id: po.id, title: `${po.number || ""} · ${po.title}`, link: linkOf("operations.procurement", po.id), excerpt: [po.status, po.eta && `ETA ${po.eta}`, po.qty != null && `qty ${po.qty}`, po.received != null && `received ${po.received}`, po.unit && `for ${po.unit}`].filter(Boolean).join(" · ") });
+        } else if (a.kind === "risks") {
+          facts.push(`Manufacturing risks (fact): ${(a.items || []).length} blocked unit(s), ${(a.nonconformances || []).length} open nonconformance(s), ${(a.failed_tests || []).length} failed test(s)`);
+          for (const u of (a.items || []).slice(0, 12)) unitSrc(u, `${u.status} · ${(u.reasons || []).join("; ")}`);
+          for (const r of (a.nonconformances || []).slice(0, 6)) recSrc(r, "nonconformance", "company.issues");
+          for (const r of (a.failed_tests || []).slice(0, 6)) recSrc(r, "test", "technical.testing");
+        } else if (a.kind === "records") {
+          facts.push(`Manufacturing (${mi.intent}, fact): ${(a.items || []).length} record(s)`);
+          for (const r of (a.items || []).slice(0, 15)) recSrc(r, mi.intent === "failed_tests" ? "test" : "inspection", mi.intent === "failed_tests" ? "technical.testing" : "operations.quality");
+        } else if (a.kind === "bom_diff") {
+          const d = a.diff || {}; const n = (k: string) => (d[k] || []).length;
+          facts.push(`BOM ${d.a?.number} revision ${d.a?.revision} → ${d.b?.revision} (deterministic comparison): added ${n("added")}, removed ${n("removed")}, quantity changed ${n("quantity")}, substituted ${n("substituted")}, moved ${n("moved")}, unchanged ${d.unchanged ?? 0}`);
+          for (const k of ["added", "removed", "quantity", "substituted", "moved"]) for (const x of (d[k] || []).slice(0, 8)) facts.push(`${k}: ${x.item?.number || x.from?.number || ""} ${x.item?.title || x.from?.title || ""}${x.from != null && typeof x.from !== "object" ? ` ${x.from} → ${x.to}` : x.to?.number ? ` → ${x.to.number}` : ""}`);
+          for (const b of [d.a, d.b]) if (b?.id) add({ kind: "BOM", id: b.id, title: `${b.number} rev ${b.revision}`, link: `/mfg?tab=boms&bom=${b.id}`, excerpt: `${b.status}` });
+        } else if (a.kind === "unit") {
+          const v = a.unit || {}; const h = v.header || {};
+          facts.push(`Build unit ${h.number} (fact): status ${h.status}; build readiness ${v.readiness?.build?.status}; acceptance readiness ${v.readiness?.acceptance?.status}; ${(v.blockers || []).length} blocker(s)`);
+          unitSrc(h, [h.product, h.config, h.bom, h.status, ...(v.blockers || []).map((b: any) => b.text)].filter(Boolean).join(" · "));
+        } else if (a.kind === "blockers") {
+          facts.push(`Blockers of ${a.unit?.number} (fact): ${(a.blockers || []).length}`); for (const b of a.blockers || []) facts.push(`- ${b.level === "block" ? "blocks" : "attention"}: ${b.text}`);
+          unitSrc(a.unit, (a.blockers || []).map((b: any) => b.text).join("; ") || "no blockers");
+        } else if (a.kind === "materials") {
+          facts.push(`Missing material for ${a.unit?.number} (fact): ${(a.rows || []).length} line(s)`); for (const r of a.rows || []) facts.push(`- ${r.item_number} ${r.item_title}: required ${r.required}, allocated ${r.allocated}, ordered ${r.ordered}, shortage ${r.shortage}`);
+          unitSrc(a.unit, "materials tab of the unit");
+        } else if (a.kind === "purchases") {
+          facts.push(`Purchases ${mi.intent === "late_pos" ? "late" : "not yet received"} for ${a.unit?.number} (fact): ${(a.items || []).length}`);
+          for (const po of a.items || []) add({ kind: "purchase", id: po.id, title: `${po.number || ""} · ${po.title || ""}`, link: linkOf("operations.procurement", po.id), excerpt: [po.po_status || po.status, po.eta && `ETA ${po.eta}`, po.qty != null && `qty ${po.qty}`].filter(Boolean).join(" · ") });
+          unitSrc(a.unit, "materials tab of the unit");
+        } else if (a.kind === "installed") {
+          facts.push(`Installed in ${a.unit?.number} (fact, from installation records): ${(a.installed || []).length}`); for (const x of a.installed || []) facts.push(`- ${x.item} ${x.title}${x.serial ? ` serial ${x.serial}` : ""} × ${x.qty}${x.position ? ` at ${x.position}` : ""} (${x.work_order || ""}, ${x.installed_by || ""})`);
+          unitSrc(a.unit, "installed tab of the unit");
+        } else if (a.kind === "software") {
+          facts.push(`Software on ${a.unit?.number} (fact): ${(a.items || []).filter((x: any) => x.current).map((x: any) => `${x.component} ${x.version}`).join(", ") || "none recorded"}`);
+          unitSrc(a.unit, "software tab of the unit");
+        } else if (a.kind === "compare") {
+          const rows = (a.compare?.rows || []).filter((r: any) => r.status !== "match");
+          facts.push(`${a.unit?.number}: approved BOM ${a.compare?.bom?.number || ""} rev ${a.compare?.bom?.revision || ""} vs As-Built (deterministic): ${rows.length} difference(s), ${(a.compare?.extra || []).length} not in the BOM`);
+          for (const r of rows.slice(0, 15)) facts.push(`- ${r.status}: ${r.expected?.number} expected ${r.expected_qty}, installed ${r.installed_qty}${(r.substitutes || []).length ? `, substitutes ${(r.substitutes || []).map((x: any) => `${x.item?.number} × ${x.qty}`).join(", ")}` : ""}`);
+          unitSrc(a.unit, "As-Built tab of the unit");
+        } else if (a.kind === "readiness") {
+          facts.push(`${a.unit?.number} ${mi.intent === "ready_shipment" ? "shipment" : "acceptance"} readiness (fact): ${a.readiness?.status}`); for (const r of a.readiness?.reasons || []) facts.push(`- ${r.text}`);
+          unitSrc(a.unit, `${a.readiness?.status}: ${(a.readiness?.reasons || []).map((r: any) => r.text).join("; ")}`);
+        }
+        // B56: assisted actions are proposals only — each opens the exact confirmation step on the unit (the person confirms; the database checks authority)
+        const uid = a.unit?.id; const propose = (what: string, tab: string) => uid && add({ kind: "proposed action", id: `${uid}:${tab}:${what.slice(0, 40)}`, title: what, link: `/mfg?unit=${uid}&utab=${tab}`, excerpt: "Proposal — nothing is done until you confirm it on this screen; procurement, engineering approval and acceptance are never done by the Assistant" });
+        if (a.kind === "materials") for (const r of (a.rows || []).filter((x: any) => Number(x.purchase_required) > 0).slice(0, 5)) propose(`Create a purchase request for ${r.purchase_required} × ${r.item_number}`, "materials");
+        if (a.kind === "blockers") for (const b of a.blockers || []) {
+          if (b.kind === "missing_material") propose(`Create a purchase request: ${b.text}`, "materials");
+          else if (b.kind === "ecr_impact") propose(`Decide the engineering change for this unit (Incorporate or Keep current)`, "overview");
+          else if (/nonconformance|issue/i.test(b.kind || "")) propose(`Create a rework work order or close the issue: ${b.text}`, "issues");
+          else if (/inspection/i.test(b.kind || "")) propose(`Create the inspection: ${b.text}`, "inspections");
+          else if (/test/i.test(b.kind || "")) propose(`Schedule the test: ${b.text}`, "tests");
+        }
+        if (a.kind === "readiness") for (const r of (a.readiness?.reasons || []).slice(0, 4)) propose(/test/i.test(r.text) ? `Schedule the test: ${r.text}` : /inspection/i.test(r.text) ? `Create the inspection: ${r.text}` : `Follow up: ${r.text}`, /test/i.test(r.text) ? "tests" : /inspection/i.test(r.text) ? "inspections" : "overview");
+        facts.push("Manufacturing facts come from Workspace records; an engineering status, pass/fail or acceptance is never inferred. Acceptance is internal, not certification. Proposed actions need the person's confirmation on the linked screen; to raise an engineering change use /ops (change request), to assign a task use a task.");
       }
     } }
   // Phase 7: commercial questions — the same pattern: one allow-listed intent, the database answers for this person

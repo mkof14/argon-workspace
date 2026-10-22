@@ -22,6 +22,7 @@ import { useEffect, useRef, useState } from "react";
 import Icon from "./Icon";
 import { useApp } from "./App";
 import { t, tx } from "@/lib/i18n";
+import Link from "next/link";
 import { trFields, trPending, trText } from "@/lib/tr";
 import { Activity, Comment, DEMO, Rec, isConflict, isExternal, store, textSim, type FileItem } from "@/lib/store";
 import Discussion from "./Discussion";
@@ -256,7 +257,8 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
           {rec && section.id === "sales.pipeline" && !isExternal(me.role) && <ProposalBuilder deal={rec} onDone={onReload || onSaved} />}
           {rec && section.id === "sales.clients" && !isExternal(me.role) && <PortalLinks client={rec} />}
           {rec && section.id === "operations.support" && <SlaPanel rec={rec} />}
-          {rec && section.id === "operations.builds" && !isExternal(me.role) && <BuildParts build={rec} />}
+          {rec && section.id === "operations.builds" && !isExternal(me.role) && (rec.data?.product_ref ? <Link className="btn" data-open-unit href={`/mfg?unit=${rec.id}`}><Icon n="factory" />{tx({ en: "Open the build unit view", ru: "Открыть карточку изделия", uk: "Відкрити картку виробу", ar: "فتح عرض وحدة البناء" }, lang)}</Link> : <BuildParts build={rec} />)}
+          {rec && section.id === "operations.work_orders" && !isExternal(me.role) && <Link className="btn" data-open-wo href={`/build?wo=${rec.id}`}><Icon n="cpu" />{tx({ en: "Open on the shop floor", ru: "Открыть в цехе", uk: "Відкрити в цеху", ar: "فتح في أرضية المصنع" }, lang)}</Link>}
           {rec && section.id === "finance.invoices" && <MilestoneNote rec={rec} />}
           {rec && section.id === "finance.invoices" && !isExternal(me.role) && <Collection rec={rec} />}
           {rec && section.id === "operations.fleet" && !isExternal(me.role) && <ServicePanel unit={rec} />}

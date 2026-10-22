@@ -24,7 +24,7 @@ process.on("SIGINT", () => { stop(); process.exit(130); });
 
 try {
   await up();
-  const needApp = suites.some((s) => /\/(api|e2e|docapi|e2e4|p4accept|p5|e2e5|e2e6|e2e7)\.test\.ts$/.test(s));
+  const needApp = suites.some((s) => /\/(api|e2e|docapi|e2e4|p4accept|p5|e2e5|e2e6|e2e7|e2e8)\.test\.ts$/.test(s));
   if (needApp) {
     if (!process.env.SKIP_BUILD) { log("build"); const b = spawnSync("npx", ["next", "build"], { cwd: ROOT, env, stdio: "inherit" }); if (b.status) throw new Error("build failed"); }
     try { await fetch(APP); throw new Error(`port ${PORT} is already in use — stop the old app first`); } catch (e) { if (/already in use/.test(e.message)) throw e; }

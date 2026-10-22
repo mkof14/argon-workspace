@@ -36,6 +36,15 @@ export const KINDS: Record<string, { icon: string; label: T4 }> = {
   crm_meeting_soon: { icon: "calendar", label: L("Commercial meeting soon", "Скоро коммерческая встреча", "Скоро комерційна зустріч", "اجتماع تجاري قريب") },
   crm_proposal_expiring: { icon: "receipt", label: L("Proposal validity ends soon", "Скоро истекает срок КП", "Скоро спливає термін КП", "صلاحية العرض تنتهي قريبًا") },
   crm_decision_due: { icon: "stamp", label: L("Customer decision expected", "Ожидается решение клиента", "Очікується рішення клієнта", "قرار العميل متوقع") },
+  mfg_work_assigned: { icon: "cpu", label: L("Work order assigned to you", "Вам назначен наряд", "Вам призначено наряд", "أُسند إليك أمر عمل") },
+  mfg_work_overdue: { icon: "alert", label: L("Work order overdue", "Наряд просрочен", "Наряд прострочено", "أمر عمل متأخر") },
+  mfg_unit_late: { icon: "clock", label: L("Build unit late", "Изделие опаздывает", "Виріб запізнюється", "وحدة بناء متأخرة") },
+  mfg_blocked: { icon: "alert", label: L("Build unit blocked", "Изделие заблокировано", "Виріб заблоковано", "وحدة بناء معطلة") },
+  mfg_shortage: { icon: "cart", label: L("Material shortage", "Нехватка материалов", "Нестача матеріалів", "نقص المواد") },
+  mfg_purchase_late: { icon: "truck", label: L("Purchase for a build is late", "Закупка для сборки опаздывает", "Закупівля для збірки запізнюється", "شراء لبناء متأخر") },
+  mfg_inspection_required: { icon: "shield", label: L("Inspection required", "Нужна инспекция", "Потрібна інспекція", "مطلوب فحص") },
+  mfg_ecr_decision: { icon: "git", label: L("Engineering change needs a decision", "Инженерное изменение ждёт решения", "Інженерна зміна чекає рішення", "تغيير هندسي يحتاج قرارًا") },
+  mfg_ready_acceptance: { icon: "stamp", label: L("Unit ready for acceptance", "Изделие готово к приёмке", "Виріб готовий до приймання", "وحدة جاهزة للقبول") },
   crm_stalled: { icon: "alert", label: L("Opportunity stalled", "Возможность застряла", "Можливість застрягла", "فرصة متوقفة") },
   crm_hold_review: { icon: "clock", label: L("On-hold opportunity due for review", "Пора пересмотреть приостановленную возможность", "Час переглянути призупинену можливість", "حان مراجعة الفرصة المعلقة") },
   wf_done: { icon: "check", label: L("Your request is finished", "Ваша заявка завершена", "Вашу заявку завершено", "اكتمل طلبك") },
@@ -65,6 +74,7 @@ export const CATS: { k: string; label: T4; kinds?: string[] }[] = [
   { k: "company", label: L("Company", "Компания", "Компанія", "الشركة"), kinds: ["announcement", "announcement_critical", "security"] },
   { k: "management", label: L("Management", "Руководство", "Керівництво", "الإدارة"), kinds: ["mgmt_alert", "waiting_remind", "waiting_escalated"] },
   { k: "processes", label: L("Requests & processes", "Заявки и процессы", "Заявки та процеси", "الطلبات والعمليات"), kinds: ["wf_action", "wf_due_soon", "wf_overdue", "wf_escalated", "wf_done"] },
+  { k: "manufacturing", label: L("Manufacturing", "Производство", "Виробництво", "التصنيع"), kinds: ["mfg_work_assigned", "mfg_work_overdue", "mfg_unit_late", "mfg_blocked", "mfg_shortage", "mfg_purchase_late", "mfg_inspection_required", "mfg_ecr_decision", "mfg_ready_acceptance"] },
   { k: "commercial", label: L("Commercial", "Коммерция", "Комерція", "التجاري"), kinds: ["crm_opp_assigned", "crm_lead_assigned", "crm_follow_up_due", "crm_follow_up_overdue", "crm_lead_follow_up", "crm_event_follow_up", "crm_meeting_soon", "crm_proposal_expiring", "crm_decision_due", "crm_stalled", "crm_hold_review"] },
 ];
 export const noticeHref = (n: Notice) => n.link || (n.record_id && n.section ? `/${n.section.replace(".", "/")}?r=${n.record_id}` : "/notifications");
