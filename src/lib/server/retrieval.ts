@@ -5,6 +5,7 @@
 // as untrusted data: instructions inside documents, e-mail, comments or notes never change the Assistant's rules.
 
 import { opsIntent } from "@/lib/opsText";
+import { crmIntent } from "@/lib/crmText";
 
 export type Source = { n: number; kind: string; id: string; title: string; link: string; excerpt: string; suspicious?: boolean; meta?: Record<string, any> };
 export type Retrieval = { sources: Source[]; intents: string[]; facts: string[]; empty: boolean };
@@ -67,6 +68,47 @@ export async function retrieve(sb: any, me: { id: string; role: string }, ask: A
               excerpt: [it.step && `step: ${it.step}`, procs && `process: ${procs.name} — ${procs.status}${procs.step ? `, step ${procs.step}` : ""}`, it.status && `status: ${it.status}`, it.amount != null && `amount: ${it.currency || ""} ${it.amount}`,
                 it.estimate != null && `estimate: ${it.currency || ""} ${it.estimate}`, it.level && `approval level ${it.level}`, it.requester && `requested by ${it.requester}`, it.due && `due ${String(it.due).slice(0, 10)}`, it.reason].filter(Boolean).join(" · ") });
           }
+        }
+      }
+    } }
+  // Phase 7: commercial questions — the same pattern: one allow-listed intent, the database answers for this person
+  { const ci = crmIntent(q);
+    if (ci) {
+      const { data: a } = await sb.rpc("crm_assistant", { p_intent: ci.intent, p_arg: ci.arg || null });
+      if (a) {
+        intents.push(`crm_${ci.intent}`);
+        const oppSrc = (o: any) => add({ kind: "opportunity", id: o.id, title: `${o.number ? o.number + " · " : ""}${o.title}`, link: `/crm?opp=${o.id}`,
+          excerpt: [o.stage && `stage: ${o.stage}`, o.party && `organization: ${o.party}`, o.owner && `owner: ${o.owner}`, o.value != null && `estimate: ${o.currency || ""} ${o.value}`, o.quoted != null && `quoted: ${o.currency || ""} ${o.quoted}`,
+            o.negotiated != null && `negotiated: ${o.currency || ""} ${o.negotiated}`, o.next_action && `next: ${o.next_action}${o.next_action_due ? ` by ${o.next_action_due}` : ""}`, o.sent_at && `proposal sent ${o.sent_at}`,
+            o.health && `health: ${o.health}`, ...(o.reasons || []).map((r: any) => r.text)].filter(Boolean).join(" · ") });
+        if (a.kind === "unavailable") facts.push(`Commercial (${ci.intent}): unavailable — ${a.note || "nothing among the records the person can open"}`);
+        else if (a.kind === "list") {
+          const items = Array.isArray(a.items) ? a.items : [...(a.items?.opportunities || []), ...(a.items?.leads || []).map((l: any) => ({ ...l, lead: true }))];
+          facts.push(`Commercial (${ci.intent}${a.arg ? `: ${a.arg}` : ""}, fact): ${items.length} item(s)${a.note ? ` — ${a.note}` : ""}`);
+          for (const it of items.slice(0, 20)) it.lead ? add({ kind: "lead", id: it.id, title: it.title, link: `/crm?lead=${it.id}`, excerpt: [it.organization, it.follow_up && `follow up by ${it.follow_up}`, it.importance, it.event].filter(Boolean).join(" · ") }) : oppSrc(it);
+        } else if (a.kind === "event") {
+          const f = a.followup || {}; facts.push(`Event «${f.event?.title}» (fact): ${f.total} lead(s); converted ${f.converted?.length || 0}; hot ${f.hot?.length || 0}; without owner ${f.no_owner?.length || 0}; not qualified ${f.not_qualified?.length || 0}`);
+          for (const l of [...(f.converted || []), ...(f.hot || [])].slice(0, 15)) add({ kind: "lead", id: l.id, title: l.title, link: `/crm?lead=${l.id}`, excerpt: [l.status, l.organization, l.owner && `owner ${l.owner}`].filter(Boolean).join(" · ") });
+        } else if (a.kind === "relations") {
+          const r = a.relations || {}; const intros = [...(r.introduced_to_us_by || []), ...(r.introductions || [])];
+          facts.push(`Introductions of «${a.record?.title}» (fact): ${intros.length}`);
+          add({ kind: "record", id: a.record.id, title: a.record.title, link: a.record.section === "company.contacts" ? `/crm?contact=${a.record.id}` : a.record.section === "sales.pipeline" ? `/crm?opp=${a.record.id}` : `/crm?org=${a.record.id}`, excerpt: "the organization, contact or opportunity asked about" });
+          for (const i of intros) add({ kind: "introduction", id: i.id, title: i.title, link: `/sales/introductions?r=${i.id}`, excerpt: [i.date, i.kind, i.introducer && `introduced by ${i.introducer}`, i.context].filter(Boolean).join(" · ") });
+          if (r.introduced_by) add({ kind: "organization", id: r.introduced_by.id, title: r.introduced_by.title, link: `/crm?org=${r.introduced_by.id}`, excerpt: "introduced this opportunity" });
+        } else if (a.kind === "timeline") {
+          facts.push(`Last interactions with «${a.record?.title}» (fact): ${(a.items || []).length}`);
+          for (const t of a.items || []) add({ kind: t.kind, id: t.record_id, title: t.title, link: t.link || `/crm?opp=${t.record_id}`, excerpt: `${String(t.at || "").slice(0, 10)} · ${t.excerpt || ""}` });
+        } else if (a.kind === "meeting") {
+          const m = a.meeting;
+          if (!m) facts.push(`No past meeting with «${a.record?.title}» among the meetings the person can open`);
+          else { add({ kind: "meeting", id: m.id, title: m.title, link: `/company/meetings?r=${m.id}`, excerpt: `${m.date} · decisions: ${clip(m.decisions || "—", 300)} · notes: ${clip(m.notes || "—", 300)}` });
+            for (const d of m.linked_decisions || []) add({ kind: "decision", id: d.id, title: d.title, link: linkOf("company.decisions", d.id), excerpt: `${d.status} · ${clip(d.decision, 200)}` });
+            for (const t of m.tasks || []) add({ kind: "task", id: t.id, title: t.title, link: linkOf("company.tasks", t.id), excerpt: `${t.status} · ${t.assignee || "—"} · due ${t.due || "—"}` }); }
+        } else if (a.kind === "review") {
+          const rv = a.review || {}; const sm = rv.summary || {};
+          facts.push(`Commercial review ${rv.from} → ${rv.to} (fact): active ${sm.active}, new ${sm.new}, won ${sm.won}, lost ${sm.lost}, stalled ${sm.stalled}, at risk ${sm.risk}, proposals outstanding ${sm.proposals_outstanding}`);
+          for (const c of rv.pipeline?.currencies || []) facts.push(`Pipeline ${c.currency} (raw, per currency): estimated ${c.estimated ?? 0}, quoted ${c.quoted ?? 0}, negotiated ${c.negotiated ?? 0}; weighted estimate ${c.estimated_weighted ?? 0} (management estimate, not revenue)`);
+          for (const o of [...(rv.attention || []), ...(rv.decisions_expected || [])].slice(0, 15)) oppSrc(o);
         }
       }
     } }

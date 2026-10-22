@@ -677,7 +677,7 @@ begin
       cand := array(select p.id from public.profiles p where p.role = ap->>'role' and not p.disabled and p.id is distinct from i.requester and public._wf_could_see(p.id, r) order by p.created_at desc limit 25);
     elsif ap->>'kind' = 'capability' then
       -- v24: the active holders of a business capability who may open the record, never the requester
-      cand := array(select h from public.crm_cap_holders(ap->>'cap') h where h is distinct from i.requester and public._wf_could_see(h, r) limit 25);
+      cand := array(select hh from public.crm_cap_holders(ap->>'cap') hh where hh is distinct from i.requester and public._wf_could_see(hh, r) limit 25);
     else
       select * into res from public._wf_resolve(ap, i.id, r, null);
       -- the requester never approves their own request: their lead's place is taken by the fallback
@@ -973,7 +973,7 @@ $$;
 
 -- the text the commercial search reads (names, number, e-mail, phone also as digits, organisation, aliases, tags)
 create or replace function public.crm_search_text(t text, d jsonb) returns text language sql immutable parallel safe as $$
-  select lower(concat_ws(' ', t, d->>'number', d->>'email', d->>'phone', d->>'mobile', regexp_replace(coalesce(d->>'phone', '') || ' ' || coalesce(d->>'mobile', ''), '[^0-9 ]', '', 'g'),
+  select lower(concat_ws(' ', t, d->>'number', d->>'email', d->>'phone', d->>'mobile', regexp_replace(coalesce(d->>'phone', ''), '[^0-9]', '', 'g'), regexp_replace(coalesce(d->>'mobile', ''), '[^0-9]', '', 'g'),
     d->>'trading_name', d->>'legal_name', d->>'aliases', d->>'tags', d->>'organization', d->>'contact', d->>'first_name', d->>'last_name', d->>'party_ref_title',
     d->>'domain', d->>'website', d->>'title', d->>'country'))
 $$;
@@ -1008,8 +1008,8 @@ begin
   kind := coalesce(st->>'kind', 'open');
   for k in select jsonb_array_elements_text(coalesce(st->'required', '[]'::jsonb)) loop
     if k = 'owner_id' then
-      if public._crm_blank(n.data->'owner_id') and public._crm_blank(n.data->'owner') then miss := miss || 'the AGRON owner'; end if;
-    elsif public._crm_blank(n.data->k) then miss := miss || replace(k, '_', ' ');
+      if public._crm_blank(n.data->'owner_id') and public._crm_blank(n.data->'owner') then miss := array_append(miss, ('the AGRON owner')::text); end if;
+    elsif public._crm_blank(n.data->k) then miss := array_append(miss, (replace(k, '_', ' '))::text);
     end if;
   end loop;
   if kind = 'lost' and not public._crm_blank(n.data->'lost_reason') and not (coalesce(public.crm_cfg()->'lost_reasons', '[]'::jsonb) ? (n.data->>'lost_reason')) then
@@ -1017,7 +1017,7 @@ begin
   end if;
   if coalesce((st->>'requires_proposal')::boolean, false)
      and not exists (select 1 from public.records p where p.section = 'sales.proposals' and p.data->>'deal_ref' = n.id::text and coalesce(p.status, '') <> 'Superseded') then
-    miss := miss || 'a proposal';
+    miss := array_append(miss, ('a proposal')::text);
   end if;
   if cardinality(miss) = 0 then return null; end if;
   -- a loss or a hold always says why: no exception replaces the reason
@@ -1034,7 +1034,9 @@ begin
   return 'To move to «' || n.status || '», add: ' || array_to_string(miss, ', ')
     || case when kind not in ('lost', 'hold') then ' — or give the reason for an exception (at least 10 characters) in «Exception to the stage rules»' else '' end;
 end $$;
-revoke execute on function public._crm_stage_check(text, public.records, public.records, uuid) from public, anon, authenticated;
+revoke execute on function public._crm_stage_check(text, public.records, public.records, uuid) from public, anon;
+-- called by the user-facing guard (which runs as the signed-in person); it only reads and answers with a message
+grant execute on function public._crm_stage_check(text, public.records, public.records, uuid) to authenticated;
 
 -- the last completed approval process of a proposal is valid for the proposal exactly as it is now
 create or replace function public._crm_proposal_approved(r public.records) returns boolean language sql stable security definer set search_path = public as $$
@@ -1075,7 +1077,8 @@ begin
   end if;
   return null;
 end $$;
-revoke execute on function public._crm_proposal_check(text, public.records, public.records) from public, anon, authenticated;
+revoke execute on function public._crm_proposal_check(text, public.records, public.records) from public, anon;
+grant execute on function public._crm_proposal_check(text, public.records, public.records) to authenticated;
 
 -- what a signed-in person may not enter or change by hand (Workspace sets it); invoker on purpose, like v23:
 -- inside the commercial functions (definer) the current user is the owner and these checks do not apply
@@ -1160,6 +1163,16 @@ begin
     end if;
   elsif new.section = 'company.parties' then
     if new.data ? 'domain' then new.data := new.data || jsonb_build_object('domain', lower(regexp_replace(trim(new.data->>'domain'), '^(https?://)?(www\.)?|/.*$', '', 'g'))); end if;
+  elsif new.section in ('company.tasks', 'company.decisions') then
+    -- a task or decision made from a meeting of an opportunity belongs to that opportunity too (source trace)
+    if coalesce(new.data->>'deal_ref', '') = '' and coalesce(new.data->>'meeting_ref', new.data->>'source_ref', '') <> '' then
+      select m.data->>'deal_ref', m.data->>'deal_ref_title' into dv, nm from public.records m
+       where m.id = public.as_uuid(coalesce(new.data->>'meeting_ref', new.data->>'source_ref')) and m.section = 'company.meetings' and coalesce(m.data->>'deal_ref', '') <> '';
+      if dv is not null then
+        new.data := new.data || jsonb_build_object('deal_ref', dv, 'deal_ref_title', nm);
+        if not coalesce(new.controlled, false) and exists (select 1 from public.records x where x.id = public.as_uuid(dv) and x.controlled) then new.controlled := true; end if;
+      end if;
+    end if;
   elsif new.section = 'legal.contracts' then
     -- the exact document version that was signed
     if coalesce(new.data->>'signed_on', '') <> '' and coalesce(new.data->>'signed_version_id', '') = '' and coalesce(new.data->>'document_ref', '') <> '' then
@@ -1329,7 +1342,7 @@ revoke execute on function public._crm_name(uuid) from public, anon, authenticat
  * the lead belongs to its AGRON owner. Duplicates are shown with the result; nothing is merged.
  */
 create or replace function public.crm_lead_capture(p jsonb) returns jsonb language plpgsql security definer set search_path = public as $$
-declare me uuid := public.crm_viewer(); d jsonb; nm text; owner uuid; ev uuid; id uuid; t text; fu text;
+declare me uuid := public.crm_viewer(); d jsonb; nm text; owner uuid; ev uuid; v_id uuid; t text; fu text;
 begin
   if me is null then raise exception 'Not signed in' using errcode = '42501'; end if;
   d := jsonb_strip_nulls(jsonb_build_object(
@@ -1355,10 +1368,10 @@ begin
          || case when ev is not null then jsonb_build_object('event_ref', ev, 'event_ref_title', (select title from public.records where id = ev)) else '{}'::jsonb end
          || case when d ? 'introducer_ref' then jsonb_build_object('introducer_ref_title', (select title from public.records where id = (d->>'introducer_ref')::uuid)) else '{}'::jsonb end;
   t := left(coalesce(nullif(nm, ''), d->>'organization') || case when nm <> '' and coalesce(d->>'organization', '') <> '' then ' — ' || (d->>'organization') else '' end, 300);
-  insert into public.records(section, title, status, data) values ('marketing.leads', t, 'New', d) returning records.id into id;
-  insert into public.crm_audit(actor, kind, record_id, detail) values (me, 'lead_captured', id, jsonb_build_object('via', d->>'captured_via', 'event', ev));
-  return jsonb_build_object('id', id, 'title', t, 'owner', public._crm_name(owner), 'follow_up', fu,
-    'dupes', jsonb_build_object('organization', case when coalesce(d->>'organization', '') <> '' then public.crm_dupes('organization', d) else '[]'::jsonb end,
+  insert into public.records(section, title, status, data) values ('marketing.leads', t, 'New', d) returning records.id into v_id;
+  insert into public.crm_audit(actor, kind, record_id, detail) values (me, 'lead_captured', v_id, jsonb_build_object('via', d->>'captured_via', 'event', ev));
+  return jsonb_build_object('id', v_id, 'title', t, 'owner', public._crm_name(owner), 'follow_up', fu,
+    'dupes', jsonb_build_object('organization', case when coalesce(d->>'organization', '') <> '' then public.crm_dupes('organization', jsonb_build_object('name', d->>'organization', 'email', d->>'email', 'website', d->>'website', 'country', d->>'country')) else '[]'::jsonb end,
                                 'contact', case when nm <> '' or d ? 'email' or d ? 'phone' then public.crm_dupes('contact', (d - 'title') || jsonb_build_object('name', nm)) else '[]'::jsonb end));
 end $$;
 revoke execute on function public.crm_lead_capture(jsonb) from public, anon;
@@ -1366,13 +1379,13 @@ grant execute on function public.crm_lead_capture(jsonb) to authenticated;
 
 -- a choice of an existing record or a new one ({"use": id} | {"new": {...}}); a strong duplicate needs a reason
 create or replace function public._crm_pick(p_kind text, p_choice jsonb, p_me uuid, p_seed jsonb) returns uuid language plpgsql security definer set search_path = public as $$
-declare id uuid; v jsonb; dup jsonb; sec text := case when p_kind = 'organization' then 'company.parties' else 'company.contacts' end; t text;
+declare v_id uuid; v jsonb; dup jsonb; sec text := case when p_kind = 'organization' then 'company.parties' else 'company.contacts' end; t text;
 begin
   if p_choice ? 'use' then
-    id := public.as_uuid(p_choice->>'use');
-    if id is null or not exists (select 1 from public.records x where x.id = id and x.section = sec) then raise exception 'The chosen % was not found', p_kind using errcode = 'P0002'; end if;
-    if not public.record_visible_for(p_me, (select x from public.records x where x.id = id)) then raise exception 'The chosen % was not found', p_kind using errcode = 'P0002'; end if;
-    return id;
+    v_id := public.as_uuid(p_choice->>'use');
+    if v_id is null or not exists (select 1 from public.records x where x.id = v_id and x.section = sec) then raise exception 'The chosen % was not found', p_kind using errcode = 'P0002'; end if;
+    if not public.record_visible_for(p_me, (select x from public.records x where x.id = v_id)) then raise exception 'The chosen % was not found', p_kind using errcode = 'P0002'; end if;
+    return v_id;
   end if;
   v := coalesce(p_choice->'new', p_seed);
   -- the display name is «name» (for an organisation also «title»); a contact's «title» is the job title
@@ -1385,8 +1398,8 @@ begin
   end if;
   v := (case when p_kind = 'organization' then v - 'title' else v end - 'name' - 'merged_into' - 'import_batch') || jsonb_build_object('owner_id', coalesce(v->>'owner_id', p_me::text), 'owner', coalesce(v->>'owner', public._crm_name(coalesce(public.as_uuid(v->>'owner_id'), p_me))))
        || case when p_choice ? 'new_reason' then jsonb_build_object('created_despite', jsonb_build_object('similar', dup, 'reason', left(p_choice->>'new_reason', 300))) else '{}'::jsonb end;
-  insert into public.records(section, title, status, data) values (sec, left(t, 300), case when p_kind = 'contact' then 'Active' else 'Active' end, jsonb_strip_nulls(v)) returning records.id into id;
-  return id;
+  insert into public.records(section, title, status, data) values (sec, left(t, 300), case when p_kind = 'contact' then 'Active' else 'Active' end, jsonb_strip_nulls(v)) returning records.id into v_id;
+  return v_id;
 end $$;
 revoke execute on function public._crm_pick(text, jsonb, uuid, jsonb) from public, anon, authenticated;
 
@@ -1606,9 +1619,8 @@ begin
       case when pk->'organization' is not null then 'Organization: ' || (pk->'organization'->>'title') end,
       case when coalesce(pk->>'scope', '') <> '' then 'Scope: ' || (pk->>'scope') end,
       case when pk->'final_proposal' is not null then 'Final proposal: ' || coalesce(pk->'final_proposal'->>'number', '') || ' v' || coalesce(pk->'final_proposal'->>'version', '') || ' (' || (pk->'final_proposal'->>'status') || ')' end,
-      'Commercial value: ' || coalesce(case when pk->'values'->>'final' is not null then (pk->'values'->>'final') || ' ' || coalesce(pk->'values'->>'currency', '') || ' (final agreed)'
-        when pk->'values'->>'negotiated' is not null then (pk->'values'->>'negotiated') || ' ' || coalesce(pk->'values'->>'currency', '') || ' (negotiated)'
-        when pk->'values'->>'quoted' is not null then (pk->'values'->>'quoted') || ' ' || coalesce(pk->'values'->>'currency', '') || ' (quoted)' end, 'not known'),
+      -- the commercial value stays on the opportunity (its readers); the project's readers may differ (engineering)
+      'Commercial values: see the opportunity (for the people who may open it).',
       case when jsonb_array_length(pk->'contracts') > 0 then 'Contracts: ' || (select string_agg(coalesce(c->>'number', c->>'title') || ' (' || (c->>'status') || ')', ', ') from jsonb_array_elements(pk->'contracts') c) end,
       case when jsonb_array_length(pk->'outstanding') > 0 then 'Outstanding: ' || (select string_agg(c->>'title', '; ') from jsonb_array_elements(pk->'outstanding') c) end);
     insert into public.records(section, title, status, controlled, data)
@@ -2024,7 +2036,7 @@ begin
       from public.records p where p.section = 'sales.proposals' and p.data->>'deal_ref' = r.id::text and public.record_visible_for(me, p)), '[]'::jsonb),
     'nda', jsonb_build_object('status', v.nda, 'contract', (select jsonb_build_object('id', c.id, 'number', c.data->>'number', 'title', c.title, 'status', c.status, 'signed_on', c.data->>'signed_on',
         'start_date', c.data->>'start_date', 'end_date', c.data->>'end_date', 'document_ref', c.data->>'document_ref', 'signed_version_id', c.data->>'signed_version_id',
-        'signed_version', (select jsonb_build_object('version', dv.version, 'file_name', dv.file_name, 'created_at', dv.created_at) from public.document_versions dv where dv.id = public.as_uuid(c.data->>'signed_version_id')))
+        'signed_version', (select jsonb_build_object('version', dv.label, 'file_name', dv.file_name, 'created_at', dv.created_at) from public.document_versions dv where dv.id = public.as_uuid(c.data->>'signed_version_id')))
       from public.records c where c.section = 'legal.contracts' and (c.id::text = r.data->>'nda_ref' or (c.data->>'deal_ref' = r.id::text and c.data->>'type' = 'NDA')) and public.record_visible_for(me, c)
       order by (c.id::text = r.data->>'nda_ref') desc, c.updated_at desc limit 1),
       'note', 'An NDA does not by itself permit sharing any particular information: the access rules decide what each person may see.'),
@@ -2097,7 +2109,7 @@ begin
          and public.record_visible_for(me, x)), '[]'::jsonb),
       'introduced_by_them', coalesce((select jsonb_agg(jsonb_build_object('id', x.id, 'title', x.title, 'date', x.data->>'date', 'introduced', coalesce(x.data->>'introduced_party_ref_title', x.data->>'introduced_contact_ref_title'), 'opportunity', x.data->>'deal_ref_title') order by x.data->>'date' desc)
          from public.records x where x.section = 'sales.introductions' and x.data->>'introducer_party_ref' = sid and public.record_visible_for(me, x)), '[]'::jsonb),
-      'introduced_to_us_by', coalesce((select jsonb_agg(jsonb_build_object('id', x.id, 'title', x.title, 'date', x.data->>'date', 'introducer', coalesce(x.data->>'introducer_party_ref_title', x.data->>'introducer_contact_ref_title', x.data->>'introducer_employee'), 'kind', x.data->>'introducer_kind', 'context', x.data->>'context') order by x.data->>'date' desc)
+      'introduced_to_us_by', coalesce((select jsonb_agg(jsonb_build_object('id', x.id, 'title', x.title, 'date', x.data->>'date', 'introducer', coalesce(x.data->>'introducer_party_ref_title', x.data->>'introducer_contact_ref_title', x.data->>'introducer_employee'), 'introducer_id', coalesce(x.data->>'introducer_party_ref', x.data->>'introducer_contact_ref', x.data->>'introducer_employee_id'), 'kind', x.data->>'introducer_kind', 'context', x.data->>'context') order by x.data->>'date' desc)
          from public.records x where x.section = 'sales.introductions' and x.data->>'introduced_party_ref' = sid and public.record_visible_for(me, x)), '[]'::jsonb),
       'supports', coalesce((select jsonb_agg(jsonb_build_object('id', x.id, 'number', x.data->>'number', 'title', x.title, 'stage', x.status,
            'roles', (select jsonb_agg(z) from (values (case when x.data->>'introduced_by_ref' = sid then 'introduced' end), (case when x.data->>'technical_support_ref' = sid then 'technical support' end),
@@ -2277,8 +2289,8 @@ begin
     return jsonb_build_object('kind', 'list', 'intent', p_intent, 'items', public.crm_list(case p_intent when 'attention' then 'needs_action' else p_intent end, null, 50));
   elsif p_intent = 'geography' then
     if arg is null then return jsonb_build_object('kind', 'unavailable', 'note', 'Say which geography'); end if;
-    return jsonb_build_object('kind', 'list', 'intent', p_intent, 'arg', arg, 'items', public.crm_list('active', null, 50,
-      jsonb_build_object('geography', coalesce((select x from jsonb_array_elements_text(public.crm_cfg()->'geographies') x where lower(x) = lower(arg) limit 1), arg))),
+    arg := coalesce((select x from jsonb_array_elements_text(public.crm_cfg()->'geographies') x where lower(x) = lower(arg) limit 1), arg);
+    return jsonb_build_object('kind', 'list', 'intent', p_intent, 'arg', arg, 'items', public.crm_list('active', null, 50, jsonb_build_object('geography', arg)),
       'note', 'Opportunities whose geography is ' || arg || ' (the field on the opportunity)');
   elsif p_intent = 'event' then
     select e.id into ev from public.records e where e.section = 'marketing.events' and (arg is null and e.id = public.as_uuid(public.crm_cfg()->>'active_event_ref') or (arg is not null and lower(e.title) like '%' || lower(arg) || '%'))
@@ -2304,7 +2316,7 @@ begin
             'linked_decisions', (select coalesce(jsonb_agg(jsonb_build_object('id', d.id, 'title', d.title, 'decision', d.data->>'decision', 'status', d.status)), '[]'::jsonb) from public.records d
                where d.section = 'company.decisions' and d.data->>'source_ref' = m.id::text and public.record_visible_for(me, d)),
             'tasks', (select coalesce(jsonb_agg(jsonb_build_object('id', t.id, 'title', t.title, 'assignee', t.data->>'assignee', 'due', t.data->>'due', 'status', t.status)), '[]'::jsonb) from public.records t
-               where t.section = 'company.tasks' and t.data->>'source_ref' = m.id::text and public.record_visible_for(me, t)))
+               where t.section = 'company.tasks' and t.data->>'meeting_ref' = m.id::text and public.record_visible_for(me, t)))
           from public.records m where m.section = 'company.meetings' and coalesce(m.status, '') <> 'Cancelled' and public._crm_date(m.data->>'date') <= current_date
             and (m.data->>'deal_ref' = r.id::text or m.data->>'party_ref' = r.id::text or m.data->>'contact_ref' = r.id::text
                  or (r.section <> 'sales.pipeline' and m.data->>'deal_ref' in (select o.id::text from public.records o where o.section = 'sales.pipeline' and o.data->>(case when r.section = 'company.parties' then 'party_ref' else 'contact_ref' end) = r.id::text)))
@@ -2312,7 +2324,9 @@ begin
           order by public._crm_date(m.data->>'date') desc, m.data->>'time' desc nulls last limit 1));
     end if;
   elsif p_intent = 'above_value' then
-    amt := coalesce(public._num(to_jsonb(regexp_replace(coalesce(arg, ''), '[^0-9.]', '', 'g'))), 1000000);
+    -- "1000000", "$1M", "2.5 million", "500k": the number and its multiplier, as written
+    amt := coalesce(public._num(to_jsonb(substring(replace(coalesce(arg, ''), ',', '') from '[0-9]+(?:\.[0-9]+)?'))), 1000000)
+      * case when lower(coalesce(arg, '')) ~ '[0-9.]\s*(m|mln|million|млн)\M' then 1000000 when lower(coalesce(arg, '')) ~ '[0-9.]\s*(k|thousand|тыс|тис)\M' then 1000 else 1 end;
     cur := coalesce(substring(upper(coalesce(arg, '')) from '(USD|AED|EUR)'), case when coalesce(arg, '') ~ '\$' then 'USD' when coalesce(arg, '') ~ '€' then 'EUR' end);
     return jsonb_build_object('kind', 'list', 'intent', p_intent, 'amount', amt, 'currency', cur,
       'items', public.crm_list('active', null, 100, jsonb_strip_nulls(jsonb_build_object('min_value', amt, 'currency', cur))),
@@ -2382,7 +2396,7 @@ grant execute on function public.crm_import_preview(text, jsonb) to authenticate
 /** Import the confirmed rows. Decisions per row: create | skip | use:<id> (an existing record is never changed). */
 create or replace function public.crm_import_commit(p_kind text, p_rows jsonb, p_decisions jsonb, p_file text default null) returns jsonb language plpgsql security definer set search_path = public as $$
 declare me uuid := public.crm_viewer(); sec text := public._crm_import_section(p_kind); pv jsonb; r jsonb; x jsonb; dec text; batch uuid := gen_random_uuid(); n_new int := 0; n_link int := 0; n_skip int := 0;
-  rep jsonb := '[]'::jsonb; d jsonb; nm text; id uuid; party uuid; fields text[] := public._crm_import_fields(p_kind); k text;
+  rep jsonb := '[]'::jsonb; d jsonb; nm text; v_id uuid; party uuid; fields text[] := public._crm_import_fields(p_kind); k text;
 begin
   pv := public.crm_import_preview(p_kind, p_rows); -- the same checks again, on the server, at the moment of import
   for r in select * from jsonb_array_elements(pv->'rows') loop
@@ -2391,9 +2405,9 @@ begin
     if dec is null then raise exception 'Row % looks like an existing record: choose create, skip or use the existing one', r->>'row' using errcode = '23505'; end if;
     if dec = 'skip' then n_skip := n_skip + 1; rep := rep || jsonb_build_object('row', r->'row', 'result', 'skipped'); continue; end if;
     if dec like 'use:%' then
-      id := public.as_uuid(substr(dec, 5));
-      if id is null or not exists (select 1 from jsonb_array_elements(r->'duplicates') q where q->>'id' = id::text) then raise exception 'Row %: the chosen existing record is not one of its matches', r->>'row' using errcode = '22023'; end if;
-      n_link := n_link + 1; rep := rep || jsonb_build_object('row', r->'row', 'result', 'existing used (not changed)', 'id', id); continue;
+      v_id := public.as_uuid(substr(dec, 5));
+      if v_id is null or not exists (select 1 from jsonb_array_elements(r->'duplicates') q where q->>'id' = v_id::text) then raise exception 'Row %: the chosen existing record is not one of its matches', r->>'row' using errcode = '22023'; end if;
+      n_link := n_link + 1; rep := rep || jsonb_build_object('row', r->'row', 'result', 'existing used (not changed)', 'id', v_id); continue;
     end if;
     if dec <> 'create' then raise exception 'Row %: unknown decision %', r->>'row', dec using errcode = '22023'; end if;
     d := '{}'::jsonb;
@@ -2406,8 +2420,8 @@ begin
     end if;
     d := d || jsonb_build_object('import_batch', batch, 'owner_id', me, 'owner', public._crm_name(me)) || case when p_kind = 'leads' and nm is not null then jsonb_build_object('contact', nullif(r->>'name', '')) else '{}'::jsonb end;
     insert into public.records(section, title, status, data) values (sec, left(case when p_kind = 'leads' and coalesce(x->>'organization', '') <> '' and coalesce(r->>'name', '') <> '' then (r->>'name') || ' — ' || (x->>'organization') else nm end, 300),
-      case p_kind when 'leads' then 'New' when 'contacts' then 'New' else 'Active' end, d) returning records.id into id;
-    n_new := n_new + 1; rep := rep || jsonb_build_object('row', r->'row', 'result', 'created', 'id', id);
+      case p_kind when 'leads' then 'New' when 'contacts' then 'New' else 'Active' end, d) returning records.id into v_id;
+    n_new := n_new + 1; rep := rep || jsonb_build_object('row', r->'row', 'result', 'created', 'id', v_id);
   end loop;
   insert into public.crm_imports(id, kind, created_by, file_name, rows_total, created, linked, skipped, report) values (batch, p_kind, me, left(p_file, 200), (pv->>'total')::int, n_new, n_link, n_skip, rep);
   insert into public.crm_audit(actor, kind, detail) values (me, 'import', jsonb_build_object('batch', batch, 'kind', p_kind, 'created', n_new, 'linked', n_link, 'skipped', n_skip));
@@ -2475,13 +2489,13 @@ grant execute on function public.crm_export(text, jsonb) to authenticated;
 
 /** E-mail → which contact, organisation or opportunity it most likely belongs to (suggestions; nothing is linked). */
 create or replace function public.crm_email_suggest(p_from text, p_subject text, p_source_kind text default null, p_source_id text default null) returns jsonb language plpgsql security definer set search_path = public as $$
-declare me uuid := public.crm_viewer(); addr text := lower(substring(coalesce(p_from, '') from '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}')); dom text; out jsonb := '[]'::jsonb; x record; num text;
+declare me uuid := public.crm_viewer(); addr text := lower(substring(coalesce(p_from, '') from '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}')); dom text; out jsonb := '[]'::jsonb; x public.records; num text;
 begin
   if me is null then raise exception 'Not signed in' using errcode = '42501'; end if;
   dom := split_part(coalesce(addr, ''), '@', 2);
   -- the exact address of a contact (strong), then that contact's organisation and open opportunities
   for x in select r.* from public.records r where r.section = 'company.contacts' and addr is not null and lower(r.data->>'email') = addr and coalesce(r.data->>'merged_into', '') = '' limit 5 loop
-    if not public.record_visible_for(me, x::public.records) then continue; end if;
+    if not public.record_visible_for(me, x) then continue; end if;
     out := out || jsonb_build_object('target', x.id, 'section', 'company.contacts', 'title', x.title, 'why', 'the sender''s address is this contact''s e-mail', 'strength', 'strong');
     out := out || coalesce((select jsonb_agg(jsonb_build_object('target', o.id, 'section', 'sales.pipeline', 'title', coalesce(o.data->>'number', '') || ' ' || o.title, 'why', 'open opportunity of this contact', 'strength', 'likely'))
       from public.records o where o.section = 'sales.pipeline' and o.data->>'contact_ref' = x.id::text and public.crm_stage_kind(o.status) = 'open' and public.record_visible_for(me, o)), '[]'::jsonb);
@@ -2490,13 +2504,13 @@ begin
   num := substring(coalesce(p_subject, '') from '[A-Z]{2,5}-OPP-\d{4}-\d{3,}');
   if num is not null then
     for x in select r.* from public.records r where r.section = 'sales.pipeline' and r.data->>'number' = num limit 1 loop
-      if public.record_visible_for(me, x::public.records) then out := out || jsonb_build_object('target', x.id, 'section', 'sales.pipeline', 'title', num || ' ' || x.title, 'why', 'opportunity number in the subject', 'strength', 'strong'); end if;
+      if public.record_visible_for(me, x) then out := out || jsonb_build_object('target', x.id, 'section', 'sales.pipeline', 'title', num || ' ' || x.title, 'why', 'opportunity number in the subject', 'strength', 'strong'); end if;
     end loop;
   end if;
   -- the company's own domain (not a free mailbox): its organisation (likely)
   if dom <> '' and not public._crm_free_mail(dom) then
     for x in select r.* from public.records r where r.section = 'company.parties' and lower(r.data->>'domain') = dom and coalesce(r.data->>'merged_into', '') = '' limit 3 loop
-      if public.record_visible_for(me, x::public.records) and not out @> jsonb_build_array(jsonb_build_object('target', x.id)) then
+      if public.record_visible_for(me, x) and not out @> jsonb_build_array(jsonb_build_object('target', x.id)) then
         out := out || jsonb_build_object('target', x.id, 'section', 'company.parties', 'title', x.title, 'why', 'sender domain ' || dom, 'strength', 'likely');
       end if;
     end loop;
