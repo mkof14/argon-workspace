@@ -592,7 +592,7 @@ begin
         or not coalesce(r.data->>'classification' = any(restricted), false)
         or coalesce(r.data->'access_ids', '[]'::jsonb) ? p.id::text or coalesce(r.data->'contributors_ids', '[]'::jsonb) ? p.id::text
         or p.role in ('owner', 'management')
-      when r.section in ('company.meetings', 'company.decisions') and coalesce(r.data->>'deal_ref', '') <> '' then coalesce(public.extra_visible(p.id, r), false)
+      when r.section in ('company.meetings', 'company.decisions') and coalesce(r.data->>'deal_ref', '') <> '' and p.role not in ('owner', 'management') then coalesce(public.extra_visible(p.id, r), false)
       when r.section = 'company.decisions' and coalesce(r.data->>'source_ref', '') ~ '^[0-9a-f-]{36}$' then coalesce(public.extra_visible(p.id, r), false)
       else true end;
 end $$;
@@ -645,7 +645,7 @@ begin
           or not coalesce(r.data->>'classification' = any(restricted), false)
           or coalesce(r.data->'access_ids', '[]'::jsonb) ? p.id::text or coalesce(r.data->'contributors_ids', '[]'::jsonb) ? p.id::text
           or p.role in ('owner', 'management')
-        when r.section in ('company.meetings', 'company.decisions') and coalesce(r.data->>'deal_ref', '') <> '' then coalesce(public.extra_visible(p.id, r), false)
+        when r.section in ('company.meetings', 'company.decisions') and coalesce(r.data->>'deal_ref', '') <> '' and p.role not in ('owner', 'management') then coalesce(public.extra_visible(p.id, r), false)
         when r.section = 'company.decisions' and coalesce(r.data->>'source_ref', '') ~ '^[0-9a-f-]{36}$' then coalesce(public.extra_visible(p.id, r), false)
         else true end
       -- a draft or archived document with no date and no open approval takes part in no engine: not copied
@@ -1453,7 +1453,7 @@ begin
       'first_name', d->>'first_name', 'last_name', d->>'last_name', 'email', d->>'email', 'phone', d->>'phone', 'party_ref', party))) x where x->>'strength' = 'strong';
     if jsonb_array_length(dup) = 1 then contact := (dup->0->>'id')::uuid;
     elsif jsonb_array_length(dup) > 1 then raise exception 'Several contacts match — choose one' using errcode = '23505';
-    else contact := public._crm_pick('contact', jsonb_build_object('new', jsonb_strip_nulls(jsonb_build_object('name', coalesce(nullif(d->>'contact', ''), trim(concat_ws(' ', d->>'first_name', d->>'last_name')), d->>'email'),
+    else contact := public._crm_pick('contact', jsonb_build_object('new', jsonb_strip_nulls(jsonb_build_object('name', coalesce(nullif(d->>'contact', ''), nullif(trim(concat_ws(' ', d->>'first_name', d->>'last_name')), ''), d->>'email'),
            'first_name', d->>'first_name', 'last_name', d->>'last_name', 'title', d->>'title', 'email', d->>'email', 'phone', d->>'phone', 'country', d->>'country',
            'party_ref', party, 'party_ref_title', pt, 'organization', d->>'organization', 'source', d->>'source'))), me, null);
     end if;
@@ -1722,6 +1722,14 @@ $$;
 
 -- the row of the working set (a type, so that the list helpers can take a whole row)
 drop type if exists public.crm_vrow cascade;
+-- the latest linked activity and meeting of an opportunity, one index probe each (the read models)
+create index if not exists records_crm_act_last_idx on public.records ((data->>'deal_ref'), (coalesce(public._crm_date(data->>'date'), (created_at at time zone 'UTC')::date)) desc, created_at desc)
+  where section = 'sales.activities' and status = 'Done' and data ? 'deal_ref';
+create index if not exists records_crm_meet_last_idx on public.records ((data->>'deal_ref'), (coalesce(public._crm_date(data->>'date'), (created_at at time zone 'UTC')::date)) desc, created_at desc)
+  where section = 'company.meetings' and data ? 'deal_ref';
+create index if not exists records_crm_prop_last_idx on public.records ((data->>'deal_ref'), (public._crm_date(data->>'sent_at')) desc nulls last)
+  where section = 'sales.proposals' and data ? 'deal_ref';
+
 create type public.crm_vrow as (id uuid, title text, stage text, kind text, data jsonb, controlled boolean, created_by uuid, created_at timestamptz, updated_at timestamptz,
       number text, party_id uuid, party_title text, contact_id uuid, owner_id uuid, owner text, value numeric, quoted numeric, approved numeric, negotiated numeric, final numeric, currency text,
       prob numeric, prob_source text, decision_on date, close_on date, next_action text, next_due date, next_owner uuid, waiting_for text, waiting_since date,
@@ -1750,67 +1758,58 @@ begin
         value, quoted, approved, negotiated, final, currency, prob, prob_source, decision_on, close_on, next_action, next_due, next_owner, waiting_for, waiting_since, hold_review,
         geography, product, use_case, source, introduced_by, lead_ref, restricted)
       select r.id, r.title, r.status, coalesce(s->>'kind', 'open'), r.data, r.controlled, r.created_by, r.created_at, r.updated_at, r.data->>'number',
-        public.as_uuid(r.data->>'party_ref'), coalesce(r.data->>'party_ref_title', r.data->>'client'), public.as_uuid(r.data->>'contact_ref'), public.as_uuid(r.data->>'owner_id'), r.data->>'owner',
+        case when r.data->>'party_ref' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then (r.data->>'party_ref')::uuid end, coalesce(r.data->>'party_ref_title', r.data->>'client'), case when r.data->>'contact_ref' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then (r.data->>'contact_ref')::uuid end, case when r.data->>'owner_id' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then (r.data->>'owner_id')::uuid end, r.data->>'owner',
         public._num(r.data->'value'), public._num(r.data->'quoted_value'), public._num(r.data->'approved_value'), public._num(r.data->'negotiated_value'), public._num(r.data->'final_value'),
         nullif(r.data->>'currency', ''),
         coalesce(public._num(r.data->'probability'), public._num(s->'probability')), case when public._num(r.data->'probability') is not null then 'manual' when public._num(s->'probability') is not null then 'stage default' end,
         public._crm_date(r.data->>'expected_decision'), public._crm_date(r.data->>'expected_close'), nullif(trim(r.data->>'next_action'), ''), public._crm_date(r.data->>'next_action_due'),
-        public.as_uuid(r.data->>'next_action_owner_id'), nullif(r.data->>'waiting_for', ''), public._crm_date(r.data->>'waiting_since'), public._crm_date(r.data->>'hold_review'),
-        nullif(r.data->>'geography', ''), nullif(r.data->>'product', ''), nullif(r.data->>'use_case', ''), nullif(r.data->>'source', ''), public.as_uuid(r.data->>'introduced_by_ref'),
-        public.as_uuid(r.data->>'lead_ref'), coalesce((r.data->>'restricted')::boolean, false)
-      from public.records r left join lateral (select x from jsonb_array_elements(st) x where x->>'stage' = r.status limit 1) ss(s) on true
+        case when r.data->>'next_action_owner_id' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then (r.data->>'next_action_owner_id')::uuid end, nullif(r.data->>'waiting_for', ''), public._crm_date(r.data->>'waiting_since'), public._crm_date(r.data->>'hold_review'),
+        nullif(r.data->>'geography', ''), nullif(r.data->>'product', ''), nullif(r.data->>'use_case', ''), nullif(r.data->>'source', ''), case when r.data->>'introduced_by_ref' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then (r.data->>'introduced_by_ref')::uuid end,
+        case when r.data->>'lead_ref' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then (r.data->>'lead_ref')::uuid end, coalesce((r.data->>'restricted')::boolean, false)
+      from public.records r left join (select distinct on (x->>'stage') x->>'stage' stage, x s from jsonb_array_elements(st) x) ss on ss.stage = r.status
       where r.section = 'sales.pipeline'
         and (coalesce(r.controlled, true) = false or p.us)
         and (not coalesce((r.data->>'restricted')::boolean, false) or p.role in ('owner', 'management') or r.created_by = p.id
              or coalesce(r.data->>'owner_id', '') = pid or coalesce(r.data->>'next_action_owner_id', '') = pid
              or coalesce(r.data->'team_ids', '[]'::jsonb) ? pid or coalesce(r.data->'access_ids', '[]'::jsonb) ? pid);
-      -- when the current stage began (stage history; the record's creation before v24 history existed)
-      update pg_temp.crm_v v set stage_since = h.at from (
-        select distinct on (h.record_id) h.record_id, h.at from public.crm_stage_history h join pg_temp.crm_v x on x.id = h.record_id and h.to_stage = x.stage order by h.record_id, h.at desc) h
-      where h.record_id = v.id;
-      update pg_temp.crm_v set stage_since = created_at where stage_since is null;
-      -- the last interaction: a call, note or e-mail done, a meeting held, a proposal sent, a confirmed e-mail link
-      update pg_temp.crm_v v set last_at = t.at, last_kind = t.k, last_title = t.title, last_ref = t.id from (
-        select distinct on (oid) oid, at, k, title, id from (
-          select public.as_uuid(a.data->>'deal_ref') oid, coalesce(public._crm_date(a.data->>'date')::timestamptz, a.created_at) at, coalesce(a.data->>'type', 'Note') k, a.title, a.id
-          from public.records a join pg_temp.crm_v x on a.data->>'deal_ref' = x.id::text
-          where a.section = 'sales.activities' and a.status = 'Done' and (coalesce(a.controlled, true) = false or p.us)
-          union all
-          select public.as_uuid(m.data->>'deal_ref'), coalesce(public._crm_date(m.data->>'date')::timestamptz, m.created_at), 'Meeting', m.title, m.id
-          from public.records m join pg_temp.crm_v x on m.data->>'deal_ref' = x.id::text
-          where m.section = 'company.meetings' and coalesce(m.status, '') <> 'Cancelled' and (m.status = 'Done' or public._crm_date(m.data->>'date') <= today) and (coalesce(m.controlled, true) = false or p.us)
-          union all
-          select public.as_uuid(q.data->>'deal_ref'), public._crm_date(q.data->>'sent_at')::timestamptz, 'Proposal sent', q.title, q.id
-          from public.records q join pg_temp.crm_v x on q.data->>'deal_ref' = x.id::text
-          where q.section = 'sales.proposals' and coalesce(q.data->>'sent_at', '') <> '' and (coalesce(q.controlled, true) = false or p.us)
-          union all
-          select l.target_id, l.decided_at, 'E-mail', l.subject, null from public.crm_email_links l join pg_temp.crm_v x on x.id = l.target_id where l.status = 'confirmed'
-        ) u where at is not null order by oid, at desc) t
+      -- one pass over the working set (each part one index probe per opportunity): when the current stage began (stage
+      -- history; the creation before v24 history existed), the last activity, held meeting and sent proposal, the confirmed
+      -- e-mail link (open and on-hold opportunities: a closed one needs no follow-up facts), the NDA (the linked NDA contract
+      -- when the viewer may open it, otherwise the field), the lead's event
+      update pg_temp.crm_v v set stage_since = coalesce(t.h_at, v.created_at), last_at = t.w_at, last_kind = t.w_k, last_title = t.w_title, last_ref = t.w_id,
+        meeting_on = t.m_d, meeting_ref = t.m_id, sent_at = t.s_d, sent_ref = t.s_id, sent_title = t.s_title,
+        nda = public._crm_nda(v.data, t.c_status, t.c_end), nda_since = t.c_at, event_ref = t.ev
+      from (select x.id oid, h.at h_at, w.at w_at, w.k w_k, w.title w_title, w.id w_id, m.d m_d, m.id m_id, s.d s_d, s.id s_id, s.title s_title,
+                   c.status c_status, c.end_date c_end, c.updated_at c_at, ld.ev
+        from pg_temp.crm_v x
+        left join lateral (select h.at from public.crm_stage_history h where h.record_id = x.id and h.to_stage = x.stage order by h.at desc limit 1) h on true
+        left join lateral (select coalesce(public._crm_date(a.data->>'date')::timestamptz, a.created_at) at, coalesce(a.data->>'type', 'Note') k, a.title, a.id from public.records a
+          where x.kind in ('open', 'hold') and a.section = 'sales.activities' and a.status = 'Done' and a.data ? 'deal_ref' and a.data->>'deal_ref' = x.id::text and (coalesce(a.controlled, true) = false or p.us)
+          order by coalesce(public._crm_date(a.data->>'date'), (a.created_at at time zone 'UTC')::date) desc, a.created_at desc limit 1) a on true
+        left join lateral (select public._crm_date(m.data->>'date') d, coalesce(public._crm_date(m.data->>'date')::timestamptz, m.created_at) at, m.title, m.id from public.records m
+          where x.kind in ('open', 'hold') and m.section = 'company.meetings' and m.data ? 'deal_ref' and m.data->>'deal_ref' = x.id::text and coalesce(m.status, '') <> 'Cancelled'
+            and (m.status = 'Done' or public._crm_date(m.data->>'date') <= today) and (coalesce(m.controlled, true) = false or p.us)
+          order by coalesce(public._crm_date(m.data->>'date'), (m.created_at at time zone 'UTC')::date) desc, m.created_at desc limit 1) m on true
+        left join lateral (select public._crm_date(q.data->>'sent_at') d, q.id, q.title from public.records q
+          where x.kind in ('open', 'hold') and q.section = 'sales.proposals' and q.data ? 'deal_ref' and q.data->>'deal_ref' = x.id::text and (q.status || '') = 'Sent' and (coalesce(q.controlled, true) = false or p.us)
+          order by public._crm_date(q.data->>'sent_at') desc nulls last limit 1) s on true
+        left join lateral (select public._crm_date(q.data->>'sent_at') d, q.id, q.title from public.records q
+          where x.kind in ('open', 'hold') and q.section = 'sales.proposals' and q.data ? 'deal_ref' and q.data->>'deal_ref' = x.id::text and coalesce(q.data->>'sent_at', '') <> '' and (coalesce(q.controlled, true) = false or p.us)
+          order by public._crm_date(q.data->>'sent_at') desc nulls last limit 1) q on true
+        left join lateral (select l.decided_at at, l.subject from public.crm_email_links l where x.kind in ('open', 'hold') and l.target_id = x.id and l.status = 'confirmed' order by l.decided_at desc limit 1) e on true
+        -- the latest of the four is the last interaction
+        left join lateral (select * from (values (a.at, a.k, a.title, a.id), (m.at, 'Meeting', m.title, m.id), (q.d::timestamptz, 'Proposal sent', q.title, q.id), (e.at, 'E-mail', e.subject, null::uuid)) w0(at, k, title, id)
+          where w0.at is not null order by w0.at desc limit 1) w on true
+        left join lateral (select c.status, c.data->>'end_date' end_date, c.updated_at from public.records c
+          where c.section = 'legal.contracts' and (c.id::text = x.data->>'nda_ref' or (c.data ? 'deal_ref' and c.data->>'deal_ref' = x.id::text and c.data->>'type' = 'NDA')) and public.record_visible_for(p.id, c)
+          order by (c.id::text = x.data->>'nda_ref') desc, c.updated_at desc limit 1) c on true
+        left join lateral (select case when l.data->>'event_ref' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then (l.data->>'event_ref')::uuid end ev
+          from public.records l where x.lead_ref is not null and l.id = x.lead_ref and l.section = 'marketing.leads') ld on true) t
       where t.oid = v.id;
-      -- the proposal waiting for an answer (the latest version sent and not yet accepted, rejected or replaced)
-      update pg_temp.crm_v v set sent_at = q.sent, sent_ref = q.id, sent_title = q.title from (
-        select distinct on (q.data->>'deal_ref') q.data->>'deal_ref' oid, public._crm_date(q.data->>'sent_at') sent, q.id, q.title
-        from public.records q join pg_temp.crm_v x on q.data->>'deal_ref' = x.id::text
-        where q.section = 'sales.proposals' and q.status = 'Sent' and (coalesce(q.controlled, true) = false or p.us)
-        order by q.data->>'deal_ref', public._crm_date(q.data->>'sent_at') desc nulls last) q
-      where q.oid = v.id::text;
-      update pg_temp.crm_v v set meeting_on = m.d, meeting_ref = m.id from (
-        select distinct on (m.data->>'deal_ref') m.data->>'deal_ref' oid, public._crm_date(m.data->>'date') d, m.id
-        from public.records m join pg_temp.crm_v x on m.data->>'deal_ref' = x.id::text
-        where m.section = 'company.meetings' and coalesce(m.status, '') <> 'Cancelled' and (m.status = 'Done' or public._crm_date(m.data->>'date') <= today) and (coalesce(m.controlled, true) = false or p.us)
-        order by m.data->>'deal_ref', public._crm_date(m.data->>'date') desc nulls last) m
-      where m.oid = v.id::text;
-      -- NDA: the linked NDA contract when the viewer may open it; otherwise the field on the opportunity
-      update pg_temp.crm_v v set nda = public._crm_nda(v.data, c.status, c.end_date), nda_since = c.updated_at from (
-        select distinct on (x.id) x.id oid, c.status, c.data->>'end_date' end_date, c.updated_at
-        from pg_temp.crm_v x join public.records c on c.section = 'legal.contracts' and (c.id::text = x.data->>'nda_ref' or (c.data->>'deal_ref' = x.id::text and c.data->>'type' = 'NDA'))
-        where public.record_visible_for(p.id, c)
-        order by x.id, (c.id::text = x.data->>'nda_ref') desc, c.updated_at desc) c
-      where c.oid = v.id;
-      update pg_temp.crm_v v set nda = public._crm_nda(v.data, null, null) where v.nda is null;
-      update pg_temp.crm_v v set event_ref = public.as_uuid(l.data->>'event_ref') from public.records l where l.id = v.lead_ref and l.section = 'marketing.leads';
       -- follow-up and stall reasons: deterministic rules (Commercial → Settings), each with its date
-      update pg_temp.crm_v v set reasons = z.r from (
+      update pg_temp.crm_v v set reasons = z.r, health = case
+        when z.r @> '[{"severity": "stalled"}]' then 'Stalled' when z.r @> '[{"severity": "risk"}]' then 'Risk'
+        when jsonb_array_length(z.r) > 0 then 'Attention' else 'Healthy' end from (
         select x.id, coalesce(jsonb_agg(e) filter (where e is not null), '[]'::jsonb) r from pg_temp.crm_v x, lateral (values
           (case when x.kind = 'open' and x.owner_id is null and coalesce(x.owner, '') = '' then jsonb_build_object('code', 'no_owner', 'severity', 'attention', 'text', 'No AGRON owner') end),
           (case when x.kind = 'open' and (x.next_action is null or x.next_due is null) then jsonb_build_object('code', 'no_next_action', 'severity', 'attention', 'text', 'No next action with a date') end),
@@ -1832,11 +1831,8 @@ begin
           (case when x.kind = 'open' and x.stage <> 'Negotiation' and x.stage_since < now() - make_interval(days => coalesce((fu->>'stage_age_days')::int, 60))
                 then jsonb_build_object('code', 'stage_age', 'severity', 'attention', 'text', 'In «' || x.stage || '» since ' || left(x.stage_since::text, 10), 'since', x.stage_since::date) end),
           (case when x.kind = 'hold' and x.hold_review <= today then jsonb_build_object('code', 'hold_review', 'severity', 'attention', 'text', 'On hold — review date reached (' || x.hold_review || ')', 'since', x.hold_review) end)
-        ) e(e) group by x.id) z
+        ) e(e) where x.kind in ('open', 'hold') group by x.id) z
       where z.id = v.id;
-      update pg_temp.crm_v set health = case
-        when reasons @> '[{"severity": "stalled"}]' then 'Stalled' when reasons @> '[{"severity": "risk"}]' then 'Risk'
-        when jsonb_array_length(reasons) > 0 then 'Attention' else 'Healthy' end;
     end if;
   end if;
   analyze pg_temp.crm_v;

@@ -1,7 +1,7 @@
 "use client";
 import Announcements from "./Announcements";
 import DecisionLog from "./DecisionLog";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 // Loaded when needed: the record form (with PDF, markdown and AI tools) and the template list are not part of the first page load
 const RecordDrawer = dynamic(() => import("./RecordDrawer"), { ssr: false });
 const SectionTemplates = dynamic(() => import("./Templates").then((m) => m.SectionTemplates), { ssr: false });
@@ -66,10 +66,14 @@ export default function SectionView({ section }: { section: any }) {
   const load = async () => { try { setRows(await store.list(section.id)); } catch (e: any) { toast(e.message || "Error", true); setRows([]); } };
   useEffect(() => { if (section.view !== "mail") load(); setSel(new Set()); }, [section.id, tick]); // eslint-disable-line
   useEffect(() => { setViews(me?.prefs?.views?.[section.id] || []); const so = new URLSearchParams(window.location.search).get("sort"); if (so) { const [k, d] = so.split(":"); setSort({ k, dir: d === "-1" ? -1 : 1 }); } }, [section.id]); // eslint-disable-line
+  // deep link ?r=<id> or ?new=1: opened once per link — a reload of the list after saving must not open it again
+  // (it did: a drawer could reappear behind a closing one and its backdrop then blocked the page)
+  const linkDone = useRef<string | null>(null);
   useEffect(() => { // deep link ?r=<id>
-    if (!rows) return; const id = new URLSearchParams(window.location.search).get("r");
-    if (id) { const r = rows.find((x) => x.id === id); if (r) setOpen(r); }
-    else if (new URLSearchParams(window.location.search).get("new") === "1" && canWrite) setOpen("new");
+    if (!rows) return; const q = new URLSearchParams(window.location.search); const id = q.get("r"); const key = `${section.id}|${window.location.search}`;
+    if (linkDone.current === key) return;
+    if (id) { const r = rows.find((x) => x.id === id); if (r) { setOpen(r); linkDone.current = key; } }
+    else if (q.get("new") === "1" && canWrite) { setOpen("new"); linkDone.current = key; }
   }, [rows]);
   useEffect(() => { // gallery thumbnails = first image attached to each record
     if (view !== "gallery" || !rows) return;

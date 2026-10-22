@@ -249,7 +249,7 @@ test("a non-technical path: find my task, open the project, reply to a comment, 
   assert.ok(await waitFor(async () => (await sql("select count(*)::int n from comments where record_id = $1", [t.id]))[0].n === 2));
   await p.selectOption("#f-status", "Completed"); await save(p); clicks += 2;
   assert.ok(await waitFor(async () => (await record(`Book the stand ${run}`)).status === "Completed"));
-  await p.keyboard.press("Escape"); clicks++; await p.click(".rail a.nav-item[href='/projects']"); clicks++; await p.click(`a.proj-card:has-text('Exhibitions ${run}')`); clicks++; await p.waitForSelector(".proj-hero");
+  await p.keyboard.press("Escape"); clicks++; await p.waitForSelector(".scrim", { state: "detached", timeout: 10000 }); await p.click(".rail a.nav-item[href='/projects']"); clicks++; await p.click(`a.proj-card:has-text('Exhibitions ${run}')`); clicks++; await p.waitForSelector(".proj-hero");
   evidence.usability_clicks = clicks; assert.ok(clicks <= 7, `${clicks} actions`);
 });
 
