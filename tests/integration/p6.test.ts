@@ -378,3 +378,179 @@ test("SLA calendar: business days skip the configured weekend; hours and calenda
   assert.equal(new Date(r.d).toISOString(), "2026-10-16T15:00:00.000Z");
   assert.equal(new Date(r.e).toISOString(), "2026-10-18T10:00:00.000Z", "Friday–Saturday weekend: next business day is Sunday");
 });
+
+/* ------------------------------------------- Scenario 11: a hidden (US-persons-only) project ------------------------------------------- */
+test("Scenario 11 — purchase, contract, change and issue of a US-persons-only project are invisible everywhere to non-US people", async () => {
+  await fails(call("empNon", "ops_request_create", ["purchase", `${tag} leak`, { item: "x", qty: 1, est_amount: 10, currency: "USD", project_ref: PROJ_US.id }, null]), /Linked record not found/);
+  const pr = await prToApproval("Sensor heads", 2000, { project: PROJ_US.id });
+  const prr = await get(pr.record); assert.equal(prr.controlled, true, "the request inherits US Persons Only from its project");
+  const q = await get(pr.q1); assert.equal(q.controlled, true, "so does its quotation");
+  const ecr = await call("pm", "ops_request_create", ["change", `${tag} US change`, { reason: "r", project_ref: PROJ_US.id }, null]);
+  const ctr = await call("emp", "ops_request_create", ["contract", `${tag} US contract`, { counterparty: "Gov Lab", type: "Supply", project_ref: PROJ_US.id }, null]);
+  const iss = (await as("ops", "insert into records(section, title, status, data) values ('company.issues', $1, 'Open', $2) returning *", [`${tag} US issue`, { type: "Technical", project_ref: PROJ_US.id, due: D(-1) }]))[0];
+  for (const id of [ecr.record, ctr.record, iss.id]) assert.equal((await get(id)).controlled, true);
+  const tasks = await sql("select r.controlled from wf_links l join records r on r.id = l.record_id where l.instance_id in (select id from wf_instances where record_id = any($1))", [[pr.record, ecr.record, ctr.record]]);
+  assert.ok(tasks.every((t: any) => t.controlled), "tasks made by those processes are US Persons Only too");
+  const hidden = [pr.record, pr.q1, ecr.record, ctr.record, iss.id];
+  for (const k of ["empNon", "mgmtNon"]) {
+    const ids = (await as(k, "select public.ops_visible_ids() id")).map((r: any) => r.id);
+    for (const h of hidden) assert.ok(!ids.includes(h), `${k} must not see ${h}`);
+    const ov = await call(k, "ops_overview");
+    for (const kind of Object.keys(ov.items)) for (const h of hidden) assert.ok(!ov.items[kind].ids.includes(h), `${k} overview ${kind}`);
+    const att = await call(k, "ops_attention"); assert.ok(!att.some((x: any) => hidden.includes(x.record_id)));
+    const dl = await call(k, "ops_deadlines", [60]); assert.ok(!dl.some((x: any) => hidden.includes(x.record_id)));
+    for (const intent of ["purchases_open", "issues_open", "changes_open", "contracts_open", "sla_overdue"]) {
+      const a = await call(k, "ops_assistant", [intent, null]); assert.ok(!a.items.some((x: any) => hidden.includes(x.record_id)), `${k} assistant ${intent}`);
+    }
+    await fails(call(k, "ops_instance", [pr.record]), /not found/);
+    await fails(call(k, "ops_budget", [PROJ_US.id]), /not found/);
+    const n = (await as(k, "select count(*)::int n from records where id = any($1)", [hidden]))[0].n; assert.equal(n, 0, "row-level security agrees");
+  }
+  const notes = await sql("select count(*)::int n from notifications where record_id = any($1) and user_id = any($2)", [hidden, [U.empNon.id, U.mgmtNon.id]]);
+  assert.equal(notes[0].n, 0, "no notification about them reached a non-US person");
+  const us = (await as("mgmt", "select public.ops_visible_ids() id")).map((r: any) => r.id);
+  for (const h of hidden) assert.ok(us.includes(h), "a US person in management sees them");
+  EV.security.hidden_project = { hidden: hidden.length, checked_for: ["empNon", "mgmtNon"] };
+});
+
+/* ------------------------------------------- Scenario 12: the Assistant ------------------------------------------- */
+test("Scenario 12 — Assistant: «What purchases need my approval?» answers from the approvals with sources; nothing for someone else", async () => {
+  const pr = await prToApproval("Docking station", 1200);
+  const a = await call("salesLead", "ops_assistant", ["my_approvals", "operations.requests"]);
+  assert.equal(a.kind, "fact");
+  const it = a.items.find((x: any) => x.record_id === pr.record); assert.ok(it, "the pending request is listed");
+  assert.equal(Number(it.amount), 1200); assert.equal(it.currency, "USD"); assert.match(it.number, /^AGR-PR-/); assert.match(it.requester, /^emp /);
+  const b = await call("hrEmp", "ops_assistant", ["my_approvals", "operations.requests"]);
+  assert.ok(!b.items.some((x: any) => x.record_id === pr.record));
+  const c = await call("hrEmp", "ops_assistant", ["horoscope", null]); assert.equal(c.kind, "unavailable");
+  const bud = await call("mgmt", "ops_assistant", ["budget", PROJ.id]); assert.equal(bud.kind, "calculation"); assert.match(bud.formula, /Remaining = Budget/);
+  const proc = await call("emp", "ops_assistant", ["process", (await get(pr.record)).data.number]); assert.equal(proc.kind, "fact"); assert.equal(proc.items[0].processes[0].step, "Approval");
+  EV.scenarios.s12 = { answer: { kind: a.kind, item: it }, other: b.kind };
+});
+
+/* ------------------------------------------- Scenario 13: extraction needs a person ------------------------------------------- */
+test("Scenario 13 — values extracted from a document are proposals: nothing is created until a person confirms (and their edits win)", async () => {
+  const pr = await call("emp", "ops_request_create", ["purchase", `${tag} Extraction`, { item: "Valves", qty: 4, est_amount: 900, currency: "USD" }, null]);
+  const doc = await rec("company.documents", "Vendor quote PDF", "Draft", { doc_type: "Supplier quotation", request_ref: pr.record }, { by: "proc" });
+  const before = (await sql("select count(*)::int n from records where section = 'operations.quotations' and data->>'request_ref' = $1", [pr.record]))[0].n;
+  const pid = (await sql("select public.ops_proposal_add($1, $2, 'quotation', 'operations.quotations', $3, 'pattern', $4) id", [U.proc.id, doc.id, { title: "Quote from document", amount: 950, currency: "USD", vendor_ref: VENDOR.id }, { amount: "page 1: Total USD 950.00" }]))[0].id;
+  assert.equal((await sql("select count(*)::int n from records where section = 'operations.quotations' and data->>'request_ref' = $1", [pr.record]))[0].n, before, "a proposal creates nothing");
+  await fails(sql("select public.ops_proposal_add($1, $2, 'quotation', 'operations.quotations', $3, 'model', null)", [U.proc.id, doc.id, { amount: 1, cvv: "123" }]), /secrets/);
+  await fails(call("hrEmp", "ops_proposal_decide", [pid, true, null, null]), /not found|cannot create/);
+  const res = await call("proc", "ops_proposal_decide", [pid, true, { amount: 925 }, "Total corrected from the PDF"]);
+  const q = await get(res.record);
+  assert.equal(Number(q.data.amount), 925, "the person's correction wins"); assert.equal(q.data.request_ref, pr.record); assert.equal(q.data.confirmed_by_id, U.proc.id);
+  assert.equal(q.data.extracted.method, "pattern");
+  const ev = await sql("select detail from wf_events where kind = 'proposal_accepted' and detail->>'proposal' = $1", [pid]);
+  assert.deepEqual(ev[0].detail.changed, ["amount"]);
+  await fails(call("proc", "ops_proposal_decide", [pid, true, null, null]), /Already accepted/);
+  // an obligation proposal from a contract must be described in a person's words
+  const p2 = (await sql("select public.ops_proposal_add($1, $2, 'obligation', 'legal.contract_obligations', $3, 'model', null) id", [U.legal.id, EV.contract, { title: "Deliver monthly report", due: D(20) }]))[0].id;
+  await fails(call("legal", "ops_proposal_decide", [p2, true, null, null]), /Describe the obligation/);
+  const r2 = await call("legal", "ops_proposal_decide", [p2, true, { description: "Monthly delivery report to the client" }, null]);
+  assert.equal((await get(r2.record)).data.contract_ref, EV.contract);
+  const p3 = (await sql("select public.ops_proposal_add($1, $2, 'obligation', 'legal.contract_obligations', $3, 'model', null) id", [U.legal.id, EV.contract, { title: "Rejected one" }]))[0].id;
+  await call("legal", "ops_proposal_decide", [p3, false, null, "Not in the contract"]);
+  assert.equal((await sql("select status from ops_proposals where id = $1", [p3]))[0].status, "rejected");
+  EV.scenarios.s13 = { proposal: pid, record: res.record };
+});
+
+/* ------------------------------------------- Scenario 14: definitions, validation, versions ------------------------------------------- */
+test("Scenario 14 — definition V1/V2: running processes keep V1, new ones take V2; published versions cannot change; validation catches every error class", async () => {
+  // validation
+  const base = { code: `T${run.toUpperCase().replace(/[^A-Z0-9]/g, "")}`.slice(0, 30), name: "Test", source_section: "company.requests" };
+  const errs = async (steps: any[], extra: any = {}) => (await call("admin", "wf_validate", [{ ...base, steps, ...extra }])).map((e: any) => e.code);
+  assert.ok((await errs([{ id: "a", name: "A", type: "TASK", responsible: { kind: "requester" }, on: { success: "$complete" } }, { id: "b", name: "B", type: "TASK", responsible: { kind: "requester" } }])).includes("unreachable"));
+  assert.ok((await errs([{ id: "a", name: "A", type: "TASK" }])).includes("missing_owner"));
+  assert.ok((await errs([{ id: "a", name: "A", type: "AUTOMATION", action: "notify", params: { to: { kind: "requester" } }, on: { success: "b" } }, { id: "b", name: "B", type: "AUTOMATION", action: "notify", params: { to: { kind: "requester" } }, on: { success: "a" } }])).includes("loop"));
+  assert.ok((await errs([{ id: "a", name: "A", type: "REVIEW", responsible: { kind: "requester" }, on: { success: "a" } }])).some((c: string) => ["missing_completion", "loop"].includes(c)));
+  assert.ok((await errs([{ id: "a", name: "A", type: "TASK", responsible: { kind: "role", role: "wizard" } }])).includes("missing_owner"), "invalid role");
+  assert.ok((await errs([{ id: "a", name: "A", type: "DOCUMENT", responsible: { kind: "requester" }, documents: [{ kind: "document", field: "document_ref", doc_type: "Spellbook" }] }])).includes("invalid_document"));
+  assert.ok((await errs([{ id: "a", name: "A", type: "APPROVAL", policy: "NOPE" }])).includes("approval_chain"));
+  assert.ok((await errs([{ id: "a", name: "A", type: "CHECK", rule: { field: "record.amount", op: "eval", value: "1; drop table records" } }])).includes("rule"), "no code in rules");
+  assert.ok((await errs([{ id: "a", name: "A", type: "AUTOMATION", action: "run_sql", params: { sql: "select 1" } }])).includes("automation"));
+  assert.ok((await errs([{ id: "a", name: "A", type: "TASK", responsible: { kind: "requester" }, script: "alert(1)" }])).includes("step_key"), "no scripts in a step");
+  assert.ok((await errs([{ id: "a", name: "A", type: "TASK", responsible: { kind: "requester" } }], { required_roles: ["pirate"] })).includes("invalid_role"));
+  assert.deepEqual(await errs([{ id: "a", name: "A", type: "TASK", responsible: { kind: "requester" } }]), [], "a minimal valid process");
+  // editing: only owners, administrators and management
+  await fails(call("emp", "wf_definition_save", [{ ...base, steps: [] }]), /Only owners/);
+  const v1 = await call("admin", "wf_definition_save", [{ ...base, steps: [{ id: "first", name: "First", type: "TASK", responsible: { kind: "requester" } }] }]);
+  assert.equal(v1.version, 1);
+  const bad = await call("admin", "wf_definition_save", [{ id: v1.id, steps: [{ id: "first", name: "First", type: "TASK" }] }]);
+  const pubBad = await call("admin", "wf_definition_publish", [v1.id]); assert.equal(pubBad.ok, false); assert.ok(bad.errors.length > 0);
+  await call("admin", "wf_definition_save", [{ id: v1.id, steps: [{ id: "first", name: "First", type: "TASK", responsible: { kind: "requester" } }] }]);
+  assert.equal((await call("admin", "wf_definition_publish", [v1.id])).ok, true);
+  await fails(sql("update wf_definitions set steps = '[]' where id = $1", [v1.id]), /cannot be changed/);
+  const r1 = await rec("company.requests", "on V1", "Triage", {}, { by: "emp" });
+  const i1 = await call("emp", "wf_start", [base.code, r1.id, null]);
+  const nv = await call("admin", "wf_definition_new_version", [base.code]);
+  await call("admin", "wf_definition_save", [{ id: nv.id, steps: [{ id: "first", name: "First", type: "TASK", responsible: { kind: "requester" } }, { id: "second", name: "Second", type: "TASK", responsible: { kind: "requester" } }] }]);
+  assert.equal((await call("admin", "wf_definition_publish", [nv.id])).ok, true);
+  const r2 = await rec("company.requests", "on V2", "Triage", {}, { by: "emp" });
+  const i2 = await call("emp", "wf_start", [base.code, r2.id, null]);
+  const a = (await sql("select def_version from wf_instances where id = $1", [i1]))[0]; const b = (await sql("select def_version from wf_instances where id = $1", [i2]))[0];
+  assert.equal(a.def_version, 1); assert.equal(b.def_version, 2);
+  let x = await inst(r1.id); await act("emp", x.run, "done");
+  assert.equal((await inst(r1.id)).status, "completed", "V1 has one step and keeps it");
+  x = await inst(r2.id); await act("emp", x.run, "done");
+  assert.equal((await inst(r2.id)).cur, "second", "V2 has two");
+  assert.deepEqual((await sql("select state from wf_definitions where code = $1 order by version", [base.code])).map((r: any) => r.state), ["retired", "published"]);
+  // an explicit move of a running process to another version (owner / admin only)
+  const r3 = await rec("company.requests", "migrate", "Triage", {}, { by: "emp" });
+  await call("admin", "wf_definition_disable", [base.code, false]);
+  await fails(call("emp", "wf_start", [base.code, r3.id, null]), /not available/);
+  await call("admin", "wf_definition_disable", [base.code, true]);
+  const i3 = await call("emp", "wf_start", [base.code, r3.id, null]);
+  const v1id = (await sql("select id from wf_definitions where code = $1 and version = 1", [base.code]))[0].id;
+  await fails(call("mgmt", "wf_migrate", [i3, v1id, null]), /Only owners and administrators/);
+  const m = await call("admin", "wf_migrate", [i3, v1id, "back to V1 for the test"]); assert.equal(m.version, 1);
+  EV.engine.versions = { v1: a.def_version, v2: b.def_version };
+});
+
+/* ------------------------------------------- Scenario 15: automation idempotency, retry, dead letter ------------------------------------------- */
+test("Scenario 15 — automatic steps run at most once, failures are retried through the Phase 1 queue and give up into the dead letter", async () => {
+  const code = `AU${run.toUpperCase().replace(/[^A-Z0-9]/g, "")}`.slice(0, 30);
+  const d = await call("admin", "wf_definition_save", [{ code, name: "Auto test", source_section: "marketing.events", steps: [
+    { id: "num", name: "Give a number", type: "AUTOMATION", action: "allocate_number" },
+    { id: "done", name: "Done", type: "TASK", responsible: { kind: "requester" }, on: { success: "$complete" } }] }]);
+  assert.equal((await call("admin", "wf_definition_publish", [d.id])).ok, true);
+  { const c0 = await call("owner", "ops_settings_get"); const nb = { ...c0.value.numbering }; delete nb["marketing.events"]; await call("owner", "ops_settings_save", [{ numbering: nb }, c0.version]); }
+  await sql("delete from doc_number_formats where scope = 'ops' and doc_type = 'EVT'");
+  const e1 = await rec("marketing.events", "Event 1", "Considering", {}, { by: "mgmt" });
+  await sql("insert into section_access(section, role, can_write) values ('marketing.events', 'management', true) on conflict (section, role) do update set can_write = true");
+  await call("mgmt", "wf_start", [code, e1.id, null]);
+  let i = await inst(e1.id); assert.equal(i.status, "blocked"); assert.match(i.blocker, /No number format/);
+  let q = (await sql("select * from automation_queue where dedupe_key = $1", [`wf:${i.run}`]))[0];
+  assert.equal(q.status, "retrying"); assert.equal(q.agent, "workflow"); assert.equal(q.attempts, 1);
+  // fixed by configuration: a number type for the section
+  const cur = await call("owner", "ops_settings_get");
+  await call("owner", "ops_settings_save", [{ numbering: { ...cur.value.numbering, "marketing.events": "EVT" } }, cur.version]);
+  await sql("insert into doc_number_formats(scope, doc_type, pattern, company) values ('ops', 'EVT', '{CO}-EVT-{YEAR}-{SEQ:3}', 'AGR')");
+  await sql("update automation_queue set next_attempt_at = now() where id = $1", [q.id]);
+  const rd = (await sql("select public.wf_retry_due(50) r"))[0].r;
+  assert.ok(rd.completed >= 1);
+  i = await inst(e1.id); assert.equal(i.cur, "done"); assert.equal(i.status, "active");
+  assert.match((await get(e1.id)).data.number, /^AGR-EVT-\d{4}-\d{3}$/);
+  q = (await sql("select * from automation_queue where id = $1", [q.id]))[0]; assert.equal(q.status, "completed"); assert.equal(q.attempts, 2);
+  { const c1 = await call("owner", "ops_settings_get"); const nb = { ...c1.value.numbering }; delete nb["marketing.events"]; await call("owner", "ops_settings_save", [{ numbering: nb }, c1.version]); }
+  // running the same queued action again does nothing a second time
+  assert.match((await sql("select public.wf_automation_execute($1) r", [q.id]))[0].r, /no longer open/);
+  const n = (await get(e1.id)).data.number;
+  assert.equal((await sql("select count(*)::int n from wf_events where instance_id = $1 and kind = 'automation_done'", [i.id]))[0].n, 1);
+  assert.equal((await get(e1.id)).data.number, n);
+  // dead letter: a failure that never goes away gives up after the configured attempts and says so
+  const code2 = `AD${run.toUpperCase().replace(/[^A-Z0-9]/g, "")}`.slice(0, 30);
+  const d2 = await call("admin", "wf_definition_save", [{ code: code2, name: "Auto dead", source_section: "company.parties", steps: [{ id: "num", name: "Give a number", type: "AUTOMATION", action: "allocate_number", on: { success: "$complete" } }] }]);
+  await call("admin", "wf_definition_publish", [d2.id]);
+  const p = await rec("company.parties", "Party X", "Active", {}, { by: "admin" });
+  await call("admin", "wf_start", [code2, p.id, null]);
+  i = await inst(p.id);
+  const qid = (await sql("select id from automation_queue where dedupe_key = $1", [`wf:${i.run}`]))[0].id;
+  for (let k = 0; k < 6; k++) { await sql("update automation_queue set next_attempt_at = now() where id = $1 and status = 'retrying'", [qid]); await sql("select public.wf_retry_due(50)"); }
+  q = (await sql("select * from automation_queue where id = $1", [qid]))[0];
+  assert.equal(q.status, "dead"); assert.equal(q.attempts, 5);
+  i = await inst(p.id); assert.equal(i.status, "blocked"); assert.match(i.blocker, /gave up after 5 attempts/);
+  // an administrator retries it by hand (after fixing the cause) — the same step run, never a second one
+  await fails(act("emp", i.run, "retry"), /Only the process owner/);
+  EV.automation = { retried: { attempts: 2, status: "completed" }, dead: { attempts: q.attempts, status: q.status } };
+});

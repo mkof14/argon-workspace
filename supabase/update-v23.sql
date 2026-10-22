@@ -327,7 +327,7 @@ language plpgsql immutable set search_path = public as $$
 declare x jsonb; e text; f text; o text; facts text[] := array['quotations', 'selected', 'amount', 'currency', 'approval_current', 'vendor_status',
   'impact_complete', 'received_all', 'received_any', 'budget_remaining', 'documents', 'paid', 'document_version', 'days_to_need', 'obligations'];
 begin
-  if r is null then return null; end if;
+  if r is null or r = 'null'::jsonb then return null; end if;
   if depth > 6 then return 'The rule is nested too deeply'; end if;
   if jsonb_typeof(r) <> 'object' then return 'A rule must be an object'; end if;
   if r ? 'all' or r ? 'any' then
@@ -368,7 +368,7 @@ create or replace function public.wf_rule(r jsonb, ctx jsonb) returns boolean
 language plpgsql immutable set search_path = public as $$
 declare v jsonb; w jsonb; o text; a numeric; b numeric; x jsonb;
 begin
-  if r is null or r = '{}'::jsonb then return true; end if;
+  if r is null or r = '{}'::jsonb or r = 'null'::jsonb then return true; end if;
   if r ? 'all' then
     for x in select * from jsonb_array_elements(r->'all') loop if not public.wf_rule(x, ctx) then return false; end if; end loop; return true;
   elsif r ? 'any' then
@@ -500,7 +500,7 @@ end $$;
 revoke execute on function public._wf_resp_error(jsonb, text) from public, anon, authenticated;
 
 create or replace function public._wf_sla_error(s jsonb, what text) returns text language sql immutable set search_path = public as $$
-  select case when s is null then null
+  select case when s is null or s = 'null'::jsonb then null
     when jsonb_typeof(s) <> 'object' or s->>'unit' not in ('hours', 'business_days', 'calendar_days') then what || ': SLA unit must be hours, business_days or calendar_days'
     when public._num(s->'amount') is null or public._num(s->'amount') <= 0 or public._num(s->'amount') > 1000 then what || ': SLA amount must be between 0 and 1000'
     else null end
@@ -1204,7 +1204,7 @@ begin
   if cardinality(d.required_roles) > 0 and not (rl = any(d.required_roles) or rl in ('owner', 'admin')) then
     raise exception 'Your role cannot start this process' using errcode = '42501';
   end if;
-  if not (rl in ('owner', 'admin') or r.created_by = p_actor or coalesce(r.data->>'requester_id', '') = p_actor::text
+  if not (rl in ('owner', 'admin') or coalesce(r.created_by = p_actor, false) or coalesce(r.data->>'requester_id', '') = p_actor::text
           or exists (select 1 from public.section_access a where a.role = rl and a.section = r.section and a.can_write)) then
     raise exception 'You cannot start a process on this record' using errcode = '42501';
   end if;
@@ -1533,8 +1533,8 @@ grant execute on function public.wf_retry_due(integer) to service_role;
    13. Acting on a step: the responsible person (or a member of the responsible role) only
    --------------------------------------------------------------------------------------------- */
 create or replace function public._wf_can_act(p_actor uuid, s public.wf_step_runs, r public.records) returns boolean language sql stable security definer set search_path = public as $$
-  select public.is_active_employee(p_actor) and public.record_visible_for(p_actor, r)
-    and (s.assignee = p_actor or (s.assignee is null and s.assignee_role is not null and exists (select 1 from public.profiles p where p.id = p_actor and p.role = s.assignee_role)))
+  select coalesce(public.is_active_employee(p_actor) and public.record_visible_for(p_actor, r)
+    and (coalesce(s.assignee = p_actor, false) or (s.assignee is null and s.assignee_role is not null and exists (select 1 from public.profiles p where p.id = p_actor and p.role = s.assignee_role))), false)
 $$;
 revoke execute on function public._wf_can_act(uuid, public.wf_step_runs, public.records) from public, anon, authenticated;
 
@@ -1559,7 +1559,7 @@ begin
   st := public._wf_step(i.definition_id, s.step_id);
   -- retries of a step nobody owns (an automatic action, an approval chain that could not start, a cancelled task)
   if p_outcome = 'retry' then
-    if not (public._ops_admin(me) or i.owner = me or public._wf_can_act(me, s, r)) then raise exception 'Only the process owner or management can retry this step' using errcode = '42501'; end if;
+    if not (public._ops_admin(me) or coalesce(i.owner = me, false) or public._wf_can_act(me, s, r)) then raise exception 'Only the process owner or management can retry this step' using errcode = '42501'; end if;
     perform public._wf_event(i.id, s.id, me, 'retried', s.step_id, 'blocked', 'open', jsonb_build_object('note', left(p_note, 300)));
     if s.step_type = 'AUTOMATION' then
       update public.automation_queue set attempts = 0, status = 'retrying' where dedupe_key = 'wf:' || s.id and agent = 'workflow';
@@ -1643,7 +1643,7 @@ begin
   select * into s from public.wf_step_runs where id = p_run;
   select * into r from public.records where id = i.record_id;
   if s.status <> 'open' then raise exception 'This step is already done' using errcode = '55000'; end if;
-  if not (public._ops_admin(me) or i.owner = me or s.assignee = me) or not public.record_visible_for(me, r) then raise exception 'Only the person responsible, the process owner or management can hand a step over' using errcode = '42501'; end if;
+  if not (public._ops_admin(me) or coalesce(i.owner = me, false) or coalesce(s.assignee = me, false)) or not public.record_visible_for(me, r) then raise exception 'Only the person responsible, the process owner or management can hand a step over' using errcode = '42501'; end if;
   if s.step_type in ('APPROVAL', 'AUTOMATION', 'CHECK') then raise exception 'This step has no person to hand over' using errcode = '22023'; end if;
   if not public.is_active_employee(p_user) or not public._wf_could_see(p_user, r) then raise exception 'That person cannot open this record' using errcode = '42501'; end if;
   if p_user = i.requester and s.step_type in ('REVIEW', 'DECISION') then raise exception 'The requester cannot review their own request' using errcode = '42501'; end if;
@@ -1669,7 +1669,7 @@ begin
   select * into r from public.records where id = i.record_id;
   if not public.record_visible_for(me, r) then raise exception 'Process not found' using errcode = 'P0002'; end if;
   if i.status not in ('active', 'waiting', 'blocked', 'draft') then raise exception 'This process is already closed' using errcode = '55000'; end if;
-  if not (me = i.requester or i.owner = me or public._ops_admin(me)) then raise exception 'Only the requester, the process owner or management can cancel' using errcode = '42501'; end if;
+  if not (coalesce(me = i.requester, false) or coalesce(i.owner = me, false) or public._ops_admin(me)) then raise exception 'Only the requester, the process owner or management can cancel' using errcode = '42501'; end if;
   if coalesce(trim(p_note), '') = '' then raise exception 'Say why' using errcode = '22023'; end if;
   perform public._wf_close(i.id, 'cancelled', me, p_note);
   return jsonb_build_object('ok', true);
@@ -2159,7 +2159,7 @@ grant execute on function public.ops_ecr_candidates(uuid) to authenticated;
 -- Extraction: the model (or a pattern match) only proposes; nothing becomes a record until a person confirms it
 create or replace function public.ops_proposal_add(p_actor uuid, p_source uuid, p_kind text, p_target text, p_proposed jsonb, p_method text, p_evidence jsonb default null) returns uuid
 language plpgsql security definer set search_path = public as $$
-declare src public.records; id uuid;
+declare src public.records; v_id uuid;
 begin
   select * into src from public.records where id = p_source;
   if not found or not public.record_visible_for(p_actor, src) then raise exception 'Source not found' using errcode = 'P0002'; end if;
@@ -2167,9 +2167,9 @@ begin
   perform public.ops_secret_check(p_proposed);
   insert into public.ops_proposals(created_by, source_record, target_section, kind, method, proposed, evidence)
   values (p_actor, p_source, p_target, p_kind, p_method, public._ops_clean(p_proposed) || jsonb_build_object('title', left(coalesce(p_proposed->>'title', p_kind), 300)), p_evidence)
-  returning ops_proposals.id into id;
-  insert into public.wf_events(record_id, section, actor, kind, to_state, detail) values (p_source, src.section, p_actor, 'proposal_created', 'proposed', jsonb_build_object('proposal', id, 'kind', p_kind, 'method', p_method));
-  return id;
+  returning ops_proposals.id into v_id;
+  insert into public.wf_events(record_id, section, actor, kind, to_state, detail) values (p_source, src.section, p_actor, 'proposal_created', 'proposed', jsonb_build_object('proposal', v_id, 'kind', p_kind, 'method', p_method));
+  return v_id;
 end $$;
 revoke execute on function public.ops_proposal_add(uuid, uuid, text, text, jsonb, text, jsonb) from public, anon, authenticated;
 grant execute on function public.ops_proposal_add(uuid, uuid, text, text, jsonb, text, jsonb) to service_role;
@@ -2502,8 +2502,8 @@ begin
     'current', case when s.id is null then null else jsonb_build_object('run_id', s.id, 'step_id', s.step_id, 'name', s.step_name, 'type', s.step_type, 'assignee', s.assignee, 'assignee_name', public._wf_name(s.assignee),
       'assignee_role', s.assignee_role, 'due_at', s.due_at, 'paused', s.paused, 'blocked_reason', s.blocked_reason, 'todo', public.wf_todo(s.step_type, s.step_name),
       'step', public._wf_step(d.id, s.step_id), 'can_act', can, 'is_requester', me = i.requester,
-      'can_manage', public._ops_admin(me) or i.owner = me, 'can_retry', public._ops_admin(me) or i.owner = me or can) end,
-    'can_cancel', i.status in ('active', 'waiting', 'blocked') and (me = i.requester or i.owner = me or public._ops_admin(me)),
+      'can_manage', public._ops_admin(me) or coalesce(i.owner = me, false), 'can_retry', public._ops_admin(me) or coalesce(i.owner = me, false) or can) end,
+    'can_cancel', i.status in ('active', 'waiting', 'blocked') and (me = i.requester or coalesce(i.owner = me, false) or public._ops_admin(me)),
     'facts', public._wf_facts(i.id, r),
     'runs', coalesce((select jsonb_agg(jsonb_build_object('id', x.id, 'seq', x.seq, 'step_id', x.step_id, 'name', x.step_name, 'type', x.step_type, 'status', x.status, 'outcome', x.outcome,
         'assignee_name', public._wf_name(x.assignee), 'assignee_role', x.assignee_role, 'started_at', x.started_at, 'due_at', x.due_at, 'completed_at', x.completed_at,
