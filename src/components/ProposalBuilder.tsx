@@ -25,7 +25,7 @@ export default function ProposalBuilder({ deal, onDone }: { deal: Rec; onDone: (
   const [f, setF] = useState(() => ({
     config: CONFIGS.includes(d.config) ? d.config : "C40 Base", qty: 1, currency: d.currency || "USD", unit: Number(d.value) || 0, discount: 0,
     leaseOn: false, leaseMonth: 0, term: 36, terms: "30/40/30", weeks: 12, valid: 30, warranty: "", site: "", contact: "", need: "",
-    plang: (lang === "ru" || lang === "uk" ? lang : "en") as PLang, moveDeal: ["Lead", "Qualified"].includes(deal.status || ""),
+    plang: (lang === "ru" || lang === "uk" ? lang : "en") as PLang, moveDeal: ["New", "Qualified", "Discovery", "Technical", "NDA / Information Exchange"].includes(deal.status || ""),
   }));
   const [busy, setBusy] = useState("");
   const set = (k: string, v: any) => setF((x) => ({ ...x, [k]: v }));
@@ -45,28 +45,35 @@ export default function ProposalBuilder({ deal, onDone }: { deal: Rec; onDone: (
   useEffect(() => { if (client) setF((x) => ({ ...x, contact: x.contact || client.data?.contact || "", site: x.site || client.data?.vessel || "" })); }, [client?.id]); // eslint-disable-line
 
   const today = new Date().toISOString().slice(0, 10);
-  const number = nextNumber(used, new Date().getUTCFullYear());
-  const doc = proposalMarkdown({
+  // Phase 7: the real number is given by Workspace (the configurable atomic numbering) when the proposal is saved;
+  // the preview shows the next free number of the older format only as a placeholder
+  const preview = nextNumber(used, new Date().getUTCFullYear());
+  const docFor = (number: string) => proposalMarkdown({
     number, date: today, client: store.original(deal).data?.client || client?.title || deal.title, contact: f.contact, site: f.site, country: d.country,
     config: f.config, qty: f.qty, unit: f.unit, discount: f.discount, currency: f.currency, lease: f.leaseOn ? { month: f.leaseMonth, term: f.term } : null,
     terms: f.terms, delivery_weeks: f.weeks, valid_days: f.valid, warranty: f.warranty, need: f.need, notes: line ? String(store.original(line).data?.notes || "") : "",
     sender: { name: me.full_name || me.email, title: me.title || undefined, email: me.email },
   }, f.plang);
-  const title = `${number} · StarDome ${f.config} · ${store.original(deal).data?.client || deal.title}`;
-  const pdfName = `AGRON_${number}_${f.config.replace(/\s+/g, "-")}`;
+  const doc = docFor(preview);
+  const titleFor = (number: string) => `${number} · StarDome ${f.config} · ${store.original(deal).data?.client || deal.title}`;
+  const pdfFor = (number: string) => `AGRON_${number}_${f.config.replace(/\s+/g, "-")}`;
+  const title = titleFor(preview); const pdfName = pdfFor(preview);
   const canSave = access.write.has("sales.proposals");
 
   const create = async () => {
     if (!f.unit) { toast(T(L("Set the unit price", "Укажите цену за единицу", "Вкажіть ціну за одиницю", "حدد سعر الوحدة")), true); return; }
     setBusy("save");
     try {
-      const rec = await store.save({ section: "sales.proposals", title, status: "Draft", data: {
-        deal_ref: deal.id, number, client: store.original(deal).data?.client || deal.title, config: f.config, qty: f.qty, unit_price: f.unit, discount: f.discount, value: doc.total, currency: f.currency,
+      const rec0 = await store.save({ section: "sales.proposals", title: titleFor("…"), status: "Draft", data: {
+        deal_ref: deal.id, party_ref: store.original(deal).data?.party_ref, party_ref_title: store.original(deal).data?.party_ref_title, owner: me.full_name || me.email, owner_id: me.id, date: today, client: store.original(deal).data?.client || deal.title, config: f.config, qty: f.qty, unit_price: f.unit, discount: f.discount, value: doc.total, currency: f.currency,
         lease_month: f.leaseOn ? doc.lease : undefined, payment_terms: termsText(f.terms, f.plang), terms_key: f.terms, delivery: `${f.weeks} weeks`, valid_until: doc.valid_until, language: f.plang.toUpperCase(), document: doc.md,
       } });
-      const blob = await markdownToPdf(doc.md, { title, filename: pdfName, blob: true });
-      if (blob) await store.upload(`sales.proposals/${rec.id}`, new File([blob], `${pdfName}.pdf`, { type: "application/pdf" })).catch(() => {});
-      if (f.moveDeal && ["Lead", "Qualified"].includes(deal.status || "")) await store.save({ ...deal, status: "Proposal" }).catch(() => {});
+      // the number Workspace gave, then the document and title with it
+      const num = String(rec0.data?.number || preview); const real = docFor(num);
+      const rec = await store.save({ ...rec0, title: titleFor(num), data: { ...(rec0.data || {}), document: real.md } } as any);
+      const blob = await markdownToPdf(real.md, { title: titleFor(num), filename: pdfFor(num), blob: true });
+      if (blob) await store.upload(`sales.proposals/${rec.id}`, new File([blob], `${pdfFor(num)}.pdf`, { type: "application/pdf" })).catch(() => {});
+      if (f.moveDeal && ["New", "Qualified", "Discovery", "Technical", "NDA / Information Exchange"].includes(deal.status || "")) await store.save({ ...deal, status: "Proposal" }).catch(() => {});
       toast(T(L("Proposal created — send it for approval, then to the client", "КП создано — отправьте на согласование, затем клиенту", "КП створено — надішліть на погодження, потім клієнту", "تم إنشاء العرض — أرسله للموافقة ثم للعميل")));
       setOpen(false); onDone();
       location.href = `/sales/proposals?r=${rec.id}`;
@@ -80,7 +87,7 @@ export default function ProposalBuilder({ deal, onDone }: { deal: Rec; onDone: (
 
   const num = (k: string, label: T4, extra: any = {}) => <div className="field"><label>{T(label)}</label><input className="input mono" type="number" value={(f as any)[k]} onChange={(e) => set(k, Number(e.target.value))} {...extra} /></div>;
   return <section className="appr prop-b">
-    <div className="appr-h"><Icon n="file" /><b>{T(L("Commercial proposal", "Коммерческое предложение", "Комерційна пропозиція", "العرض التجاري"))} · {number}</b>
+    <div className="appr-h"><Icon n="file" /><b>{T(L("Commercial proposal", "Коммерческое предложение", "Комерційна пропозиція", "العرض التجاري"))} · {T(L("number is given when saved", "номер присваивается при сохранении", "номер надається під час збереження", "يُمنح الرقم عند الحفظ"))}</b>
       <button className="btn ghost sm" style={{ marginInlineStart: "auto" }} onClick={() => setOpen(false)}>{T(L("Close", "Закрыть", "Закрити", "إغلاق"))}</button></div>
     <div className="fgrid">
       <div className="field"><label>{T(L("Configuration", "Конфигурация", "Конфігурація", "التهيئة"))}</label><select className="input" value={f.config} onChange={(e) => set("config", e.target.value)}>{CONFIGS.map((c) => <option key={c}>{c}</option>)}</select>
@@ -99,7 +106,7 @@ export default function ProposalBuilder({ deal, onDone }: { deal: Rec; onDone: (
       <label className="check wide"><input type="checkbox" checked={f.leaseOn} onChange={(e) => set("leaseOn", e.target.checked)} />{T(L("Add a lease option", "Добавить вариант лизинга", "Додати варіант лізингу", "إضافة خيار التأجير"))}</label>
       {f.leaseOn && <>{num("leaseMonth", L("Lease per month (per unit)", "Лизинг в месяц (за единицу)", "Лізинг на місяць (за одиницю)", "الإيجار الشهري للوحدة"), { min: 0 })}{num("term", L("Lease term, months", "Срок лизинга, мес.", "Строк лізингу, міс.", "مدة التأجير (أشهر)"), { min: 1 })}</>}
       <div className="field wide"><label>{T(L("Client's request (optional, appears in the proposal)", "Запрос клиента (по желанию, попадёт в КП)", "Запит клієнта (за бажанням, потрапить у КП)", "طلب العميل (اختياري، يظهر في العرض)"))}</label><textarea className="input" rows={2} value={f.need} onChange={(e) => set("need", e.target.value)} /></div>
-      {["Lead", "Qualified"].includes(deal.status || "") && <label className="check wide"><input type="checkbox" checked={f.moveDeal} onChange={(e) => set("moveDeal", e.target.checked)} />{T(L("Move the deal to Proposal", "Перевести сделку в Proposal", "Перевести угоду в Proposal", "نقل الصفقة إلى Proposal"))}</label>}
+      {["New", "Qualified", "Discovery", "Technical", "NDA / Information Exchange"].includes(deal.status || "") && <label className="check wide"><input type="checkbox" checked={f.moveDeal} onChange={(e) => set("moveDeal", e.target.checked)} />{T(L("Move the deal to Proposal", "Перевести сделку в Proposal", "Перевести угоду в Proposal", "نقل الصفقة إلى Proposal"))}</label>}
     </div>
     {f.discount > 10 && <div className="gate-msg">{T(L("Discount above 10% — send the proposal for approval before it goes to the client.", "Скидка больше 10% — отправьте КП на согласование до отправки клиенту.", "Знижка понад 10% — надішліть КП на погодження до надсилання клієнту.", "خصم يتجاوز 10٪ — أرسل العرض للموافقة قبل إرساله للعميل."))}</div>}
     <details className="prop-prev" open><summary>{T(L("Preview", "Предпросмотр", "Попередній перегляд", "معاينة"))} · <b className="mono">{doc.total.toLocaleString("en-US")} {f.currency}</b></summary>

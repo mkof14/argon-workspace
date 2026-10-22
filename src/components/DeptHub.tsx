@@ -228,7 +228,7 @@ export default function DeptHub({ dept }: { dept: string }) {
       kpis.push({ l: L("Going out in 14 days", "Выходит за 14 дней"), v: String(upcoming.length), s: `${upcoming.filter((r) => r.section === "marketing.social").length} ${T(L("posts", "постов"))}`, href: "/marketing/social" });
       kpis.push({ l: L("Waiting for compliance check", "Ждут проверки комплаенса"), v: String(needs.length), s: `${needs.filter((r) => r.data?.check === "Legal review needed").length} ${T(L("with legal", "у юриста"))}`, tone: "bad" });
       kpis.push({ l: L("Published in 30 days", "Опубликовано за 30 дней"), v: String(published30.length), s: `${published30.reduce((a, r) => a + n(r.data?.reach) + n(r.data?.views) + n(r.data?.audience), 0).toLocaleString("en-US")} ${T(L("reach", "охват"))}` });
-      kpis.push({ l: L("New leads in 30 days", "Новые лиды за 30 дней"), v: String(newLeads.length), s: `${leads.filter((r) => r.status === "To pipeline").length} ${T(L("passed to sales", "передано в продажи"))}`, href: "/marketing/leads" });
+      kpis.push({ l: L("New leads in 30 days", "Новые лиды за 30 дней"), v: String(newLeads.length), s: `${leads.filter((r) => r.status === "Converted").length} ${T(L("passed to sales", "передано в продажи"))}`, href: "/marketing/leads" });
       if (has("marketing.plan")) kpis.push({ l: L("Budget: spent / plan", "Бюджет: потрачено / план"), v: planned ? `${Math.round((spent / planned) * 100)}%` : "—", s: `${usd(spent)} / ${usd(planned)}`, href: "/marketing/plan", tone: planned && spent > planned ? "bad" : "" });
 
       if (has("marketing.channels")) cards.push(<ChannelsBoard key="chan" compact />);

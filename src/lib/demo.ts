@@ -55,7 +55,7 @@ export function demoSeed(): Rec[] {
     r("operations.comms", "Welcome to AGRON Workspace", "Published", S({ audience: "Everyone", body: "All departments, documents and approvals now live here. Chat and calls stay in Microsoft Teams." }), { company: "*" }),
     r("sales.pipeline", "Marina security package (sample)", "Proposal", S({ client: "Pilot marina (sample)", segment: "Marina", config: "C20 Enhanced", currency: "USD", country: "UAE", screening: "In progress", owner: "Sample Sales" })),
     r("sales.pipeline", "Tanker fleet pilot (sample)", "Qualified", S({ client: "Tanker operator (sample)", segment: "Tanker / commercial vessel", config: "C20 Base", currency: "USD", country: "UAE", screening: "Not started", owner: "Sample Sales" }), {}, 3),
-    r("sales.pipeline", "Private island (sample)", "Lead", S({ client: "Family office (sample)", segment: "Private island", config: "C40 Advanced", currency: "USD", screening: "Not started" }), {}, 6),
+    r("sales.pipeline", "Private island (sample)", "New", S({ client: "Family office (sample)", segment: "Private island", config: "C40 Advanced", currency: "USD", screening: "Not started" }), {}, 6),
     r("sales.partners", "Gulf Marine Partners (sample)", "Onboarding", S({ region: "UAE / GCC", agreement: "Referral", screening: "Cleared" }), { company: "Gulf Marine Partners (sample)" }),
     r("technical.software", "AGRON 1 · radar adapter v0.2", "In progress", S({ type: "Feature", component: "Device adapters", priority: "High", owner: "Sample Engineer" }), { controlled: true }),
     r("technical.testing", "Bench test · radar + EO/IR fusion", "Planned", S({ type: "Bench", config: "C20 Enhanced", equipment: "Radar + LWIR camera", date: "2026-11-20", owner: "Sample Engineer" }), { controlled: true }),

@@ -33,7 +33,7 @@ export function collectMonth(dept: string, all: Rec[], p: string): Auto {
     if (cf) put("burn", n(cf.data?.outflow) - n(cf.data?.inflow), "Cash flow Actual: outflow − inflow");
   }
   if (dept === "sales") {
-    put("new_leads", of("marketing.leads").filter((r) => inM(r.created_at, p) && r.status !== "Dropped").length + of("sales.pipeline").filter((r) => inM(r.created_at, p)).length, "New leads and new deals this month");
+    put("new_leads", of("marketing.leads").filter((r) => inM(r.created_at, p) && r.status !== "Disqualified").length + of("sales.pipeline").filter((r) => inM(r.created_at, p)).length, "New leads and new deals this month");
     put("meetings", of("sales.activities").filter((r) => inM(r.data?.date, p) && r.status === "Done").length, "Activities done this month");
     const sent = of("sales.proposals").filter((r) => ["Sent", "Accepted", "Rejected"].includes(r.status || "") && inM(r.data?.date || r.updated_at, p));
     put("proposals_sent", sent.length, "Proposals sent this month"); put("proposals_value", sent.filter(usdOnly).reduce((a, r) => a + n(r.data?.value), 0), "…their value, USD");

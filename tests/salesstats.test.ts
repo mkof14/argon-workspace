@@ -16,7 +16,8 @@ test("funnel, cycle, quarter, losses", () => {
   ];
   const act = [{ record_id: "l1", action: "status", detail: { from: "Proposal", to: "Negotiation" }, created_at: "2026-09-01" }, { record_id: "w1", action: "status", detail: { from: "Negotiation", to: "Won" }, created_at: "2026-10-05T10:00:00Z" }];
   const s = salesStats(deals as any, act, "2026-10-20", 2000000);
-  assert.deepEqual(s.funnel.map((f) => f.n), [7, 6, 5, 4, 2]);
+  // Phase 7 pipeline: New, Qualified, Discovery, Technical, NDA / Information Exchange, Proposal, Negotiation, Decision, Won
+  assert.deepEqual(s.funnel.map((f) => f.n), [7, 6, 5, 5, 5, 5, 4, 2, 2]);
   assert.equal(s.winRate, 50); assert.deepEqual(s.cycle, { median: 100, avg: 113, n: 2 });
   assert.equal(s.quarter.won, 1000000); assert.equal(s.quarter.weighted, 300000); assert.equal(s.quarter.forecast, 1300000); assert.equal(s.quarter.gap, 700000); assert.equal(s.quarter.noDate, 1);
   assert.deepEqual(s.lostReasons.map((r) => r.k), ["Price", "—"]); assert.equal(s.lostNoReason, 1);

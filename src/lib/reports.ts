@@ -46,7 +46,7 @@ export function marketingReport(all: Rec[], ms: string[]): string {
     `## Channels`, table(["Channel", "Followers", `vs ${before}`, "Impressions", "Engagements", "Clicks", "Video views", "Leads"], chRows),
     `## Published`, table(["Type", "Count", "Titles"], published.map(([l, rs]) => [l, rs.length, rs.slice(0, 6).map((r) => r.title).join("; ")])),
     `Total reach of published posts: ${f(published.flatMap(([, rs]) => rs).reduce((a, r) => a + n(r.data?.reach) + n(r.data?.views) + n(r.data?.audience), 0))}`,
-    `## Leads`, `New leads: ${leads.length} · passed to sales: ${leads.filter((r) => r.status === "To pipeline").length}`, table(["Source", "Leads"], bySrc.map(([k, v]) => [k, v as number])),
+    `## Leads`, `New leads: ${leads.length} · passed to sales: ${leads.filter((r) => r.status === "Converted").length}`, table(["Source", "Leads"], bySrc.map(([k, v]) => [k, v as number])),
     `## Campaigns`, table(["Campaign", "Channel", "Status", "Spent", "Clicks", "Leads", "Meetings"], camps.map((r) => [r.title, r.data?.channel || "", r.status || "", usd(n(r.data?.spent)), f(n(r.data?.clicks)), n(r.data?.leads), n(r.data?.meetings)])),
     `## Budget`, table(["Area", "Period", "Planned", "Spent", "Used"], lines.map((r) => [r.data?.area || r.title, r.data?.period || "", usd(n(r.data?.planned)), usd(n(r.data?.actual)), n(r.data?.planned) ? `${Math.round((n(r.data?.actual) / n(r.data?.planned)) * 100)}%` : "—"])),
     `## Waiting for compliance check or approval`, waiting.length ? waiting.slice(0, 15).map((r) => `- ${r.title} — ${secLabel(r.section)}, ${r.status}, check: ${r.data?.check || "Not checked"}`).join("\n") : "_Nothing waiting._",
@@ -107,7 +107,7 @@ export function genericReport(dept: string, all: Rec[], ms: string[]): string {
     hl.push(`Expenses submitted in the period: ${usd(of("finance.expenses").filter((r) => inMonths(r.data?.date || r.created_at, ms)).reduce((a, r) => a + n(r.data?.amount), 0))}`);
   }
   if (dept === "sales") {
-    const deals = of("sales.pipeline"); const st = ["Lead", "Qualified", "Proposal", "Negotiation"];
+    const deals = of("sales.pipeline"); const st = ["New", "Qualified", "Discovery", "Technical", "NDA / Information Exchange", "Proposal", "Negotiation", "Decision"];
     hl.push(table(["Stage", "Deals", "Value"], st.map((k) => { const x = deals.filter((r) => r.status === k); return [k, x.length, usd(x.reduce((a, r) => a + n(r.data?.value), 0))]; })));
     const won = deals.filter((r) => r.status === "Won" && inMonths(r.updated_at, ms)); hl.push(`Won in the period: ${won.length} · ${usd(won.reduce((a, r) => a + n(r.data?.value), 0))}${won.length ? " — " + won.map((r) => r.title).join("; ") : ""}`);
     hl.push(`Deals in Proposal or Negotiation without cleared screening: ${deals.filter((r) => ["Proposal", "Negotiation"].includes(r.status || "") && r.data?.screening !== "Cleared").length}`);

@@ -27,7 +27,7 @@ export default function WhatIf({ all }: { all: Rec[] }) {
   const opts: Record<Kind, Rec[]> = useMemo(() => ({
     delay: all.filter((r) => r.section === "sales.pipeline" && r.status === "Won" && all.some((x) => x.data?.project === r.id)),
     pay: all.filter((r) => r.section === "finance.invoices" && r.data?.direction !== "Payable" && r.status !== "Paid" && r.data?.due),
-    deal: all.filter((r) => r.section === "sales.pipeline" && ["Lead", "Qualified", "Proposal", "Negotiation"].includes(r.status || "")),
+    deal: all.filter((r) => r.section === "sales.pipeline" && ["New", "Qualified", "Discovery", "Technical", "NDA / Information Exchange", "Proposal", "Negotiation", "Decision"].includes(r.status || "")),
     po: all.filter((r) => r.section === "operations.procurement" && ["Approved", "Ordered"].includes(r.status || "")),
   }), [all]);
   const base = useMemo(() => cashForecast(all as any, today), [all, today]);

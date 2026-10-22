@@ -125,7 +125,7 @@ export function salesFindings(all: R[], today: string, th: Th): Finding[] {
   // Qualified leads become deals; new leads must be contacted within two days
   for (const l of of(all, "marketing.leads")) {
     if (l.status === "New" && created(l, today) >= 2) out.push({ rec: l, level: "warn", who: ["owner", "role:sales"], key: `sal-lead|${l.id}`, repeat: 3, text: `New lead “${l.title}” (${l.data?.source || "unknown source"}) has not been contacted for ${created(l, today)} days.` });
-    if (["Qualified", "To pipeline"].includes(l.status || "") && !deals.some((d) => d.data?.lead_ref === l.id))
+    if (l.status === "Qualified" && !l.data?.opportunity_ref && !deals.some((d) => d.data?.lead_ref === l.id))
       out.push({ rec: l, level: "info", who: ["role:sales"], key: `sal-todeal|${l.id}`, text: `Qualified lead “${l.title}” has no deal yet — a deal is prepared.`,
         action: { type: "create", section: "sales.pipeline", title: "{title}", status: "Qualified", link: "lead_ref", fields: { client: "{title}", country: "{country}", owner: "{owner}", notes: "Created from the qualified lead. Contact: {contact} {email}" } }, why: "Lead qualified" });
   }
@@ -137,7 +137,7 @@ export function salesFindings(all: R[], today: string, th: Th): Finding[] {
       if (d < 0) out.push({ rec: p, level: "warn", who: ["owner", "role:sales"], key: `sal-expired|${p.id}`, repeat: 30, text: `Proposal “${p.title}” expired on ${p.data.valid_until} without an answer — extend or close it.` });
     }
     const deal = deals.find((d) => d.id === p.data?.deal_ref);
-    if (p.status === "Accepted" && deal && ["Lead", "Qualified", "Proposal"].includes(deal.status || ""))
+    if (p.status === "Accepted" && deal && ["New", "Qualified", "Discovery", "Technical", "NDA / Information Exchange", "Proposal"].includes(deal.status || ""))
       out.push({ rec: deal, level: "info", who: ["owner", "role:sales"], key: `sal-acc|${p.id}`, text: `Proposal “${p.title}” was accepted — deal “${deal.title}” moves to Negotiation.`, action: { type: "set", field: "status", value: "Negotiation" }, why: "Proposal accepted" });
   }
   // Data the next steps need

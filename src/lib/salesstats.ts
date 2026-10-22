@@ -3,11 +3,13 @@
 
 type R = { id: string; section: string; title: string; status: string | null; created_at?: string; updated_at?: string; data: Record<string, any> };
 type A = { record_id: string | null; action: string; detail: any; created_at: string };
-export const STAGES = ["Lead", "Qualified", "Proposal", "Negotiation", "Won"] as const;
-const P: Record<string, number> = { Lead: 0.1, Qualified: 0.25, Proposal: 0.5, Negotiation: 0.75 };
+// Phase 7: the default pipeline (New … Decision → Won); deals moved from the earlier "Lead" stage count as New
+export const STAGES = ["New", "Qualified", "Discovery", "Technical", "NDA / Information Exchange", "Proposal", "Negotiation", "Decision", "Won"] as const;
+// the same starting probabilities as the Commercial pipeline settings (stage defaults; a manual estimate wins there)
+const P: Record<string, number> = { New: 0.1, Qualified: 0.25, Discovery: 0.3, Technical: 0.35, "NDA / Information Exchange": 0.4, Proposal: 0.5, Negotiation: 0.75, Decision: 0.85 };
 const RATES: Record<string, number> = { USD: 1, AED: 3.6725, EUR: 0.92, GBP: 0.79 };
 const usd = (v: any, c?: string) => (Number(v) || 0) / (RATES[String(c || "USD").toUpperCase()] || 1);
-const idx = (s: string) => STAGES.indexOf(s as any);
+const idx = (s: string) => STAGES.indexOf((s === "Lead" ? "New" : s) as any);
 
 /** Quarter of a date: start and end (inclusive) as YYYY-MM-DD, label like 2026 Q4. */
 export function quarterOf(iso: string) {
@@ -21,7 +23,7 @@ export function salesStats(deals: R[], activity: A[], today: string, target = 0)
   const hist = new Map<string, A[]>(); for (const a of activity) if (a.record_id) hist.set(a.record_id, [...(hist.get(a.record_id) || []), a]);
   // Highest stage each deal reached (from its status history, or its current status)
   const reached = (d: R) => {
-    let m = d.status === "Lost" ? 0 : Math.max(0, idx(d.status || "Lead"));
+    let m = d.status === "Lost" ? 0 : Math.max(0, idx(d.status || "New"));
     for (const a of hist.get(d.id) || []) for (const s of [a.detail?.from, a.detail?.to, a.detail?.status]) if (s && idx(s) > m) m = idx(s);
     if (d.status === "Lost" && d.data?.lost_stage && idx(d.data.lost_stage) > m) m = idx(d.data.lost_stage);
     return m;

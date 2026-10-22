@@ -74,8 +74,8 @@ test("data quality finds gaps and offers safe fixes", () => {
   const S = allSections() as any[]; const now = Date.parse("2026-10-14");
   const fresh = "2026-10-10T00:00:00Z";
   const recs = [
-    { id: "d1", section: "sales.pipeline", title: "Deal A", status: "Lead", data: { owner: "" }, updated_at: fresh },
-    { id: "d2", section: "sales.pipeline", title: "deal a", status: "Lead", data: { owner: "Ann" }, updated_at: fresh },
+    { id: "d1", section: "sales.pipeline", title: "Deal A", status: "New", data: { owner: "" }, updated_at: fresh },
+    { id: "d2", section: "sales.pipeline", title: "deal a", status: "New", data: { owner: "Ann" }, updated_at: fresh },
     { id: "s1", section: "security.screening", title: "Party", status: "Pending", data: { owner: "Bob", deal_ref: "d2", deal_ref_title: "Old name" }, updated_at: fresh },
     { id: "s2", section: "security.screening", title: "Party 2", status: "Pending", data: { owner: "Bob", deal_ref: "gone" }, updated_at: "2026-01-01T00:00:00Z" },
     { id: "t1", section: "company.tasks", title: "Task", status: "Weird", data: { assignee: "Ann" }, updated_at: fresh },
