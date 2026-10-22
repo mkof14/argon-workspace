@@ -574,9 +574,10 @@ test("Scenario 15 — automatic steps run at most once, failures are retried thr
   await fails(act("emp", i.run, "retry"), /Only the process owner/);
   // the Phase 1 scheduler's workflow job runs the same retries and the SLA tick (service role)
   // (the job "workflow" in src/lib/server/schedule.ts is exactly this call with the service role)
-  assert.match(fs.readFileSync(path.join(process.cwd(), "src/lib/server/schedule.ts"), "utf8"), /workflow: async \(db\) => \{\s*const \{ data, error \} = await db\.rpc\("wf_sla_tick"\)/);
+  const src = fs.readFileSync(path.join(process.cwd(), "src/lib/server/schedule.ts"), "utf8");
+  assert.match(src, /workflow: async \(db\) => \{[\s\S]*?await db\.rpc\("wf_sla_tick"\)[\s\S]*?while \(last\?\.more && Date\.now\(\) - t0 < 20000\)/, "the job repeats bounded calls while more is waiting");
   const { data: j, error: je } = await admin().rpc("wf_sla_tick");
-  assert.equal(je, null); assert.ok(j && typeof j.due_soon === "number" && j.retries, "the workflow job answers with its counts");
+  assert.equal(je, null); assert.ok(j && typeof j.due_soon === "number" && typeof j.more === "boolean" && j.retries, "the workflow job answers with its counts and whether more is waiting");
   EV.automation = { retried: { attempts: 2, status: "completed" }, dead: { attempts: q.attempts, status: q.status } };
 });
 

@@ -13,6 +13,9 @@ type U = { id: string; email: string; role: string; us: boolean; company: string
 const users: Record<string, U> = {};
 let access: { section: string; role: string; can_write: boolean }[] = [];
 let recs: { id: string; section: string; controlled: boolean; company: string | null }[] = [];
+// v23: purchase, payment, travel and general requests are seen by the people involved and by the desks that handle them
+const PER_RECORD = ["operations.requests", "finance.payments", "company.travel", "company.requests"];
+let desks: Record<string, string[]> = {};
 
 before(async () => {
   const a = admin();
@@ -24,6 +27,7 @@ before(async () => {
   users["engineering-us"] = { ...(await makeUser(`eng-us-${run}@agron-stack.test`, "engineering", { us: true })), us: true, company: null };
   users["pending"] = { ...(await makeUser(`pending-${run}@agron-stack.test`, "pending")), us: false, company: null };
   access = (await a.from("section_access").select("section,role,can_write")).data as any;
+  desks = ((await sql("select coalesce(public.ops_cfg()->'desks', '{}'::jsonb) d"))[0].d) || {};
   // four synthetic records in every section: ordinary, US-persons-only, shared with one company, shared with all partners
   const rows: any[] = [];
   for (const s of SECS) for (const [controlled, company] of [[false, null], [true, null], [false, "Acme"], [false, "*"]] as const)
@@ -40,7 +44,9 @@ function expected(u: U) {
   // v20: an announcement that is not yet published is seen only by owners, administrators and management
   // v21: a knowledge article that is still a draft is seen by its author, owner, reviewer and management only
   const ann = (r: { section: string }) => !["company.announcements", "company.wiki"].includes(r.section) || full || u.role === "management";
-  return new Set(recs.filter((r) => ann(r) && (full || readable.has(r.section)) && (!r.controlled || u.us) && (!external || r.company === "*" || (u.company && r.company === u.company))).map((r) => r.id));
+  // nobody is involved in these synthetic records (no requester, approver or step), so only the desks see them
+  const desk = (r: { section: string }) => !PER_RECORD.includes(r.section) || full || (desks[r.section] || []).includes(u.role);
+  return new Set(recs.filter((r) => ann(r) && desk(r) && (full || readable.has(r.section)) && (!r.controlled || u.us) && (!external || r.company === "*" || (u.company && r.company === u.company))).map((r) => r.id));
 }
 async function visibleApi(u: U) {
   const { c } = await signIn(u.email);

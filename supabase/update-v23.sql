@@ -2856,9 +2856,11 @@ grant execute on function public.ops_assistant(text, text) to authenticated;
 create or replace function public.wf_sla_tick() returns jsonb
 language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
 declare x record; st jsonb; r public.records; res record; soon interval := make_interval(hours => coalesce((public.ops_cfg()->>'due_soon_hours')::int, 24)); wk int[];
-  n_soon int := 0; n_over int := 0; n_esc int := 0; n_to int := 0; esc_at timestamptz;
+  n_soon int := 0; n_over int := 0; n_esc int := 0; n_to int := 0; esc_at timestamptz; t0 timestamptz := clock_timestamp(); seen int := 0; more boolean := false;
 begin
   if auth.uid() is not null then raise exception 'Not allowed' using errcode = '42501'; end if;
+  -- each call is bounded (1000 runs or about 2 seconds, whichever comes first) and says whether more is waiting;
+  -- the scheduled job calls again while «more» is true, within its own time limit
   wk := array(select v::int from jsonb_array_elements_text(coalesce(public.ops_cfg()->'weekend', '[6,7]')) v);
   for x in select s.*, i.definition_id, i.record_id, i.status ist from public.wf_step_runs s join public.wf_instances i on i.id = s.instance_id and i.current_run = s.id
            join public.wf_definitions d on d.id = i.definition_id
@@ -2867,6 +2869,8 @@ begin
              and ((s.soon_at is null and s.due_at > now()) or (s.overdue_at is null and s.due_at <= now())
                or (s.due_at <= now() and exists (select 1 from jsonb_array_elements(d.steps) st2 where st2->>'id' = s.step_id and ((st2 ? 'escalation' and s.escalation_level = 0) or st2->'on' ? 'timed_out'))))
            order by s.due_at limit 1000 loop
+    if clock_timestamp() - t0 > interval '2 seconds' then more := true; exit; end if;
+    seen := seen + 1;
     select * into r from public.records where id = x.record_id;
     st := public._wf_step(x.definition_id, x.step_id);
     if x.step_type = 'APPROVAL' and x.soon_at is null then
@@ -2901,7 +2905,7 @@ begin
       perform public._wf_finish(x.id, null, 'timed_out', 'The time for this step ran out'); n_to := n_to + 1;
     end if;
   end loop;
-  return jsonb_build_object('due_soon', n_soon, 'overdue', n_over, 'escalated', n_esc, 'timed_out', n_to, 'retries', public.wf_retry_due(20));
+  return jsonb_build_object('due_soon', n_soon, 'overdue', n_over, 'escalated', n_esc, 'timed_out', n_to, 'more', more or seen >= 1000, 'retries', public.wf_retry_due(20));
 end $$;
 revoke execute on function public.wf_sla_tick() from public, anon, authenticated;
 grant execute on function public.wf_sla_tick() to service_role;

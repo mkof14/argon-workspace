@@ -128,6 +128,8 @@ test("normal screens and actions under 1 s (p95), heavy ones under 3 s, at volum
     where a.status = 'pending' and r.title like $1 and a.approver_id = $2 and i.requester <> $2 and not r.controlled limit 12`, [`P6 PR % ${run}`, U.mgmt.id]);
   if (ap.length >= 6) T.approval_decision = await time(Math.min(10, ap.length - 1), (i) => rpc("mgmt", "wf_approval_decide", { p_id: ap[i].id, p_decision: "rejected", p_comment: "perf test" }));
   T.sla_tick_service = await time(3, async () => { await sql("select public.wf_sla_tick()"); return null; });
+  // the backlog drains in bounded calls (as the scheduled job does): how many calls and how long in total
+  { const t0 = Date.now(); let calls = 0, more = true; while (more && calls < 200) { more = !!(await sql("select public.wf_sla_tick() r"))[0].r.more; calls++; } R.sla_drain = { calls, total_ms: Date.now() - t0, drained: !more }; }
   fs.writeFileSync(path.join(ENV.STACK_DIR || ".stack", "p6-perf.json"), JSON.stringify(R, null, 1));
   const heavy = ["overview_management", "overview_non_us", "budgets_all_projects", "weekly_operations", "sla_tick_service"];
   for (const [k, v] of Object.entries(T) as [string, any][]) assert.ok(v.p95 < (heavy.includes(k) ? 3000 : 1000), `${k}: p95 ${v.p95} ms`);

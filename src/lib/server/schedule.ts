@@ -33,7 +33,12 @@ export const JOBS_FNS: Record<string, JobFn> = {
   },
   // Phase 6: process SLA (due soon, overdue, one escalation per step — never repeated) and automatic-step retries
   workflow: async (db) => {
-    const { data, error } = await db.rpc("wf_sla_tick"); if (error) throw new Error(error.message);
-    return data;
+    // each call is bounded in the database (about 2 s); repeat while more is waiting, within 20 s for this job
+    const t0 = Date.now(); const sum: Record<string, number> = { calls: 0, due_soon: 0, overdue: 0, escalated: 0, timed_out: 0 }; let last: any = null;
+    do {
+      const { data, error } = await db.rpc("wf_sla_tick"); if (error) throw new Error(error.message);
+      last = data; sum.calls++; for (const k of ["due_soon", "overdue", "escalated", "timed_out"]) sum[k] += Number(data?.[k] || 0);
+    } while (last?.more && Date.now() - t0 < 20000);
+    return { ...sum, more: !!last?.more, retries: last?.retries };
   },
 };
