@@ -78,7 +78,7 @@ async function load() {
         case when g % 5 in (1, 2) then jsonb_build_object('from', 'In progress', 'to', (array['Completed','Blocked','Review'])[1 + g % 3]) when g % 5 = 4 then jsonb_build_object('field', 'due', 'from', '2026-10-01', 'to', '2026-11-01') else jsonb_build_object('field', 'assignee_id') end,
         now() - make_interval(mins => g % 20000)
       from generate_series(1, ${N.activity}) g`, [tasks, ids]);
-  await sql("analyze records"); await sql("analyze activity"); await sql("analyze approvals"); await sql("analyze comments");
+  await sql("vacuum (analyze) records"); await sql("vacuum (analyze) activity"); await sql("vacuum (analyze) approvals"); await sql("vacuum (analyze) comments") /* steady state after the bulk load: no autovacuum racing the timings */;
 }
 
 test("management views at volume: p95 under 1 s (normal views) and under 3 s (heavy reports), through the API with row-level security", async () => {

@@ -59,7 +59,7 @@ before(async () => {
     (select count(*) from records where section = 'company.meetings')::int meetings, (select count(*) from records)::int all_records, (select count(*) from crm_stage_history)::int stage_history, (select count(*) from crm_values)::int value_history`))[0];
   R.volume = { ...R.volume, ...vol, added: N, seconds_to_load: Math.round((Date.now() - t0) / 1000) };
   for (const [k, n] of [["organizations", 5000], ["contacts", 20000], ["leads", 10000], ["opportunities", 5000], ["proposals", 10000], ["activities", 50000], ["meetings", 5000]] as const) assert.ok(vol[k] >= n, `${k} ${vol[k]}`);
-  await sql("analyze records; analyze crm_stage_history; analyze crm_values");
+  for (const t of ["records", "crm_stage_history", "crm_values"]) await sql(`vacuum (analyze) ${t}`); // steady state after the bulk load
   for (const k of Object.keys(U)) C[k] = (await signIn(U[k].email)).c;
 });
 

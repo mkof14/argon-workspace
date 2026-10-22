@@ -1789,7 +1789,7 @@ begin
         meeting_on = t.m_d, meeting_ref = t.m_id, sent_at = t.s_d, sent_ref = t.s_id, sent_title = t.s_title,
         nda = public._crm_nda(v.data, t.c_status, t.c_end), nda_since = t.c_at, event_ref = t.ev
       from (select x.id oid, h.at h_at, w.at w_at, w.k w_k, w.title w_title, w.id w_id, m.d m_d, m.id m_id, s.d s_d, s.id s_id, s.title s_title,
-                   c.status c_status, c.end_date c_end, c.updated_at c_at, ld.ev
+                   coalesce(c1.status, c2.status) c_status, case when c1.ok then c1.end_date else c2.end_date end c_end, case when c1.ok then c1.updated_at else c2.updated_at end c_at, ld.ev
         from pg_temp.crm_v x
         left join lateral (select h.at from public.crm_stage_history h where h.record_id = x.id and h.to_stage = x.stage order by h.at desc limit 1) h on true
         left join lateral (select coalesce(public._crm_date(a.data->>'date')::timestamptz, a.created_at) at, coalesce(a.data->>'type', 'Note') k, a.title, a.id from public.records a
@@ -1809,9 +1809,13 @@ begin
         -- the latest of the four is the last interaction
         left join lateral (select * from (values (a.at, a.k, a.title, a.id), (m.at, 'Meeting', m.title, m.id), (q.d::timestamptz, 'Proposal sent', q.title, q.id), (e.at, 'E-mail', e.subject, null::uuid)) w0(at, k, title, id)
           where w0.at is not null order by w0.at desc limit 1) w on true
+        -- the NDA: the contract named on the opportunity (primary key), else the latest NDA contract linked to it (deal_ref index)
+        left join lateral (select true ok, c.status, c.data->>'end_date' end_date, c.updated_at from public.records c
+          where x.data->>'nda_ref' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' and c.id = (x.data->>'nda_ref')::uuid
+            and c.section = 'legal.contracts' and public.record_visible_for(p.id, c)) c1 on true
         left join lateral (select c.status, c.data->>'end_date' end_date, c.updated_at from public.records c
-          where c.section = 'legal.contracts' and (c.id::text = x.data->>'nda_ref' or (c.data ? 'deal_ref' and c.data->>'deal_ref' = x.id::text and c.data->>'type' = 'NDA')) and public.record_visible_for(p.id, c)
-          order by (c.id::text = x.data->>'nda_ref') desc, c.updated_at desc limit 1) c on true
+          where c1.ok is null and c.data ? 'deal_ref' and c.data->>'deal_ref' = x.id::text and c.section = 'legal.contracts' and c.data->>'type' = 'NDA'
+            and public.record_visible_for(p.id, c) order by c.updated_at desc limit 1) c2 on true
         left join lateral (select case when l.data->>'event_ref' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then (l.data->>'event_ref')::uuid end ev
           from public.records l where x.lead_ref is not null and l.id = x.lead_ref and l.section = 'marketing.leads') ld on true) t
       where t.oid = v.id;

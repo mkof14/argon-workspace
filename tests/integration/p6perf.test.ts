@@ -96,7 +96,7 @@ before(async () => {
   R.volume = { ...vol, added: N, seconds_to_load: Math.round((Date.now() - t0) / 1000) };
   for (const [k, n] of [["people", 100], ["projects", 250], ["parties", 1000], ["instances", 10000], ["step_runs", 40000], ["events", 50000], ["purchase_requests", 5000], ["quotations", 10000], ["purchases", 5000],
     ["payment_requests", 5000], ["contracts", 2000], ["obligations", 5000], ["engineering_changes", 2000], ["issues", 5000]] as const) assert.ok(vol[k] >= n, `${k} ${vol[k]}`);
-  await sql("analyze records; analyze wf_instances; analyze wf_step_runs; analyze wf_events; analyze approvals");
+  for (const t of ["records", "wf_instances", "wf_step_runs", "wf_events", "approvals"]) await sql(`vacuum (analyze) ${t}`); // steady state after the bulk load
   for (const k of Object.keys(U)) C[k] = (await signIn(U[k].email)).c;
 });
 
