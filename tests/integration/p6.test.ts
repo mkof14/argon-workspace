@@ -55,7 +55,15 @@ async function prToApproval(title: string, amount: number, o: { project?: string
     { request_ref: res.record, vendor_ref: VENDOR2.id, vendor_ref_title: VENDOR2.title, amount: amount + 300, currency: "USD", lead_time_days: 5, valid_until: D(30) }]))[0];
   await act("proc", i.run, "submit");
   i = await inst(res.record); assert.equal(i.cur, "vendor_selection");
+  // the side-by-side comparison: facts only (lowest price, shortest lead time), never a "best" pick
+  const cmp = await call("proc", "ops_compare_quotes", [res.record]);
+  assert.equal(cmp.quotes.length, 2, "both quotations side by side");
+  const c1 = cmp.quotes.find((x: any) => x.id === q1.id), c2 = cmp.quotes.find((x: any) => x.id === q2.id);
+  assert.equal(c1.lowest_in_currency, true); assert.equal(c1.shortest_lead_time, false);
+  assert.equal(c2.lowest_in_currency, false); assert.equal(c2.shortest_lead_time, true);
+  assert.equal(c1.selected, false); assert.doesNotMatch(JSON.stringify(cmp), /\bbest\b/i, "no quotation is called best");
   await call("proc", "ops_select_quote", [res.record, q1.id, "Lower price and the vendor already supplied us without problems"]);
+  assert.equal((await call("proc", "ops_compare_quotes", [res.record])).quotes.find((x: any) => x.id === q1.id).selected, true, "the choice shows in the comparison");
   i = await inst(res.record); assert.equal(i.cur, "approval");
   return { ...res, q1: q1.id, q2: q2.id, inst: i };
 }

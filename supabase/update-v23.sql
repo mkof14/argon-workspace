@@ -2037,15 +2037,18 @@ declare me uuid := public.ops_viewer(); r public.records; rows jsonb;
 begin
   select * into r from public.records where id = p_request and section = 'operations.requests';
   if me is null or not found or not public.record_visible_for(me, r) then raise exception 'Request not found' using errcode = 'P0002'; end if;
-  select coalesce(jsonb_agg(jsonb_build_object('id', q.id, 'title', q.title, 'status', q.status, 'vendor_ref', q.data->>'vendor_ref', 'vendor', coalesce(v.title, q.data->>'vendor_ref_title', q.data->>'vendor'),
-      'vendor_status', v.status, 'amount', public._num(q.data->'amount'), 'currency', q.data->>'currency', 'lead_time_days', public._num(q.data->'lead_time_days'),
-      'delivery_date', q.data->>'delivery_date', 'valid_until', q.data->>'valid_until', 'expired', coalesce(q.data->>'valid_until', '9999') < to_char(current_date, 'YYYY-MM-DD'),
-      'terms', q.data->>'payment_terms', 'incoterms', q.data->>'incoterms', 'notes', q.data->>'notes', 'selected', q.id::text = r.data->>'selected_quote_ref',
-      'lowest_in_currency', public._num(q.data->'amount') = min(public._num(q.data->'amount')) over (partition by q.data->>'currency'),
-      'shortest_lead_time', public._num(q.data->'lead_time_days') = min(public._num(q.data->'lead_time_days')) over ())
-    order by q.data->>'currency', public._num(q.data->'amount') nulls last), '[]'::jsonb) into rows
-  from public.records q left join public.records v on v.id = public.as_uuid(q.data->>'vendor_ref')
-  where q.section = 'operations.quotations' and q.data->>'request_ref' = r.id::text and public.record_visible_for(me, q);
+  -- window values are computed first, then aggregated (an aggregate cannot hold a window call)
+  select coalesce(jsonb_agg(jsonb_build_object('id', w.id, 'title', w.title, 'status', w.status, 'vendor_ref', w.data->>'vendor_ref', 'vendor', coalesce(w.vtitle, w.data->>'vendor_ref_title', w.data->>'vendor'),
+      'vendor_status', w.vstatus, 'amount', w.amt, 'currency', w.data->>'currency', 'lead_time_days', w.lead,
+      'delivery_date', w.data->>'delivery_date', 'valid_until', w.data->>'valid_until', 'expired', coalesce(w.data->>'valid_until', '9999') < to_char(current_date, 'YYYY-MM-DD'),
+      'terms', w.data->>'payment_terms', 'incoterms', w.data->>'incoterms', 'notes', w.data->>'notes', 'selected', coalesce(w.id::text = r.data->>'selected_quote_ref', false),
+      'lowest_in_currency', coalesce(w.amt = w.min_amt, false),
+      'shortest_lead_time', coalesce(w.lead = w.min_lead, false))
+    order by w.data->>'currency', w.amt nulls last), '[]'::jsonb) into rows
+  from (select q.id, q.title, q.status, q.data, v.title vtitle, v.status vstatus, public._num(q.data->'amount') amt, public._num(q.data->'lead_time_days') lead,
+          min(public._num(q.data->'amount')) over (partition by q.data->>'currency') min_amt, min(public._num(q.data->'lead_time_days')) over () min_lead
+        from public.records q left join public.records v on v.id = public.as_uuid(q.data->>'vendor_ref')
+        where q.section = 'operations.quotations' and q.data->>'request_ref' = r.id::text and public.record_visible_for(me, q)) w;
   return jsonb_build_object('request', r.id, 'quotes', rows, 'selected', r.data->>'selected_quote_ref', 'reason', r.data->>'selection_reason',
     'note', 'Lowest price and shortest lead time are facts per currency, not a recommendation. Record why you choose a quotation.');
 end $$;
