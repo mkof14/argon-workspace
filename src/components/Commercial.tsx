@@ -69,7 +69,7 @@ function OppRow({ r, onOpen }: { r: any; onOpen: (id: string) => void }) {
       <small className="muted">{[r.party, r.stage, r.owner, r.product, r.geography].filter(Boolean).join(" · ")}</small>
       {r.next_action ? <><br /><small>{T(L("Next", "Далее", "Далі", "التالي"))}: {r.next_action} · {day(r.next_action_due)}</small></> : null}
       {(r.reasons || []).length ? <><br /><small className="faint" data-reasons>{(r.reasons || []).map((x: any) => x.text || x.code).join(" · ")}</small></> : null}</span>
-    <span style={{ textAlign: "end" }}><Health h={r.health} /><br /><small className="mono">{amount(r.final ?? r.negotiated ?? r.quoted ?? r.value, r.currency)}</small>{r.probability != null ? <><br /><small className="faint">{r.probability}% {r.probability_source === "manual" ? "" : "·"}</small></> : null}</span>
+    <span style={{ textAlign: "end" }}><Health h={r.health} /><br /><small className="mono">{amount(r.final ?? r.negotiated ?? r.quoted ?? r.value, r.currency)}</small>{r.probability != null ? <><br /><small className="faint" title={r.probability_source || ""}>{r.probability}%{r.probability_source === "manual" ? " ✎" : ""}</small></> : null}</span>
   </button>;
 }
 

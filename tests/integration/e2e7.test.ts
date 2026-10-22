@@ -38,6 +38,9 @@ before(async () => {
   // a known organisation and contact (the card's person is already in Workspace)
   R.org = (await sql("insert into records(section, title, status, data) values ('company.parties', $1, 'Active', $2) returning *", [`Harbor Marine ${tag} LLC`, { domain: `harbor-${tag}.ae`, relationship_types: ["Prospect"] }]))[0];
   R.contact = (await sql("insert into records(section, title, status, data) values ('company.contacts', $1, 'Active', $2) returning *", [`Layla Haddad ${tag}`, { email: `layla@harbor-${tag}.ae`, party_ref: R.org.id, party_ref_title: R.org.title }]))[0];
+  // an open opportunity (the dashboard and its lists have something to open on a fresh stack)
+  R.open = (await sql("insert into records(section, title, status, data, created_by) values ('sales.pipeline', $1, 'Qualified', $2, $3) returning *",
+    [`Harbor Marine ${tag} — StarDome`, { party_ref: R.org.id, party_ref_title: R.org.title, owner_id: U.sales.id, owner: `Sami Sales ${tag}`, value: 1200000, currency: "USD", next_action: "Call", next_action_due: new Date(Date.now() + 2 * 864e5).toISOString().slice(0, 10) }, U.sales.id]))[0];
 });
 after(async () => { await browser?.close(); });
 
@@ -107,7 +110,7 @@ test("Lead → opportunity in one step from the Leads screen; the opportunity vi
 test("Dashboard numbers open their lists; the phone layout of the dashboard and the opportunity has no horizontal scrolling", { skip }, async () => {
   const p = await login(U.mgmt.email); await p.goto(`${APP}/crm`);
   assert.ok(await waitFor(async () => (await p.$$("[data-block='active']")).length === 1), "dashboard");
-  const n = Number(await p.textContent("[data-block='active'] b"));
+  const n = Number(await p.textContent("[data-block='active'] b")); assert.ok(n >= 1, "at least the opportunity created for this test");
   await p.click("[data-block='active']");
   assert.ok(await waitFor(async () => (await p.$$("[data-drill] [data-opp]")).length === Math.min(n, 300)), `the list behind «active» has ${n} rows`);
   await shot(p, "dashboard"); await p.context().close();

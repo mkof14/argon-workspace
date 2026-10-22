@@ -1499,3 +1499,27 @@ tr.grp td b{margin-inline-end:6px}
 .seg span.on,.seg a{display:inline-flex;align-items:center;gap:6px;border-radius:6px;font-size:13.5px}
 .seg span.on{background:var(--accent);color:var(--accent-ink)}
 .seg svg{flex:none}
+
+/* Phase 7 (and the Phase 6 process screens): tabs as buttons, labelled fields, native inputs, plain tables and icons */
+.dtabs button{display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:9px;white-space:nowrap;border:0;background:transparent;color:var(--ink-2);font:inherit;font-weight:600;font-size:14.5px;cursor:pointer}
+.dtabs button svg{width:17px;height:17px;flex:none;color:var(--dc)}
+.dtabs button:hover{background:color-mix(in srgb,var(--dc) 9%,transparent);color:var(--ink)}
+.dtabs button.on{background:color-mix(in srgb,var(--dc) 78%,#000);color:#fff}
+.dtabs button.on svg{color:#fff}
+.fld{display:grid;gap:4px;min-width:0}
+.fld>span{font-size:12.5px;font-weight:600;color:var(--ink-2)}
+.crm input:not([type=checkbox]):not([type=radio]):not([type=file]),.crm select,.crm textarea,.procs input:not([type=checkbox]):not([type=radio]):not([type=file]),.procs select,.procs textarea{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:9px;padding:8px 10px;min-width:0;max-width:100%;font:inherit;font-size:14.5px}
+.crm textarea,.procs textarea{width:100%;resize:vertical}
+.crm .fld input,.crm .fld select,.crm .fld textarea,.procs .fld input,.procs .fld select,.procs .fld textarea{width:100%}
+.crm svg,.procs svg{width:16px;height:16px;flex:none;vertical-align:-3px}
+.crm .card-h h2 svg,.procs .card-h h2 svg{width:18px;height:18px}
+.crm .stat b,.procs .stat b{display:block}
+.crm .row{background:transparent;border:0;border-bottom:1px solid var(--line-2);color:inherit;font:inherit;cursor:pointer}
+.crm button.row:hover,.crm .row:hover{background:var(--surface-2)}
+.crm .link,.procs .link{background:none;border:0;padding:0;color:var(--accent,#1D7AF2);font:inherit;cursor:pointer;text-decoration:underline;text-align:start}
+.crm table.tbl,.procs table.tbl{width:100%;border-collapse:collapse;font-size:14px}
+.crm .tbl th,.procs .tbl th{text-align:start;font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-2);padding:8px 10px;border-bottom:1px solid var(--line);background:var(--surface-2)}
+.crm .tbl td,.procs .tbl td{padding:8px 10px;border-bottom:1px solid var(--line-2)}
+.crm aside.drawer{overflow-y:auto;overscroll-behavior:contain}
+.crm aside.drawer section{display:grid;gap:6px}
+@media (max-width:640px){.crm aside.drawer{width:100%;max-width:100%}.crm [data-capture] input,.crm [data-capture] select,.crm [data-capture] textarea{font-size:16px;min-height:44px}}
