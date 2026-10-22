@@ -366,7 +366,7 @@ create index if not exists approvals_approver_pending_idx on public.approvals(ap
 /* ---------------------------------------------------------------------------------------------
    5. Helpers: payment secrets refused, SLA calendar, the allow-listed rule model
    --------------------------------------------------------------------------------------------- */
-create or replace function public._luhn(s text) returns boolean language sql immutable parallel safe set search_path = '' as $$
+create or replace function public._luhn(s text) returns boolean language sql immutable parallel safe as $$
   select coalesce(sum(case when (length(s) - i) % 2 = 1 then case when d * 2 > 9 then d * 2 - 9 else d * 2 end else d end) % 10 = 0, false)
   from (select i, substr(s, i, 1)::int d from generate_series(1, length(s)) i) x
 $$;
@@ -451,7 +451,7 @@ begin
   return null;
 end $$;
 
-create or replace function public._num(v jsonb) returns numeric language sql immutable parallel safe set search_path = '' as $$
+create or replace function public._num(v jsonb) returns numeric language sql immutable parallel safe as $$
   select case when jsonb_typeof(v) = 'number' then (v #>> '{}')::numeric
               when jsonb_typeof(v) = 'string' and (v #>> '{}') ~ '^\s*-?\d+(\.\d+)?\s*$' then trim(v #>> '{}')::numeric end
 $$;
@@ -1079,7 +1079,7 @@ end $$;
 revoke execute on function public._wf_notify(uuid, text, text, public.records, text, text, text, uuid, text) from public, anon, authenticated;
 
 -- "What you need to do", in plain words, from the step type
-create or replace function public.wf_todo(p_type text, p_name text) returns text language sql immutable set search_path = public as $$
+create or replace function public.wf_todo(p_type text, p_name text) returns text language sql immutable as $$
   select case p_type
     when 'TASK' then 'Do the task: ' || p_name
     when 'REVIEW' then 'Review and approve, ask for changes or reject: ' || p_name
@@ -2341,25 +2341,28 @@ grant execute on function public.ops_party(uuid) to authenticated;
    16. Read models for one viewer. The working set is built once per statement (as in v22): every number, list,
        budget, attention item, weekly line and Assistant answer comes only from records this viewer may open.
    --------------------------------------------------------------------------------------------- */
-create or replace function public._ops_base(p_viewer uuid) returns void
+create or replace function public._ops_base(p_viewer uuid, p_secs text[] default null, p_closed boolean default false) returns void
 language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
-declare p record; secs text[]; desks jsonb := coalesce(public.ops_cfg()->'desks', '{}'::jsonb); pid text;
+declare p record; secs text[]; desks jsonb := coalesce(public.ops_cfg()->'desks', '{}'::jsonb); pid text; want text[] := coalesce(p_secs, public.ops_sections());
+  personal text[] := array['operations.requests', 'finance.payments', 'company.travel', 'company.requests'];
 begin
   if to_regclass('pg_temp.ops_meta') is null then
-    create temp table ops_meta (viewer uuid, at timestamptz) on commit drop;
-    create temp table ops_v (id uuid primary key, section text, title text, status text, data jsonb, controlled boolean, created_by uuid, created_at timestamptz, updated_at timestamptz,
+    create temp table ops_meta (viewer uuid, at timestamptz, secs text[], closed boolean) on commit drop;
+    create temp table ops_v (id uuid, section text, title text, status text, data jsonb, controlled boolean, created_by uuid, created_at timestamptz, updated_at timestamptz,
       m_project uuid, m_amount numeric, m_currency text, m_due date, m_number text) on commit drop;
-    create temp table ops_iv (id uuid primary key, record_id uuid, section text, def_code text, def_name text, status text, priority text, requester uuid, owner uuid,
+    create temp table ops_iv (id uuid, record_id uuid, section text, def_code text, def_name text, status text, priority text, requester uuid, owner uuid,
       started_at timestamptz, due_at timestamptz, completed_at timestamptz, blocker text, run_id uuid, step_id text, step_name text, step_type text, assignee uuid, assignee_role text,
-      run_due timestamptz, run_paused boolean, run_started timestamptz, escalation_level int) on commit drop;
+      run_due timestamptz, run_paused boolean, run_started timestamptz, escalation_level int, r_title text, r_number text, r_status text, r_amount numeric, r_currency text, r_impact boolean) on commit drop;
   end if;
-  if exists (select 1 from pg_temp.ops_meta m where m.viewer is not distinct from p_viewer and m.at = statement_timestamp()) then return; end if;
+  -- built once per statement; a later call asking for no more than what is there reuses it
+  if exists (select 1 from pg_temp.ops_meta m where m.viewer is not distinct from p_viewer and m.at = statement_timestamp() and m.secs @> want and (m.closed or not p_closed)) then return; end if;
   truncate pg_temp.ops_v; truncate pg_temp.ops_iv; delete from pg_temp.ops_meta;
   select pp.id, pp.role, coalesce(pp.us_person, false) us into p from public.profiles pp where pp.id = p_viewer and not pp.disabled;
   if found and p.role is not null and p.role not in ('partner', 'vendor', 'investor', 'pending') then
     pid := p.id::text;
     select coalesce(array_agg(a.section), '{}') into secs from public.section_access a where a.role = p.role;
-    -- exactly the rule of record_visible_for (tested to be equal), set-based
+    -- exactly the rule of record_visible_for (tested to be equal), set-based; written twice below (records, then
+    -- the records behind processes) so that no row is copied that a screen does not need
     insert into pg_temp.ops_v
     select r.id, r.section, r.title, r.status, r.data, r.controlled, r.created_by, r.created_at, r.updated_at,
       public.as_uuid(r.data->>'project_ref'),
@@ -2368,10 +2371,10 @@ begin
       case when coalesce(r.data->>'due', r.data->>'eta', r.data->>'end_date', r.data->>'needed_by') ~ '^\d{4}-\d{2}-\d{2}' then left(coalesce(r.data->>'due', r.data->>'eta', r.data->>'end_date', r.data->>'needed_by'), 10)::date end,
       r.data->>'number'
     from public.records r
-    where r.section = any(public.ops_sections())
+    where r.section = any(want)
       and (p.role in ('owner', 'admin') or r.section = any(secs))
       and (coalesce(r.controlled, true) = false or p.us)
-      and (r.section not in ('operations.requests', 'finance.payments', 'company.travel', 'company.requests')
+      and (not (r.section = any(personal))
         or p.role in ('owner', 'admin') or coalesce(desks->r.section, '[]'::jsonb) ? p.role
         or r.created_by = p.id or coalesce(r.data->>'requester_id', '') = pid or coalesce(r.data->>'owner_id', '') = pid or coalesce(r.data->>'assignee_id', '') = pid
         or coalesce(r.data->'travellers_ids', '[]'::jsonb) ? pid
@@ -2381,136 +2384,154 @@ begin
         or exists (select 1 from public.records pj where pj.id = public.as_uuid(r.data->>'project_ref') and pj.data->>'manager_id' = pid));
     insert into pg_temp.ops_iv
     select i.id, i.record_id, i.section, i.def_code, d.name, i.status, i.priority, i.requester, i.owner, i.started_at, i.due_at, i.completed_at, i.blocker,
-      s.id, s.step_id, s.step_name, s.step_type, s.assignee, s.assignee_role, s.due_at, s.paused, s.started_at, s.escalation_level
-    from public.wf_instances i join pg_temp.ops_v v on v.id = i.record_id join public.wf_definitions d on d.id = i.definition_id
-    left join public.wf_step_runs s on s.id = i.current_run;
+      s.id, s.step_id, s.step_name, s.step_type, s.assignee, s.assignee_role, s.due_at, s.paused, s.started_at, s.escalation_level,
+      r.title, r.data->>'number', r.status, coalesce(public._num(r.data->'amount'), public._num(r.data->'selected_amount'), public._num(r.data->'est_amount'), public._num(r.data->'est_cost')),
+      coalesce(r.data->>'selected_currency', r.data->>'currency'), coalesce(r.data->>'impact_confirmed_at', '') <> ''
+    from public.wf_instances i join public.records r on r.id = i.record_id join public.wf_definitions d on d.id = i.definition_id
+    left join public.wf_step_runs s on s.id = i.current_run
+    where (p_closed or i.status in ('active', 'waiting', 'blocked', 'draft'))
+      and (p.role in ('owner', 'admin') or r.section = any(secs))
+      and (coalesce(r.controlled, true) = false or p.us)
+      and (not (r.section = any(personal))
+        or p.role in ('owner', 'admin') or coalesce(desks->r.section, '[]'::jsonb) ? p.role
+        or r.created_by = p.id or coalesce(r.data->>'requester_id', '') = pid or coalesce(r.data->>'owner_id', '') = pid or coalesce(r.data->>'assignee_id', '') = pid
+        or coalesce(r.data->'travellers_ids', '[]'::jsonb) ? pid
+        or exists (select 1 from public.approvals a where a.record_id = r.id and a.approver_id = p.id)
+        or exists (select 1 from public.wf_step_runs s2 where s2.instance_id in (select i2.id from public.wf_instances i2 where i2.record_id = r.id)
+                   and (s2.assignee = p.id or s2.completed_by = p.id or (s2.status = 'open' and s2.assignee is null and s2.assignee_role = p.role)))
+        or exists (select 1 from public.records pj where pj.id = public.as_uuid(r.data->>'project_ref') and pj.data->>'manager_id' = pid))
+      -- documents, decisions, knowledge and announcements carry their own rule (v21): not run as processes here
+      and r.section not in ('company.documents', 'company.decisions', 'company.wiki', 'company.announcements');
   end if;
   analyze pg_temp.ops_v; analyze pg_temp.ops_iv;
-  insert into pg_temp.ops_meta(viewer, at) values (p_viewer, statement_timestamp());
+  insert into pg_temp.ops_meta(viewer, at, secs, closed) values (p_viewer, statement_timestamp(), want, p_closed);
 end $$;
-revoke execute on function public._ops_base(uuid) from public, anon, authenticated;
+revoke execute on function public._ops_base(uuid, text[], boolean) from public, anon, authenticated;
+drop function if exists public._ops_base(uuid);
 
 -- the visible set itself (used by the tests to prove it equals row-level security)
 create or replace function public.ops_visible_ids() returns setof uuid language plpgsql volatile security definer set search_path = public as $$
 declare me uuid := public.ops_viewer();
 begin
   if me is null then return; end if;
-  perform public._ops_base(me);
+  perform public._ops_base(me, null, true);
   return query select id from pg_temp.ops_v;
 end $$;
 revoke execute on function public.ops_visible_ids() from public, anon;
 grant execute on function public.ops_visible_ids() to authenticated;
 
+-- the record sections each kind of item reads (instances carry their own record fields)
+create or replace function public._ops_kind_secs(p_kinds text[]) returns text[] language sql immutable as $$
+  select coalesce(array_agg(distinct s), '{}') from (
+    select unnest(case
+      when k in ('po_awaiting_delivery', 'po_overdue', 'received_30d') then array['operations.procurement']
+      when k in ('pay_unpaid', 'pay_ready', 'paid_30d') then array['finance.payments']
+      when k = 'ctr_expiring' then array['legal.contracts']
+      when k in ('obl_due_soon', 'obl_overdue') then array['legal.contract_obligations']
+      when k in ('iss_open', 'iss_overdue') then array['company.issues']
+      else array[]::text[] end) s
+    from unnest(coalesce(p_kinds, array['po_awaiting_delivery', 'pay_unpaid', 'ctr_expiring', 'obl_due_soon', 'iss_open'])) k) x
+$$;
+
 -- every operations item of one viewer, by kind (one definition for the dashboard, the drill-down, attention and the Assistant)
-create or replace function public._ops_items(p_viewer uuid) returns void
+create or replace function public._ops_items(p_viewer uuid, p_kinds text[] default null) returns void
 language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 declare today date := (now() at time zone 'utc')::date; soon interval := make_interval(hours => coalesce((public.ops_cfg()->>'due_soon_hours')::int, 24)); rl text;
+  k text[] := coalesce(p_kinds, array['needs_action', 'pr_open', 'pr_approval', 'po_awaiting_delivery', 'po_overdue', 'received_30d', 'pay_approval', 'pay_unpaid', 'pay_ready', 'paid_30d',
+    'ctr_review', 'ctr_signature', 'ctr_expiring', 'obl_due_soon', 'obl_overdue', 'ecr_open', 'ecr_approval', 'ecr_impact_missing', 'iss_open', 'iss_overdue', 'wait_open', 'wait_overdue',
+    'sla_due_soon', 'sla_overdue', 'sla_escalated', 'blocked']);
 begin
-  perform public._ops_base(p_viewer);
+  perform public._ops_base(p_viewer, public._ops_kind_secs(k), false);
   if to_regclass('pg_temp.ops_items') is null then
     create temp table ops_items (kind text, record_id uuid, section text, title text, number text, status text, step text, due timestamptz, amount numeric, currency text,
       run_id uuid, instance_id uuid, reason text) on commit drop;
-    create temp table ops_items_meta (viewer uuid, at timestamptz) on commit drop;
+    create temp table ops_items_meta (viewer uuid, at timestamptz, kinds text[]) on commit drop;
   end if;
-  if exists (select 1 from pg_temp.ops_items_meta m where m.viewer is not distinct from p_viewer and m.at = statement_timestamp()) then return; end if;
+  if exists (select 1 from pg_temp.ops_items_meta m where m.viewer is not distinct from p_viewer and m.at = statement_timestamp() and m.kinds @> k) then return; end if;
   truncate pg_temp.ops_items; delete from pg_temp.ops_items_meta;
   select role into rl from public.profiles where id = p_viewer;
   insert into pg_temp.ops_items
   -- what I must do: my open steps (not approvals: those are listed from the approvals themselves)
-  select 'needs_action', v.id, v.section, v.title, v.m_number, v.status, i.step_name, i.run_due, v.m_amount, v.m_currency, i.run_id, i.id, public.wf_todo(i.step_type, i.step_name)
-    from pg_temp.ops_iv i join pg_temp.ops_v v on v.id = i.record_id
-   where i.status in ('active', 'waiting', 'blocked') and i.step_type not in ('APPROVAL', 'AUTOMATION') and (i.assignee = p_viewer or (i.assignee is null and i.assignee_role = rl))
+  select 'needs_action', i.record_id, i.section, i.r_title, i.r_number, i.r_status, i.step_name, i.run_due, i.r_amount, i.r_currency, i.run_id, i.id, public.wf_todo(i.step_type, i.step_name)
+    from pg_temp.ops_iv i
+   where 'needs_action' = any(k) and i.status in ('active', 'waiting', 'blocked') and i.step_type not in ('APPROVAL', 'AUTOMATION') and (i.assignee = p_viewer or (i.assignee is null and i.assignee_role = rl))
   union all
-  select 'needs_action', v.id, v.section, v.title, v.m_number, v.status, coalesce(i.step_name, 'Approval'), a.created_at + interval '3 days', v.m_amount, v.m_currency, i.run_id, i.id, 'Approve or reject: ' || coalesce(a.note, v.title)
-    from public.approvals a join pg_temp.ops_v v on v.id = a.record_id left join pg_temp.ops_iv i on i.run_id = a.wf_run
-   where a.approver_id = p_viewer and a.status = 'pending'
+  select 'needs_action', r.id, r.section, r.title, r.data->>'number', r.status, coalesce(i.step_name, 'Approval'), a.created_at + interval '3 days',
+         coalesce(public._num(r.data->'amount'), public._num(r.data->'selected_amount'), public._num(r.data->'est_amount')), coalesce(r.data->>'selected_currency', r.data->>'currency'), i.run_id, i.id, 'Approve or reject: ' || coalesce(a.note, r.title)
+    from public.approvals a join public.records r on r.id = a.record_id left join pg_temp.ops_iv i on i.run_id = a.wf_run
+   where 'needs_action' = any(k) and a.approver_id = p_viewer and a.status = 'pending' and public.record_visible_for(p_viewer, r)
   union all
-  -- purchases
-  select 'pr_open', v.id, v.section, v.title, v.m_number, v.status, i.step_name, i.run_due, v.m_amount, v.m_currency, i.run_id, i.id, null
-    from pg_temp.ops_iv i join pg_temp.ops_v v on v.id = i.record_id where i.section = 'operations.requests' and i.status in ('active', 'waiting', 'blocked')
-  union all
-  select 'pr_approval', v.id, v.section, v.title, v.m_number, v.status, i.step_name, i.run_due, v.m_amount, v.m_currency, i.run_id, i.id, null
-    from pg_temp.ops_iv i join pg_temp.ops_v v on v.id = i.record_id where i.section = 'operations.requests' and i.status in ('active', 'blocked') and i.step_type = 'APPROVAL'
+  select kk, i.record_id, i.section, i.r_title, i.r_number, i.r_status, i.step_name, i.run_due, case when i.section in ('technical.changes') then null else i.r_amount end, i.r_currency, i.run_id, i.id,
+         case when kk = 'ecr_impact_missing' then 'Impact record not confirmed' end
+    from pg_temp.ops_iv i, lateral (select x from unnest(array[
+      case when i.section = 'operations.requests' and i.status in ('active', 'waiting', 'blocked') then 'pr_open' end,
+      case when i.section = 'operations.requests' and i.status in ('active', 'blocked') and i.step_type = 'APPROVAL' then 'pr_approval' end,
+      case when i.section = 'finance.payments' and i.status in ('active', 'blocked') and i.step_type = 'APPROVAL' then 'pay_approval' end,
+      case when i.section = 'legal.contracts' and i.status in ('active', 'waiting', 'blocked') and coalesce(i.step_id, '') <> 'signature' then 'ctr_review' end,
+      case when i.section = 'legal.contracts' and i.status in ('active', 'blocked') and i.step_id = 'signature' then 'ctr_signature' end,
+      case when i.section = 'technical.changes' and i.status in ('active', 'waiting', 'blocked') then 'ecr_open' end,
+      case when i.section = 'technical.changes' and i.status in ('active', 'blocked') and i.step_type = 'APPROVAL' then 'ecr_approval' end,
+      case when i.section = 'technical.changes' and i.status in ('active', 'waiting', 'blocked') and not coalesce(i.r_impact, false) then 'ecr_impact_missing' end]) x where x is not null and x = any(k)) z(kk)
   union all
   select 'po_awaiting_delivery', v.id, v.section, v.title, v.m_number, v.status, null, v.m_due::timestamptz, v.m_amount, v.m_currency, null, null, null
-    from pg_temp.ops_v v where v.section = 'operations.procurement' and v.status in ('Approved', 'Ordered', 'Partially delivered')
+    from pg_temp.ops_v v where 'po_awaiting_delivery' = any(k) and v.section = 'operations.procurement' and v.status in ('Approved', 'Ordered', 'Partially delivered')
   union all
   select 'po_overdue', v.id, v.section, v.title, v.m_number, v.status, null, v.m_due::timestamptz, v.m_amount, v.m_currency, null, null, 'Expected ' || to_char(v.m_due, 'YYYY-MM-DD')
-    from pg_temp.ops_v v where v.section = 'operations.procurement' and v.status in ('Approved', 'Ordered', 'Partially delivered') and v.m_due < today
+    from pg_temp.ops_v v where 'po_overdue' = any(k) and v.section = 'operations.procurement' and v.status in ('Approved', 'Ordered', 'Partially delivered') and v.m_due < today
   union all
   select 'received_30d', v.id, v.section, v.title, v.m_number, v.status, null, null, v.m_amount, v.m_currency, null, null, null
-    from pg_temp.ops_v v where v.section = 'operations.procurement' and v.status = 'Received' and coalesce(v.data->>'last_received', '') >= to_char(today - 30, 'YYYY-MM-DD')
-  union all
-  -- payments
-  select 'pay_approval', v.id, v.section, v.title, v.m_number, v.status, i.step_name, i.run_due, v.m_amount, v.m_currency, i.run_id, i.id, null
-    from pg_temp.ops_iv i join pg_temp.ops_v v on v.id = i.record_id where i.section = 'finance.payments' and i.status in ('active', 'blocked') and i.step_type = 'APPROVAL'
+    from pg_temp.ops_v v where 'received_30d' = any(k) and v.section = 'operations.procurement' and v.status = 'Received' and coalesce(v.data->>'last_received', '') >= to_char(today - 30, 'YYYY-MM-DD')
   union all
   select 'pay_unpaid', v.id, v.section, v.title, v.m_number, v.status, null, v.m_due::timestamptz, public._num(v.data->'approved_amount') - coalesce(public._num(v.data->'paid_amount'), 0), coalesce(v.data->>'approved_currency', v.m_currency), null, null, 'Approved, not yet recorded as paid'
-    from pg_temp.ops_v v where v.section = 'finance.payments' and v.data ? 'approved_amount' and v.status not in ('Paid', 'Reconciled', 'Closed', 'Cancelled', 'Rejected')
+    from pg_temp.ops_v v where 'pay_unpaid' = any(k) and v.section = 'finance.payments' and v.data ? 'approved_amount' and v.status not in ('Paid', 'Reconciled', 'Closed', 'Cancelled', 'Rejected')
   union all
   select 'pay_ready', v.id, v.section, v.title, v.m_number, v.status, null, v.m_due::timestamptz, v.m_amount, v.m_currency, null, null, null
-    from pg_temp.ops_v v where v.section = 'finance.payments' and v.status = 'Ready for payment'
+    from pg_temp.ops_v v where 'pay_ready' = any(k) and v.section = 'finance.payments' and v.status = 'Ready for payment'
   union all
   select 'paid_30d', v.id, v.section, v.title, v.m_number, v.status, null, null, public._num(v.data->'paid_amount'), v.m_currency, null, null, 'Paid ' || (v.data->>'paid_on')
-    from pg_temp.ops_v v where v.section = 'finance.payments' and coalesce(v.data->>'paid_on', '') >= to_char(today - 30, 'YYYY-MM-DD')
-  union all
-  -- contracts and obligations
-  select 'ctr_review', v.id, v.section, v.title, v.m_number, v.status, i.step_name, i.run_due, v.m_amount, v.m_currency, i.run_id, i.id, null
-    from pg_temp.ops_iv i join pg_temp.ops_v v on v.id = i.record_id where i.section = 'legal.contracts' and i.status in ('active', 'waiting', 'blocked') and coalesce(i.step_id, '') <> 'signature'
-  union all
-  select 'ctr_signature', v.id, v.section, v.title, v.m_number, v.status, i.step_name, i.run_due, v.m_amount, v.m_currency, i.run_id, i.id, null
-    from pg_temp.ops_iv i join pg_temp.ops_v v on v.id = i.record_id where i.section = 'legal.contracts' and i.status in ('active', 'blocked') and i.step_id = 'signature'
+    from pg_temp.ops_v v where 'paid_30d' = any(k) and v.section = 'finance.payments' and coalesce(v.data->>'paid_on', '') >= to_char(today - 30, 'YYYY-MM-DD')
   union all
   select 'ctr_expiring', v.id, v.section, v.title, v.m_number, v.status, null, (v.data->>'end_date')::date::timestamptz, v.m_amount, v.m_currency, null, null, 'Ends ' || (v.data->>'end_date')
-    from pg_temp.ops_v v where v.section = 'legal.contracts' and coalesce(v.data->>'end_date', '') ~ '^\d{4}-\d{2}-\d{2}$' and v.status in ('Active', 'Signed', 'Renewal')
+    from pg_temp.ops_v v where 'ctr_expiring' = any(k) and v.section = 'legal.contracts' and coalesce(v.data->>'end_date', '') ~ '^\d{4}-\d{2}-\d{2}$' and v.status in ('Active', 'Signed', 'Renewal')
       and (v.data->>'end_date')::date between today and today + 60
   union all
   select case when v.m_due < today then 'obl_overdue' else 'obl_due_soon' end, v.id, v.section, v.title, null, v.status, null, v.m_due::timestamptz, null, null, null, null,
          case when v.m_due < today then 'Overdue since ' else 'Due ' end || to_char(v.m_due, 'YYYY-MM-DD')
-    from pg_temp.ops_v v where v.section = 'legal.contract_obligations' and coalesce(v.status, 'Open') = 'Open' and v.m_due <= today + 14
+    from pg_temp.ops_v v where (('obl_overdue' = any(k) and v.m_due < today) or ('obl_due_soon' = any(k) and v.m_due >= today))
+      and v.section = 'legal.contract_obligations' and coalesce(v.status, 'Open') = 'Open' and v.m_due <= today + 14
   union all
-  -- engineering changes
-  select 'ecr_open', v.id, v.section, v.title, v.m_number, v.status, i.step_name, i.run_due, null, null, i.run_id, i.id, null
-    from pg_temp.ops_iv i join pg_temp.ops_v v on v.id = i.record_id where i.section = 'technical.changes' and i.status in ('active', 'waiting', 'blocked')
-  union all
-  select 'ecr_approval', v.id, v.section, v.title, v.m_number, v.status, i.step_name, i.run_due, null, null, i.run_id, i.id, null
-    from pg_temp.ops_iv i join pg_temp.ops_v v on v.id = i.record_id where i.section = 'technical.changes' and i.status in ('active', 'blocked') and i.step_type = 'APPROVAL'
-  union all
-  select 'ecr_impact_missing', v.id, v.section, v.title, v.m_number, v.status, i.step_name, i.run_due, null, null, i.run_id, i.id, 'Impact record not confirmed'
-    from pg_temp.ops_iv i join pg_temp.ops_v v on v.id = i.record_id where i.section = 'technical.changes' and i.status in ('active', 'waiting', 'blocked') and coalesce(v.data->>'impact_confirmed_at', '') = ''
-  union all
-  -- issues
   select 'iss_open', v.id, v.section, v.title, v.m_number, v.status, null, v.m_due::timestamptz, null, null, null, null, v.data->>'type'
-    from pg_temp.ops_v v where v.section = 'company.issues' and coalesce(v.status, 'Open') not in ('Closed', 'Cancelled')
+    from pg_temp.ops_v v where 'iss_open' = any(k) and v.section = 'company.issues' and coalesce(v.status, 'Open') not in ('Closed', 'Cancelled')
   union all
   select 'iss_overdue', v.id, v.section, v.title, v.m_number, v.status, null, v.m_due::timestamptz, null, null, null, null, 'Due ' || to_char(v.m_due, 'YYYY-MM-DD')
-    from pg_temp.ops_v v where v.section = 'company.issues' and coalesce(v.status, 'Open') not in ('Closed', 'Cancelled') and v.m_due < today
+    from pg_temp.ops_v v where 'iss_overdue' = any(k) and v.section = 'company.issues' and coalesce(v.status, 'Open') not in ('Closed', 'Cancelled') and v.m_due < today
   union all
   -- waiting for someone outside, and process SLA
-  select case when i.run_due < now() then 'wait_overdue' else 'wait_open' end, v.id, v.section, v.title, v.m_number, v.status, i.step_name, i.run_due, null, null, i.run_id, i.id, 'Waiting for ' || i.step_name
-    from pg_temp.ops_iv i join pg_temp.ops_v v on v.id = i.record_id where i.status = 'waiting' and i.step_type = 'WAIT'
+  select case when i.run_due < now() then 'wait_overdue' else 'wait_open' end, i.record_id, i.section, i.r_title, i.r_number, i.r_status, i.step_name, i.run_due, null, null, i.run_id, i.id, 'Waiting for ' || i.step_name
+    from pg_temp.ops_iv i where (('wait_overdue' = any(k) and i.run_due < now()) or ('wait_open' = any(k) and coalesce(i.run_due >= now(), true))) and i.status = 'waiting' and i.step_type = 'WAIT'
   union all
-  select 'sla_due_soon', v.id, v.section, v.title, v.m_number, v.status, i.step_name, i.run_due, null, null, i.run_id, i.id, 'Due ' || to_char(i.run_due at time zone 'utc', 'YYYY-MM-DD HH24:MI') || ' UTC'
-    from pg_temp.ops_iv i join pg_temp.ops_v v on v.id = i.record_id where i.status in ('active', 'blocked') and not coalesce(i.run_paused, false) and i.run_due between now() and now() + soon
+  select 'sla_due_soon', i.record_id, i.section, i.r_title, i.r_number, i.r_status, i.step_name, i.run_due, null, null, i.run_id, i.id, 'Due ' || to_char(i.run_due at time zone 'utc', 'YYYY-MM-DD HH24:MI') || ' UTC'
+    from pg_temp.ops_iv i where 'sla_due_soon' = any(k) and i.status in ('active', 'blocked') and not coalesce(i.run_paused, false) and i.run_due between now() and now() + soon
   union all
-  select 'sla_overdue', v.id, v.section, v.title, v.m_number, v.status, i.step_name, i.run_due, null, null, i.run_id, i.id, 'Step overdue since ' || to_char(i.run_due at time zone 'utc', 'YYYY-MM-DD HH24:MI') || ' UTC'
-    from pg_temp.ops_iv i join pg_temp.ops_v v on v.id = i.record_id where i.status in ('active', 'blocked') and not coalesce(i.run_paused, false) and i.run_due < now()
+  select 'sla_overdue', i.record_id, i.section, i.r_title, i.r_number, i.r_status, i.step_name, i.run_due, null, null, i.run_id, i.id, 'Step overdue since ' || to_char(i.run_due at time zone 'utc', 'YYYY-MM-DD HH24:MI') || ' UTC'
+    from pg_temp.ops_iv i where 'sla_overdue' = any(k) and i.status in ('active', 'blocked') and not coalesce(i.run_paused, false) and i.run_due < now()
   union all
-  select 'sla_escalated', v.id, v.section, v.title, v.m_number, v.status, i.step_name, i.run_due, null, null, i.run_id, i.id, 'Escalated'
-    from pg_temp.ops_iv i join pg_temp.ops_v v on v.id = i.record_id where i.status in ('active', 'waiting', 'blocked') and i.escalation_level > 0
+  select 'sla_escalated', i.record_id, i.section, i.r_title, i.r_number, i.r_status, i.step_name, i.run_due, null, null, i.run_id, i.id, 'Escalated'
+    from pg_temp.ops_iv i where 'sla_escalated' = any(k) and i.status in ('active', 'waiting', 'blocked') and i.escalation_level > 0
   union all
-  select 'blocked', v.id, v.section, v.title, v.m_number, v.status, i.step_name, i.run_due, null, null, i.run_id, i.id, i.blocker
-    from pg_temp.ops_iv i join pg_temp.ops_v v on v.id = i.record_id where i.status = 'blocked';
-  insert into pg_temp.ops_items_meta values (p_viewer, statement_timestamp());
+  select 'blocked', i.record_id, i.section, i.r_title, i.r_number, i.r_status, i.step_name, i.run_due, null, null, i.run_id, i.id, i.blocker
+    from pg_temp.ops_iv i where 'blocked' = any(k) and i.status = 'blocked';
+  insert into pg_temp.ops_items_meta values (p_viewer, statement_timestamp(), k);
 end $$;
-revoke execute on function public._ops_items(uuid) from public, anon, authenticated;
+revoke execute on function public._ops_items(uuid, text[]) from public, anon, authenticated;
+drop function if exists public._ops_items(uuid);
 
 create or replace function public.ops_overview() returns jsonb
 language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 declare me uuid := public.ops_viewer(); out jsonb;
 begin
   if me is null then raise exception 'Not signed in' using errcode = '42501'; end if;
-  perform public._ops_items(me);
+  perform public._ops_items(me, null);
   select coalesce(jsonb_object_agg(kind, jsonb_build_object('count', n, 'ids', ids, 'amounts', amounts)), '{}'::jsonb) into out from (
     select k.kind, count(*) n, (array_agg(k.record_id order by k.due nulls last))[1:200] ids,
       (select coalesce(jsonb_object_agg(c, s), '{}'::jsonb) from (select coalesce(x.currency, '—') c, sum(x.amount) s from pg_temp.ops_items x where x.kind = k.kind and x.amount is not null group by 1) z) amounts
@@ -2523,53 +2544,75 @@ end $$;
 revoke execute on function public.ops_overview() from public, anon;
 grant execute on function public.ops_overview() to authenticated;
 
-create or replace function public.ops_list(p_kind text, p_limit integer default 200) returns jsonb
+create or replace function public.ops_list(p_kind text, p_limit integer default 200, p_q text default null) returns jsonb
 language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
-declare me uuid := public.ops_viewer();
+declare me uuid := public.ops_viewer(); q text := nullif(trim(coalesce(p_q, '')), '');
 begin
   if me is null then raise exception 'Not signed in' using errcode = '42501'; end if;
-  perform public._ops_items(me);
-  return coalesce((select jsonb_agg(to_jsonb(x) order by x.due nulls last, x.title) from (select * from pg_temp.ops_items where kind = p_kind order by due nulls last, title limit least(greatest(p_limit, 1), 500)) x), '[]'::jsonb);
+  perform public._ops_items(me, array[p_kind]);
+  return coalesce((select jsonb_agg(to_jsonb(x) order by x.due nulls last, x.title) from (select * from pg_temp.ops_items
+    where kind = p_kind and (q is null or strpos(lower(coalesce(title, '') || ' ' || coalesce(number, '')), lower(q)) > 0) order by due nulls last, title limit least(greatest(p_limit, 1), 500)) x), '[]'::jsonb);
 end $$;
-revoke execute on function public.ops_list(text, integer) from public, anon;
-grant execute on function public.ops_list(text, integer) to authenticated;
+drop function if exists public.ops_list(text, integer);
+revoke execute on function public.ops_list(text, integer, text) from public, anon;
+grant execute on function public.ops_list(text, integer, text) to authenticated;
 
 -- Phase 5 Attention: deterministic operations items with their reason
 create or replace function public.ops_attention() returns jsonb
 language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
-declare me uuid := public.ops_viewer();
+declare me uuid := public.ops_viewer(); ks text[] := array['sla_escalated', 'blocked', 'sla_overdue', 'po_overdue', 'obl_overdue', 'wait_overdue', 'ctr_expiring'];
 begin
   if me is null then raise exception 'Not signed in' using errcode = '42501'; end if;
-  perform public._ops_items(me);
+  perform public._ops_items(me, ks);
   return coalesce((select jsonb_agg(jsonb_build_object('kind', kind, 'record_id', record_id, 'section', section, 'title', title, 'number', number, 'step', step, 'due', due, 'reason', reason,
-      'instance_id', instance_id, 'rank', case kind when 'sla_escalated' then 1 when 'blocked' then 2 when 'sla_overdue' then 3 when 'po_overdue' then 4 when 'obl_overdue' then 5 when 'wait_overdue' then 6 else 7 end)
-      order by case kind when 'sla_escalated' then 1 when 'blocked' then 2 when 'sla_overdue' then 3 when 'po_overdue' then 4 when 'obl_overdue' then 5 when 'wait_overdue' then 6 else 7 end, due nulls last)
-    from (select distinct on (kind, record_id) * from pg_temp.ops_items where kind in ('sla_escalated', 'blocked', 'sla_overdue', 'po_overdue', 'obl_overdue', 'wait_overdue', 'ctr_expiring') order by kind, record_id, due) x), '[]'::jsonb);
+      'instance_id', instance_id, 'rank', array_position(ks, kind)) order by array_position(ks, kind), due nulls last)
+    from (select * from (select distinct on (kind, record_id) * from pg_temp.ops_items where kind = any(ks) order by kind, record_id, due) y
+          order by array_position(ks, y.kind), y.due nulls last limit 200) x), '[]'::jsonb);
 end $$;
 revoke execute on function public.ops_attention() from public, anon;
 grant execute on function public.ops_attention() to authenticated;
 
+-- My Processes reads only the person's own steps, approvals and requests (indexed), each checked by the reading rule
 create or replace function public.ops_my_processes() returns jsonb
 language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
-declare me uuid := public.ops_viewer(); row_ jsonb;
+declare me uuid := public.ops_viewer(); rl text; lead boolean;
 begin
   if me is null then raise exception 'Not signed in' using errcode = '42501'; end if;
-  perform public._ops_items(me);
+  select role into rl from public.profiles where id = me; lead := public._ops_admin(me);
   return jsonb_build_object(
-    'needs_action', coalesce((select jsonb_agg(to_jsonb(x) order by x.due nulls last) from (select * from pg_temp.ops_items where kind = 'needs_action' order by due nulls last limit 300) x), '[]'::jsonb),
-    'requested', coalesce((select jsonb_agg(jsonb_build_object('instance_id', i.id, 'record_id', i.record_id, 'section', i.section, 'title', v.title, 'number', v.m_number, 'process', i.def_name, 'status', i.status,
-        'step', i.step_name, 'step_type', i.step_type, 'due', i.run_due, 'started_at', i.started_at, 'blocker', i.blocker) order by i.started_at desc)
-      from (select * from pg_temp.ops_iv where requester = me and status in ('active', 'waiting', 'blocked') order by started_at desc limit 300) i join pg_temp.ops_v v on v.id = i.record_id), '[]'::jsonb),
-    'waiting', coalesce((select jsonb_agg(jsonb_build_object('instance_id', i.id, 'record_id', i.record_id, 'section', i.section, 'title', v.title, 'number', v.m_number, 'process', i.def_name, 'status', i.status,
-        'step', i.step_name, 'due', i.run_due, 'started_at', i.run_started) order by i.run_started)
-      from (select * from pg_temp.ops_iv where status = 'waiting' and (requester = me or assignee = me or owner = me) limit 300) i join pg_temp.ops_v v on v.id = i.record_id), '[]'::jsonb),
-    'blocked', coalesce((select jsonb_agg(jsonb_build_object('instance_id', i.id, 'record_id', i.record_id, 'section', i.section, 'title', v.title, 'number', v.m_number, 'process', i.def_name,
-        'step', i.step_name, 'blocker', i.blocker, 'run_id', i.run_id) order by i.started_at)
-      from (select * from pg_temp.ops_iv where status = 'blocked' and (requester = me or assignee = me or owner = me or public._ops_admin(me)) limit 300) i join pg_temp.ops_v v on v.id = i.record_id), '[]'::jsonb),
-    'completed', coalesce((select jsonb_agg(jsonb_build_object('instance_id', i.id, 'record_id', i.record_id, 'section', i.section, 'title', v.title, 'number', v.m_number, 'process', i.def_name, 'status', i.status,
-        'completed_at', i.completed_at) order by i.completed_at desc)
-      from (select * from pg_temp.ops_iv where status in ('completed', 'cancelled') and (requester = me or exists (select 1 from public.wf_step_runs s where s.instance_id = ops_iv.id and s.completed_by = me))
-            order by completed_at desc limit 100) i join pg_temp.ops_v v on v.id = i.record_id), '[]'::jsonb));
+    'needs_action', coalesce((select jsonb_agg(to_jsonb(x) order by x.due nulls last) from (
+        select 'needs_action' kind, r.id record_id, r.section, r.title, r.data->>'number' number, r.status, s.step_name step, s.due_at due,
+          coalesce(public._num(r.data->'amount'), public._num(r.data->'selected_amount'), public._num(r.data->'est_amount')) amount, coalesce(r.data->>'selected_currency', r.data->>'currency') currency,
+          s.id run_id, i.id instance_id, public.wf_todo(s.step_type, s.step_name) reason
+        from public.wf_step_runs s join public.wf_instances i on i.current_run = s.id join public.records r on r.id = i.record_id
+        where s.status = 'open' and s.step_type not in ('APPROVAL', 'AUTOMATION') and (s.assignee = me or (s.assignee is null and s.assignee_role = rl)) and public.record_visible_for(me, r)
+        union all
+        select 'needs_action', r.id, r.section, r.title, r.data->>'number', r.status, coalesce(s.step_name, 'Approval'), a.created_at + interval '3 days',
+          coalesce(public._num(r.data->'amount'), public._num(r.data->'selected_amount'), public._num(r.data->'est_amount')), coalesce(r.data->>'selected_currency', r.data->>'currency'),
+          s.id, s.instance_id, 'Approve or reject: ' || coalesce(a.note, r.title)
+        from public.approvals a join public.records r on r.id = a.record_id left join public.wf_step_runs s on s.id = a.wf_run
+        where a.approver_id = me and a.status = 'pending' and public.record_visible_for(me, r)
+        order by 8 nulls last limit 300) x), '[]'::jsonb),
+    'requested', coalesce((select jsonb_agg(x order by x->>'started_at' desc) from (
+        select jsonb_build_object('instance_id', i.id, 'record_id', i.record_id, 'section', i.section, 'title', r.title, 'number', r.data->>'number', 'process', d.name, 'status', i.status,
+          'step', s.step_name, 'step_type', s.step_type, 'due', s.due_at, 'started_at', i.started_at, 'blocker', i.blocker) x
+        from public.wf_instances i join public.records r on r.id = i.record_id join public.wf_definitions d on d.id = i.definition_id left join public.wf_step_runs s on s.id = i.current_run
+        where i.requester = me and i.status in ('active', 'waiting', 'blocked') and public.record_visible_for(me, r) order by i.started_at desc limit 300) q), '[]'::jsonb),
+    'waiting', coalesce((select jsonb_agg(x) from (
+        select jsonb_build_object('instance_id', i.id, 'record_id', i.record_id, 'section', i.section, 'title', r.title, 'number', r.data->>'number', 'process', d.name, 'status', i.status,
+          'step', s.step_name, 'due', s.due_at, 'started_at', s.started_at) x
+        from public.wf_instances i join public.records r on r.id = i.record_id join public.wf_definitions d on d.id = i.definition_id left join public.wf_step_runs s on s.id = i.current_run
+        where i.status = 'waiting' and (i.requester = me or s.assignee = me or i.owner = me or (s.assignee is null and s.assignee_role = rl)) and public.record_visible_for(me, r) order by s.started_at limit 300) q), '[]'::jsonb),
+    'blocked', coalesce((select jsonb_agg(x) from (
+        select jsonb_build_object('instance_id', i.id, 'record_id', i.record_id, 'section', i.section, 'title', r.title, 'number', r.data->>'number', 'process', d.name,
+          'step', s.step_name, 'blocker', i.blocker, 'run_id', s.id) x
+        from public.wf_instances i join public.records r on r.id = i.record_id join public.wf_definitions d on d.id = i.definition_id left join public.wf_step_runs s on s.id = i.current_run
+        where i.status = 'blocked' and (i.requester = me or s.assignee = me or i.owner = me or lead) and public.record_visible_for(me, r) order by i.started_at limit 300) q), '[]'::jsonb),
+    'completed', coalesce((select jsonb_agg(x) from (
+        select jsonb_build_object('instance_id', i.id, 'record_id', i.record_id, 'section', i.section, 'title', r.title, 'number', r.data->>'number', 'process', d.name, 'status', i.status,
+          'completed_at', i.completed_at) x
+        from public.wf_instances i join public.records r on r.id = i.record_id join public.wf_definitions d on d.id = i.definition_id
+        where i.status in ('completed', 'cancelled') and i.requester = me and public.record_visible_for(me, r) order by i.completed_at desc limit 100) q), '[]'::jsonb));
 end $$;
 revoke execute on function public.ops_my_processes() from public, anon;
 grant execute on function public.ops_my_processes() to authenticated;
@@ -2624,17 +2667,17 @@ revoke execute on function public.ops_record_processes(uuid) from public, anon;
 grant execute on function public.ops_record_processes(uuid) to authenticated;
 
 -- Phase 5 Deadlines: operations dates (obligations, contract ends, needed-by dates, deliveries, payments due, issues)
-create or replace function public.ops_deadlines(p_days integer default 30) returns jsonb
+create or replace function public.ops_deadlines(p_days integer default 30, p_q text default null) returns jsonb
 language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
-declare me uuid := public.ops_viewer(); today date := (now() at time zone 'utc')::date;
+declare me uuid := public.ops_viewer(); today date := (now() at time zone 'utc')::date; q text := lower(nullif(trim(coalesce(p_q, '')), ''));
 begin
   if me is null then raise exception 'Not signed in' using errcode = '42501'; end if;
-  perform public._ops_base(me);
+  perform public._ops_base(me, array['legal.contract_obligations', 'operations.requests', 'operations.procurement', 'finance.payments', 'company.issues', 'legal.contracts'], false);
   return coalesce((select jsonb_agg(jsonb_build_object('kind', x.kind, 'record_id', x.id, 'section', x.section, 'title', x.title, 'number', x.m_number, 'due', x.d, 'days', x.d - today, 'status', x.status) order by x.d, x.title) from (
     select case v.section when 'legal.contract_obligations' then 'obligation' when 'operations.requests' then 'needed_by' when 'operations.procurement' then 'delivery'
       when 'finance.payments' then 'payment_due' when 'company.issues' then 'issue_due' else 'date' end kind, v.id, v.section, v.title, v.m_number, v.m_due d, v.status
     from pg_temp.ops_v v
-    where v.m_due is not null and v.m_due <= today + greatest(1, least(p_days, 366))
+    where v.m_due is not null and v.m_due <= today + greatest(1, least(p_days, 366)) and (q is null or strpos(lower(v.title || ' ' || coalesce(v.m_number, '')), q) > 0)
       and ((v.section = 'legal.contract_obligations' and coalesce(v.status, 'Open') = 'Open')
         or (v.section = 'operations.requests' and coalesce(v.status, '') not in ('Closed', 'Rejected', 'Cancelled'))
         or (v.section = 'operations.procurement' and v.status in ('Approved', 'Ordered', 'Partially delivered'))
@@ -2643,10 +2686,12 @@ begin
     union all
     select 'contract_end', v.id, v.section, v.title, v.m_number, (v.data->>'end_date')::date, v.status from pg_temp.ops_v v
     where v.section = 'legal.contracts' and coalesce(v.data->>'end_date', '') ~ '^\d{4}-\d{2}-\d{2}$' and v.status in ('Active', 'Signed', 'Renewal')
-      and (v.data->>'end_date')::date between today and today + greatest(1, least(p_days, 366))) x), '[]'::jsonb);
+      and (v.data->>'end_date')::date between today and today + greatest(1, least(p_days, 366)) and (q is null or strpos(lower(v.title || ' ' || coalesce(v.m_number, '')), q) > 0)
+    order by 6 limit 500) x), '[]'::jsonb);
 end $$;
-revoke execute on function public.ops_deadlines(integer) from public, anon;
-grant execute on function public.ops_deadlines(integer) to authenticated;
+drop function if exists public.ops_deadlines(integer);
+revoke execute on function public.ops_deadlines(integer, text) from public, anon;
+grant execute on function public.ops_deadlines(integer, text) to authenticated;
 
 /* ---------------------------------------------------------------------------------------------
    17. Project budgets without accounting: what is planned, requested (estimates), approved, committed, paid, left.
@@ -2700,7 +2745,7 @@ begin
     return jsonb_build_object('project', jsonb_build_object('id', pj.id, 'title', pj.title), 'rows', coalesce((select jsonb_agg(to_jsonb(b)) from public._ops_budget_calc(p_project, me) b), '[]'::jsonb),
       'formula', 'Remaining = Budget − Committed − Approved (not yet ordered). Requested amounts are estimates and are not subtracted.');
   end if;
-  perform public._ops_base(me);
+  perform public._ops_base(me, array['finance.budget', 'operations.requests', 'operations.procurement', 'finance.payments'], false);
   return jsonb_build_object('formula', 'Remaining = Budget − Committed − Approved (not yet ordered). Requested amounts are estimates and are not subtracted.',
     'rows', coalesce((select jsonb_agg(jsonb_build_object('project_id', x.pid, 'project', x.ptitle, 'currency', x.cur, 'budget', x.budget, 'requested', x.requested, 'approved', x.approved, 'committed', x.committed,
       'paid', x.paid, 'remaining', x.budget - x.committed - x.approved) order by x.ptitle, x.cur) from (
@@ -2728,7 +2773,8 @@ language plpgsql volatile security definer set search_path = public set plan_cac
 declare me uuid := public.ops_viewer(); f timestamptz := coalesce(p_from, now() - interval '7 days'); t timestamptz := coalesce(p_to, now());
 begin
   if me is null then raise exception 'Not signed in' using errcode = '42501'; end if;
-  perform public._ops_items(me);
+  perform public._ops_base(me, null, true);
+  perform public._ops_items(me, array['sla_overdue', 'blocked', 'po_overdue', 'wait_open', 'wait_overdue', 'pay_unpaid', 'obl_overdue']);
   return jsonb_build_object('from', f, 'to', t,
     'started', (select count(*) from public.wf_events e join pg_temp.ops_v v on v.id = e.record_id where e.kind = 'started' and e.at between f and t),
     'completed', (select count(*) from public.wf_events e join pg_temp.ops_v v on v.id = e.record_id where e.kind = 'completed' and e.at between f and t),
@@ -2754,13 +2800,12 @@ language plpgsql volatile security definer set search_path = public set plan_cac
 declare me uuid := public.ops_viewer(); kinds text[]; items jsonb; pj public.records; b jsonb; i public.wf_instances; r public.records;
 begin
   if me is null then raise exception 'Not signed in' using errcode = '42501'; end if;
-  perform public._ops_items(me);
   if p_intent = 'my_approvals' then
-    items := coalesce((select jsonb_agg(jsonb_build_object('record_id', v.id, 'section', v.section, 'title', v.title, 'number', v.m_number, 'amount', public._num(a.basis->'selected_amount'),
-        'estimate', public._num(a.basis->'est_amount'), 'currency', coalesce(a.basis->>'selected_currency', a.basis->>'currency', v.m_currency), 'level', a.step, 'requested_at', a.created_at,
+    items := coalesce((select jsonb_agg(jsonb_build_object('record_id', v.id, 'section', v.section, 'title', v.title, 'number', v.data->>'number', 'amount', public._num(a.basis->'selected_amount'),
+        'estimate', public._num(a.basis->'est_amount'), 'currency', coalesce(a.basis->>'selected_currency', a.basis->>'currency', v.data->>'currency'), 'level', a.step, 'requested_at', a.created_at,
         'requester', public._wf_name(a.requested_by)) order by a.created_at)
-      from public.approvals a join pg_temp.ops_v v on v.id = a.record_id
-      where a.approver_id = me and a.status = 'pending' and (p_arg is null or v.section = p_arg)), '[]'::jsonb);
+      from public.approvals a join public.records v on v.id = a.record_id
+      where a.approver_id = me and a.status = 'pending' and (p_arg is null or v.section = p_arg) and public.record_visible_for(me, v)), '[]'::jsonb);
     return jsonb_build_object('intent', p_intent, 'kind', case when jsonb_array_length(items) = 0 then 'unavailable' else 'fact' end, 'items', items,
       'note', case when jsonb_array_length(items) = 0 then 'Nothing is waiting for your approval among the records you can open.' end);
   elsif p_intent = 'budget' then
@@ -2771,7 +2816,7 @@ begin
     return jsonb_build_object('intent', p_intent, 'kind', case when jsonb_array_length(b) = 0 then 'unavailable' else 'calculation' end, 'project', jsonb_build_object('id', pj.id, 'title', pj.title), 'items', b,
       'formula', 'Remaining = Budget − Committed − Approved (not yet ordered). Requested amounts are estimates and are not subtracted.');
   elsif p_intent = 'process' then
-    select x.* into r from pg_temp.ops_v v join public.records x on x.id = v.id where upper(v.m_number) = upper(trim(coalesce(p_arg, ''))) limit 1;
+    select x.* into r from public.records x where x.data->>'number' = upper(trim(coalesce(p_arg, ''))) and x.section = any(public.ops_sections()) and public.record_visible_for(me, x) limit 1;
     if not found then return jsonb_build_object('intent', p_intent, 'kind', 'unavailable', 'items', '[]'::jsonb, 'note', 'No record with that number among those you can open.'); end if;
     return jsonb_build_object('intent', p_intent, 'kind', 'fact', 'items', jsonb_build_array(jsonb_build_object('record_id', r.id, 'section', r.section, 'title', r.title, 'number', r.data->>'number', 'status', r.status,
       'processes', public.ops_record_processes(r.id))));
@@ -2783,6 +2828,7 @@ begin
     when 'obligations_due' then array['obl_due_soon', 'obl_overdue'] when 'changes_open' then array['ecr_open'] when 'issues_open' then array['iss_open']
     when 'waiting_external' then array['wait_open', 'wait_overdue'] when 'sla_overdue' then array['sla_overdue', 'sla_escalated'] when 'blocked' then array['blocked'] end;
   if kinds is null then return jsonb_build_object('intent', p_intent, 'kind', 'unavailable', 'items', '[]'::jsonb, 'note', 'This question is not one Workspace can answer from its records.'); end if;
+  perform public._ops_items(me, kinds);
   items := coalesce((select jsonb_agg(to_jsonb(x) order by x.due nulls last) from (select * from pg_temp.ops_items where kind = any(kinds) order by due nulls last limit 50) x), '[]'::jsonb);
   return jsonb_build_object('intent', p_intent, 'kind', case when jsonb_array_length(items) = 0 then 'unavailable' else 'fact' end, 'items', items,
     'total', (select count(*) from pg_temp.ops_items where kind = any(kinds)),
@@ -2802,8 +2848,12 @@ begin
   if auth.uid() is not null then raise exception 'Not allowed' using errcode = '42501'; end if;
   wk := array(select v::int from jsonb_array_elements_text(coalesce(public.ops_cfg()->'weekend', '[6,7]')) v);
   for x in select s.*, i.definition_id, i.record_id, i.status ist from public.wf_step_runs s join public.wf_instances i on i.id = s.instance_id and i.current_run = s.id
+           join public.wf_definitions d on d.id = i.definition_id
            where s.status = 'open' and s.due_at is not null and not s.paused and s.due_at - soon <= now() and i.status in ('active', 'blocked')
-           order by s.due_at limit 2000 loop
+             -- only runs with something still to do: a first notice, the overdue notice, an escalation or a timeout not yet taken
+             and (s.soon_at is null or (s.overdue_at is null and s.due_at <= now())
+               or exists (select 1 from jsonb_array_elements(d.steps) st2 where st2->>'id' = s.step_id and ((st2 ? 'escalation' and s.escalation_level = 0) or (st2->'on' ? 'timed_out' and s.due_at <= now()))))
+           order by s.due_at limit 5000 loop
     select * into r from public.records where id = x.record_id;
     st := public._wf_step(x.definition_id, x.step_id);
     if x.step_type = 'APPROVAL' and x.soon_at is null then

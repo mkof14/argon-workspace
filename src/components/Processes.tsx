@@ -144,9 +144,9 @@ function MyProcesses({ onOpen }: { onOpen: (id: string) => void }) {
 /* ------------------------------------------------ Operations dashboard (B30) ------------------------------------------------ */
 function OpsDashboard({ onOpen }: { onOpen: (id: string) => void }) {
   const { lang } = useApp(); const T = (x: T4, v?: any) => say(x, lang, v);
-  const [ov, setOv] = useState<any>(null); const [err, setErr] = useState(""); const [drill, setDrill] = useState<{ kind: string; title: T4 } | null>(null); const [rows, setRows] = useState<any[] | null>(null);
+  const [ov, setOv] = useState<any>(null); const [err, setErr] = useState(""); const [drill, setDrill] = useState<{ kind: string; title: T4 } | null>(null); const [rows, setRows] = useState<any[] | null>(null); const [q, setQ] = useState("");
   useEffect(() => { ops.overview().then(setOv).catch((e) => setErr(e.message)); }, []);
-  useEffect(() => { if (!drill) return; setRows(null); ops.list(drill.kind, 500).then(setRows).catch(() => setRows([])); }, [drill]);
+  useEffect(() => { if (!drill) return; setRows(null); const t = setTimeout(() => ops.list(drill.kind, 500, q).then(setRows).catch(() => setRows([])), q ? 250 : 0); return () => clearTimeout(t); }, [drill, q]);
   if (err) return <div className="card empty">{err}</div>;
   if (!ov) return <div className="card empty">…</div>;
   const n = (k: string) => ov.items?.[k]?.count || 0;
@@ -159,7 +159,8 @@ function OpsDashboard({ onOpen }: { onOpen: (id: string) => void }) {
             <small>{T(l)}{amt ? <span className="faint"> · {amt}</span> : null}</small><b className={`mono ${["po_overdue", "obl_overdue", "sla_overdue", "sla_escalated", "blocked", "wait_overdue", "iss_overdue"].includes(k) && n(k) ? "neg" : ""}`}>{n(k)}</b></button>; })}</div></div>)}
     </div>
     {drill && <section className="card" data-drill><div className="card-h"><h2><Icon n="funnel" />{T(drill.title)} <span className="chip mono">{n(drill.kind)}</span></h2>
-      <button className="btn ghost sm" style={{ marginInlineStart: "auto" }} onClick={() => setDrill(null)}><Icon n="x" />{T(L("Close", "Закрыть", "Закрити", "إغلاق"))}</button></div>
+      <input style={{ marginInlineStart: "auto", maxWidth: 220 }} data-drill-q placeholder={T(L("Find by title or number", "Найти по названию или номеру", "Знайти за назвою чи номером", "ابحث بالعنوان أو الرقم"))} value={q} onChange={(e) => setQ(e.target.value)} />
+      <button className="btn ghost sm" onClick={() => { setDrill(null); setQ(""); }}><Icon n="x" />{T(L("Close", "Закрыть", "Закрити", "إغلاق"))}</button></div>
       <div className="feed">{!rows ? <div className="empty">…</div> : rows.length ? rows.map((r, i) => <Row key={r.record_id + i} r={r} onOpen={onOpen} extra={r.amount != null ? <small className="mono">{money(r.amount, r.currency)}</small> : null} />) : <div className="empty" style={{ padding: 16 }}>—</div>}</div></section>}
     <small className="faint">{T(L("Counted only from records you may open. Workspace keeps no accounts and moves no money: “paid” means Finance recorded the payment.", "Считается только по записям, которые вам доступны. Workspace не ведёт бухгалтерию и не переводит деньги: «оплачено» — значит, бухгалтерия записала оплату.", "Рахується лише за записами, доступними вам. Workspace не веде бухгалтерію і не переказує гроші: «сплачено» — означає, що бухгалтерія записала оплату.", "يُحتسب فقط من السجلات المتاحة لك. لا يمسك Workspace حسابات ولا ينقل أموالًا: «مدفوع» يعني أن المالية سجّلت الدفع."))}</small>
   </>;

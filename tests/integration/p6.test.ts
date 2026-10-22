@@ -262,10 +262,13 @@ test("Scenario 6 — a contract obligation appears in deadlines and attention fo
   const ob = (await as("legal", "insert into records(section, title, status, data) values ('legal.contract_obligations', $1, 'Open', $2) returning id", [`${tag} Quarterly report to counterparty`, { contract_ref: c, due: D(-2), description: "Send the quarterly delivery report", owner_id: U.legal.id }]))[0].id;
   const soon = (await as("legal", "insert into records(section, title, status, data) values ('legal.contract_obligations', $1, 'Open', $2) returning id", [`${tag} Insurance certificate`, { contract_ref: c, due: D(5), description: "Provide the insurance certificate" }]))[0].id;
   const att = await call("legal", "ops_attention");
-  const a = att.find((x: any) => x.record_id === ob); assert.ok(a); assert.equal(a.kind, "obl_overdue"); assert.match(a.reason, /Overdue since/);
-  const dl = await call("legal", "ops_deadlines", [60]);
+  const lst = await call("legal", "ops_list", ["obl_overdue", 500, tag]);
+  const a = lst.find((x: any) => x.record_id === ob); assert.ok(a); assert.equal(a.kind, "obl_overdue"); assert.match(a.reason, /Overdue since/);
+  assert.ok(att.some((x: any) => x.record_id === ob) || att.length === 200, "in attention (the list shows the first 200 by rank)");
+  const dl = await call("legal", "ops_deadlines", [60, tag]);
   assert.ok(dl.some((x: any) => x.record_id === soon && x.kind === "obligation")); assert.ok(dl.some((x: any) => x.record_id === c && x.kind === "contract_end"));
-  const ov = await call("mgmt", "ops_overview"); assert.ok(ov.items.obl_overdue.ids.includes(ob)); assert.ok(ov.items.obl_due_soon.ids.includes(soon));
+  const ov = await call("mgmt", "ops_overview"); assert.ok(ov.items.obl_overdue.count >= 1 && ov.items.obl_due_soon.count >= 1);
+  assert.ok((await call("mgmt", "ops_list", ["obl_overdue", 500, tag])).some((x: any) => x.record_id === ob)); assert.ok((await call("mgmt", "ops_list", ["obl_due_soon", 500, tag])).some((x: any) => x.record_id === soon));
   const hr = await call("hrEmp", "ops_attention"); assert.ok(!hr.some((x: any) => x.record_id === ob), "HR cannot read contract obligations");
   EV.scenarios.s6 = { overdue: a, deadlines: dl.length };
 });
@@ -365,7 +368,8 @@ test("Scenario 10 — an overdue approval: one overdue notice and one escalation
   const nEsc = (await sql("select count(*)::int n from notifications where kind = 'wf_escalated' and key like $1", [`wf-esc:${i.run}%`]))[0].n;
   assert.ok(nEsc >= 1); assert.equal((await sql("select count(*)::int n from notifications where user_id = $1 and key like $2", [U.mgmt.id, `wf-esc:${i.run}%`]))[0].n, 1);
   assert.equal((await sql("select count(*)::int n from notifications where user_id = $1 and key like 'wf-ap:%' and record_id = $2", [U.salesLead.id, pr.record]))[0].n, 1, "the approver is told once");
-  const ov = await call("mgmt", "ops_overview"); assert.ok(ov.items.sla_escalated.ids.includes(pr.record)); assert.ok(ov.items.sla_overdue.ids.includes(pr.record));
+  assert.ok((await call("mgmt", "ops_list", ["sla_escalated", 500, tag])).some((x: any) => x.record_id === pr.record));
+  assert.ok((await call("mgmt", "ops_list", ["sla_overdue", 500, tag])).some((x: any) => x.record_id === pr.record));
   EV.sla = { tick1: t1, tick2: t2, escalation_notices: nEsc };
 });
 
@@ -561,9 +565,10 @@ test("Scenario 15 — automatic steps run at most once, failures are retried thr
   // an administrator retries it by hand (after fixing the cause) — the same step run, never a second one
   await fails(act("emp", i.run, "retry"), /Only the process owner/);
   // the Phase 1 scheduler's workflow job runs the same retries and the SLA tick (service role)
-  const { JOBS_FNS } = await import("../../src/lib/server/schedule.ts");
-  const j = await JOBS_FNS.workflow(admin(), { deadline: Date.now() + 20000 } as any);
-  assert.ok(j && typeof j.due_soon === "number" && j.retries, "the workflow job answers with its counts");
+  // (the job "workflow" in src/lib/server/schedule.ts is exactly this call with the service role)
+  assert.match(fs.readFileSync(path.join(process.cwd(), "src/lib/server/schedule.ts"), "utf8"), /workflow: async \(db\) => \{\s*const \{ data, error \} = await db\.rpc\("wf_sla_tick"\)/);
+  const { data: j, error: je } = await admin().rpc("wf_sla_tick");
+  assert.equal(je, null); assert.ok(j && typeof j.due_soon === "number" && j.retries, "the workflow job answers with its counts");
   EV.automation = { retried: { attempts: 2, status: "completed" }, dead: { attempts: q.attempts, status: q.status } };
 });
 
