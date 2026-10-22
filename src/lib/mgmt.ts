@@ -185,9 +185,10 @@ export const REVIEW_TITLES: Record<string, T4> = {
   changes: L("7. Changes since the previous review", "7. Изменения с прошлого обзора", "7. Зміни з попереднього огляду", "7. التغييرات منذ المراجعة السابقة"),
   completed: L("8. Completed work", "8. Выполненная работа", "8. Виконана робота", "8. العمل المنجز"), next: L("9. Next week", "9. Следующая неделя", "9. Наступний тиждень", "9. الأسبوع القادم"),
   operations: L("10. Operations", "10. Операции", "10. Операції", "10. العمليات"),
+  commercial: L("11. Commercial", "11. Коммерция", "11. Комерція", "11. التجاري"),
 };
 /** The Weekly Management Review, assembled only from rows the database returned for this viewer. */
-export function weeklyReview(o: { overview: any; health: any[]; attention: any[]; loops: any[]; waiting: any[]; deadlines: any[]; changes: any[]; sinceLabel: string; operations?: any }, lang: Lang | string): Review {
+export function weeklyReview(o: { overview: any; health: any[]; attention: any[]; loops: any[]; waiting: any[]; deadlines: any[]; changes: any[]; sinceLabel: string; operations?: any; commercial?: any }, lang: Lang | string): Review {
   const ind = o.overview?.indicators || {}; const lv = (k: Level) => o.health.filter((h) => h.level === k).length;
   const S = (k: string, lines: { text: string; link?: string }[]) => ({ key: k, title: say(REVIEW_TITLES[k], lang), lines });
   const none = say(L("Nothing.", "Нет.", "Немає.", "لا شيء."), lang);
@@ -206,6 +207,22 @@ export function weeklyReview(o: { overview: any; health: any[]; attention: any[]
     S("next", ln(o.deadlines.filter((d) => d.days >= 0 && d.days <= 7).slice(0, 20).map((d) => ({ text: `${d.due} · ${d.title}${d.project_title ? ` (${d.project_title})` : ""}`, link: d.link })))),
     // Phase 6: OPERATIONS — the same numbers as the operations dashboard (ops_weekly, the viewer's records only)
     ...(o.operations ? [S("operations", opsWeeklyText(o.operations, lang).split("\n").slice(1).map((t) => ({ text: t.replace(/^- /, ""), link: "/ops?tab=dashboard" })))] : []),
+    // Phase 7: COMMERCIAL — crm_weekly for the viewer's opportunities only; weighted values are estimates, not revenue
+    ...(o.commercial ? [S("commercial", crmWeeklyLines(o.commercial, lang))] : []),
   ], } as Review & { since?: string };
 }
 export const reviewText = (r: Review, head: string) => [head, "", ...r.sections.flatMap((s) => [s.title, ...s.lines.map((l) => `- ${l.text}`), ""])].join("\n");
+
+/** Phase 7: the commercial lines of the weekly review — each line names its record; values per currency, never added across */
+export function crmWeeklyLines(w: any, lang: Lang | string): { text: string; link?: string }[] {
+  const p = (x: any, v: any = {}) => say(x, lang as any, v); const sm = w?.summary || {};
+  const val = (r: any) => { const v = r.final ?? r.negotiated ?? r.quoted ?? r.value; return v == null ? "" : ` · ${Number(v).toLocaleString("en-US")} ${r.currency || "(no currency)"}`; };
+  const one = (r: any) => ({ text: `${r.number ? r.number + " · " : ""}${r.title}${r.party ? ` (${r.party})` : ""}${val(r)}`, link: r.id ? `/crm?opp=${r.id}` : "/crm" });
+  const out: { text: string; link?: string }[] = [{ text: p(L("Active {a} · new this week {n} · won {w} · lost {l} · stalled {s} · at risk {r} · proposals outstanding {po}", "Активных {a} · новых за неделю {n} · выиграно {w} · проиграно {l} · застряло {s} · под риском {r} · КП без ответа {po}", "Активних {a} · нових за тиждень {n} · виграно {w} · програно {l} · застрягло {s} · під ризиком {r} · КП без відповіді {po}", "نشطة {a} · جديدة {n} · مكسوبة {w} · خاسرة {l} · متوقفة {s} · معرضة {r} · عروض معلقة {po}"),
+    { a: sm.active ?? 0, n: sm.new ?? 0, w: sm.won ?? 0, l: sm.lost ?? 0, s: sm.stalled ?? 0, r: sm.risk ?? 0, po: sm.proposals_outstanding ?? 0 }), link: "/crm?tab=review" }];
+  const add = (k: string, l: any) => { const rs = (w?.[k] || []).slice(0, 8); if (rs.length) { out.push({ text: p(l) + ":" }); rs.forEach((r: any) => out.push(one(r))); } };
+  add("wins", L("Won", "Выиграно", "Виграно", "مكسوبة")); add("losses", L("Lost", "Проиграно", "Програно", "خاسرة")); add("stalled", L("Stalled", "Застряли", "Застрягли", "متوقفة"));
+  add("decisions_expected", L("Decisions expected", "Ожидаются решения", "Очікуються рішення", "قرارات متوقعة")); add("major", L("Major opportunities", "Крупные возможности", "Великі можливості", "فرص كبرى"));
+  out.push({ text: p(L("Weighted pipeline is a management estimate, not revenue.", "Взвешенная воронка — управленческая оценка, не выручка.", "Зважена воронка — управлінська оцінка, не виручка.", "المسار المرجح تقدير إداري وليس إيرادًا.")) });
+  return out;
+}

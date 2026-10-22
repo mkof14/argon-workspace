@@ -195,6 +195,7 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
     if (f.type === "readonly") return v ? <div key={f.key} className="field"><label>{tx(f.label, lang)}</label><div className="input ro mono" id={id} data-field={f.key}>{String(v)}</div></div> : null;
     if (f.auto) return v ? <div key={f.key} className="field"><label>{tx(f.label, lang)}</label><div className="input ro mono" id={id}>{String(v)}</div></div> : null;
     if (f.type === "html") return v ? <div key={f.key} className="field wide"><label>{tx(f.label, lang)}</label><iframe title={tx(f.label, lang)} className="mailframe" style={{ height: 560 }} srcDoc={String(v)} sandbox="" /></div> : null;
+    if (f.type === "catalog" || f.type === "multi") return <CatalogField key={f.key} f={f} value={data[f.key]} set={set} ro={ro} id={id} lang={lang} />;
     if (f.type === "select") ctl = <select id={id} className="input" value={v} disabled={ro} onChange={(e) => set(e.target.value)}><option value="" />{f.options.map((o: string) => <option key={o}>{o}</option>)}</select>;
     else if (f.type === "long") ctl = <textarea id={id} className="input" value={v} readOnly={ro} rows={3} onChange={(e) => set(e.target.value)} />;
     else if (f.type === "check") return <label key={f.key} className="check wide"><input id={id} type="checkbox" checked={!!v} disabled={ro} onChange={(e) => set(e.target.checked)} />{tx(f.label, lang)}</label>;
@@ -265,6 +266,7 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
           {rec && section.id === "sales.pipeline" && rec.status === "Won" && !isExternal(me.role) && <ProjectMoney deal={rec} />}
           {section.dept === "marketing" && <MarketingStudio section={section} title={title} data={data} setData={setData} canWrite={canWrite} saved={!!rec} />}
           <datalist id="people-list">{people.map((p) => <option key={p.id} value={p.full_name || p.email} />)}</datalist>
+          {rec && rec.data?._email && !isExternal(me.role) && !rec.section.startsWith("sales.pipeline") && <CrmMailLinks rec={rec} lang={lang} />}
           {rec && Array.isArray(rec.data?._suggested_links) && rec.data._suggested_links.length > 0 && !isExternal(me.role) && <div className="thread"><div className="eyebrow">{tx({ en: "From the e-mail: possibly related (suggestion — check before linking)", ru: "Из письма: возможно связано (подсказка — проверьте перед привязкой)", uk: "З листа: можливо пов'язано (підказка — перевірте перед прив'язкою)", ar: "من البريد: قد يكون مرتبطاً (اقتراح — تحقق قبل الربط)" }, lang)}</div>
             <div className="toolbar">{rec.data._suggested_links.map((l: any) => <a key={l.kind + l.id} className="chip" href={l.kind === "thread" ? "/system?tab=ops" : l.kind === "project" ? `/projects/${l.id}` : `/${l.kind === "supplier" ? "operations/vendors" : "operations/procurement"}?r=${l.id}`} title={l.why}>{l.kind}: {l.title} · {l.strength}</a>)}</div></div>}
           {section.id === "company.meetings" && <MeetingPanel rec={rec} data={data} setData={setData} canWrite={canWrite} onDone={onReload || onSaved} />}
@@ -306,4 +308,34 @@ export default function RecordDrawer({ section, rec, onClose, onSaved, onReload 
       {cf && <ConflictDialog conflicts={cf.conflicts} at={cf.theirs?.updated_at} labelOf={fieldLabel} onResolve={resolveConflict} onCancel={() => setCf(null)} />}
     </>
   );
+}
+
+/* Phase 7: a choice from the commercial catalogs (Commercial → Settings), or several choices. The catalogs are
+   configuration, not code: a value no longer in the catalog stays shown as it was saved. */
+let CATS: Promise<any> | null = null;
+function CatalogField({ f, value, set, ro, id, lang }: { f: any; value: any; set: (v: any) => void; ro: boolean; id: string; lang: any }) {
+  const [opts, setOpts] = useState<string[]>(f.options || []);
+  useEffect(() => { const key = f.catalog || (f.key === "relationship_types" ? "relationship_types" : null); if (!key) return;
+    if (!CATS) CATS = import("@/lib/crmApi").then((m) => m.crm.catalogs()).catch(() => null);
+    CATS.then((c) => { const l = c?.[key]; if (Array.isArray(l) && l.length) setOpts(l.map((x: any) => (typeof x === "string" ? x : x.stage || x.name || String(x)))); }); }, [f.catalog, f.key]);
+  if (f.type === "multi") {
+    const cur: string[] = Array.isArray(value) ? value : value ? [String(value)] : [];
+    const all = Array.from(new Set([...opts, ...cur]));
+    return <div className="field wide" data-field={f.key}><label>{tx(f.label, lang)}</label><div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>{all.map((o) => <label key={o} className="check"><input type="checkbox" disabled={ro} checked={cur.includes(o)} onChange={(e) => set(e.target.checked ? [...cur, o] : cur.filter((x) => x !== o))} />{o}</label>)}</div></div>;
+  }
+  const v = value ?? ""; const all = v && !opts.includes(v) ? [...opts, v] : opts;
+  return <div className="field"><label htmlFor={id}>{tx(f.label, lang)}</label><select id={id} className="input" value={v} disabled={ro} onChange={(e) => set(e.target.value)}><option value="" />{all.map((o) => <option key={o}>{o}</option>)}</select></div>;
+}
+
+/* Phase 7: a record filed from an e-mail — which organisation, contact, lead or opportunity it may belong to. Suggestions
+   only (crm_email_suggest, records the person may open); a link exists only when the person confirms it. */
+function CrmMailLinks({ rec, lang }: { rec: any; lang: any }) {
+  const [s, setS] = useState<any[] | null>(null); const [done, setDone] = useState<Record<string, string>>({});
+  const raw = String(rec.data?._email || ""); const i = raw.indexOf(" — "); const from = i > 0 ? raw.slice(0, i) : raw; const subject = i > 0 ? raw.slice(i + 3) : "";
+  useEffect(() => { import("@/lib/crmApi").then((m) => m.crm.emailSuggest(from, subject, "record", rec.id)).then((r: any) => setS(r?.suggestions || [])).catch(() => setS([])); }, [rec.id]); // eslint-disable-line
+  if (!s || !s.length) return null;
+  const act = (t: any, accept: boolean) => import("@/lib/crmApi").then((m) => m.crm.emailLink("record", rec.id, t.target, accept, subject, from)).then(() => setDone((d) => ({ ...d, [t.target]: accept ? "linked" : "rejected" }))).catch(() => {});
+  return <div className="thread" data-crm-mail><div className="eyebrow">{tx({ en: "Commercial: this e-mail may belong to (suggestions — confirm each)", ru: "Коммерция: письмо может относиться к (предложения — подтвердите каждое)", uk: "Комерція: лист може стосуватися (пропозиції — підтвердьте кожну)", ar: "تجاري: قد تخص هذه الرسالة (اقتراحات — أكد كلًا منها)" }, lang)}</div>
+    {s.slice(0, 6).map((t: any) => <div key={t.target} className="toolbar" style={{ gap: 6 }}><a className="chip" href={t.section === "sales.pipeline" ? `/crm?opp=${t.target}` : `/${String(t.section).replace(".", "/")}?r=${t.target}`}>{t.title}</a><small className="faint">{Array.isArray(t.why) ? t.why.join(", ") : t.why}</small>
+      {done[t.target] ? <small className="chip">{done[t.target]}</small> : <><button className="btn ghost sm" data-mail-link={t.target} onClick={() => act(t, true)}>{tx({ en: "Link", ru: "Связать", uk: "Пов'язати", ar: "ربط" }, lang)}</button><button className="btn ghost sm" onClick={() => act(t, false)}>{tx({ en: "Not related", ru: "Не относится", uk: "Не стосується", ar: "غير مرتبط" }, lang)}</button></>}</div>)}</div>;
 }

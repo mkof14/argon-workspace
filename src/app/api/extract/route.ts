@@ -4,6 +4,7 @@ import { limit } from "@/lib/server/authz";
 import { reportError } from "@/lib/server/errors";
 import { isInternal } from "@/lib/roles";
 import { keepEvidenced, patternExtract, type Kind, type Proposal } from "@/lib/extract";
+import { parseCardText } from "@/lib/crmText";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,6 +22,24 @@ export async function POST(req: Request) {
   const db = adminClient(); const sb = await userClient();
   { const lim = await limit(`extract:${me.id}`, 20, 60, db); if (lim) return lim; }
   const b = await req.json().catch(() => ({}));
+  // Phase 7 — business card: the model (only when configured) copies the printed text; the fields are then read from that
+  // text by the same parser as typed text, so a field exists only if it is written on the card. Nothing is stored here:
+  // the person checks the proposal, duplicate detection runs, and only their confirmation creates a lead.
+  if (b.action === "card") {
+    const text0 = String(b.text || "").slice(0, 4000);
+    if (text0.trim()) return Response.json({ method: "text", fields: parseCardText(text0), text: text0 });
+    const type = String(b.type || ""); const data = String(b.image || "");
+    if (!/^image\/(png|jpe?g|webp)$/.test(type) || !data || data.length > 7_000_000) return new Response("Send a PNG, JPEG or WebP photo (up to about 5 MB), or type the card text", { status: 400 });
+    if (!process.env.ANTHROPIC_API_KEY) return new Response("Reading photos needs a configured model. Type or paste the card text, or scan the card's QR code.", { status: 409 });
+    try {
+      const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      const msg: any = await client.messages.create({ model: process.env.AI_MODEL_QUICK || "claude-haiku-5-5", max_tokens: 600,
+        system: "Copy the text printed on this business card exactly, one line per printed line. Do not add, guess, translate or complete anything. If nothing is readable, answer with an empty response.",
+        messages: [{ role: "user", content: [{ type: "image", source: { type: "base64", media_type: (type === "image/jpg" ? "image/jpeg" : type) as "image/jpeg" | "image/png" | "image/webp", data } }, { type: "text", text: "Transcribe the card." }] }] });
+      const text = (msg.content || []).map((c: any) => c.text || "").join("\n").slice(0, 4000);
+      return Response.json({ method: "model", fields: parseCardText(text), text });
+    } catch (e: any) { await reportError(db, "extract:card", e).catch(() => null); return new Response("The photo could not be read. Type the card text instead.", { status: 502 }); }
+  }
   if (b.action !== "extract") return new Response("Unknown action", { status: 400 });
   const kind: Kind | null = ["quotation", "obligation", "invoice"].includes(b.kind) ? b.kind : null;
   if (!kind) return new Response("Choose what to extract: quotation, obligation or invoice", { status: 400 });

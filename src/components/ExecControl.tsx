@@ -116,6 +116,7 @@ export default function ExecControl() {
           {(ov.deadlines || []).map((d: any) => <Link key={d.kind + d.record_id} href={d.link} className="hub-row"><span style={{ minWidth: 0 }}><b>{d.title}</b><small>{T(DEADLINE_KIND[d.kind])}{d.project_title && d.kind !== "project" ? ` · ${d.project_title}` : ""} · {d.due}</small></span><span className={`chip ${d.days <= 3 ? "c-warn" : "c-info"}`}>{rel(d.days)}</span></Link>)}
         </Card>
         <OpsCard />
+        <CrmCard />
       </div>
 
       <section className="card" id="exec-tabs">
@@ -214,7 +215,8 @@ function Reports({ overview, name }: { overview: any; name: (id?: string | null)
   const decisions = () => run("x", async () => dl(decisionsCsv(await mgmt.decisions()), `decisions-${today}.csv`));
   const review = () => run("r", async () => {
     const [health, attention, loops, waiting, deadlines, changes, operations] = await Promise.all([mgmt.health(), mgmt.attention(50), mgmt.loops(), mgmt.waiting(), mgmt.deadlines(30), mgmt.changes("review"), ops.weekly().catch(() => null)]);
-    const r = weeklyReview({ overview, health, attention, loops, waiting, deadlines, changes, sinceLabel: "", operations }, lang); setRev(r);
+    const commercial = await import("@/lib/crmApi").then((m) => m.crm.weekly()).catch(() => null);
+    const r = weeklyReview({ overview, health, attention, loops, waiting, deadlines, changes, sinceLabel: "", operations, commercial }, lang); setRev(r);
     setPacket(reviewText(r, `${T(L("Weekly Management Review", "Еженедельный обзор руководства", "Щотижневий огляд керівництва", "المراجعة الإدارية الأسبوعية"))} — ${today} — ${me.full_name || me.email}`));
   });
   const close = () => run("s", async () => { await mgmt.snapshot("review", `Review ${today}`); toast(T(L("Review saved — the next “since last review” starts now", "Обзор сохранён — «с прошлого обзора» начнётся отсюда", "Огляд збережено — «з попереднього огляду» почнеться звідси", "حُفظت المراجعة"))); });
@@ -299,4 +301,20 @@ function OpsCard() {
   return <div className="card hub-card" data-ops-card><div className="card-h"><h2><Icon n="git" />{T(L("Operations", "Операции", "Операції", "العمليات"))}</h2><Link className="btn ghost sm" style={{ marginInlineStart: "auto" }} href="/ops?tab=dashboard">{T(L("All", "Все", "Усі", "الكل"))}</Link></div>
     <div className="feed">{!ov ? <div className="empty">…</div> : <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, padding: "0 8px 8px" }}>{K.map(([k, l]) => <Link key={k} className="stat" data-ops-kind={k} href={k === "needs_action" ? "/ops?tab=mine" : "/ops?tab=dashboard"}><b className={`mono ${k !== "needs_action" && k !== "wait_open" && n(k) ? "neg" : ""}`}>{n(k)}</b><small>{T(l)}</small></Link>)}</div>}
       {(att || []).slice(0, 5).map((a: any) => <Link key={a.kind + a.record_id} className="hub-row" href={a.instance_id ? `/ops?i=${a.instance_id}` : `/${String(a.section).replace(".", "/")}?r=${a.record_id}`}><span style={{ minWidth: 0 }}><b>{a.number ? `${a.number} · ` : ""}{a.title}</b><small>{a.reason}</small></span></Link>)}</div></div>;
+}
+
+/** Phase 7: the commercial part of Executive Control — counts of the opportunities this person may open; each opens the list */
+function CrmCard() {
+  const { lang, access } = useApp(); const T = (x: T4, v?: any) => say(x, lang, v);
+  const [ov, setOv] = useState<any>(null);
+  const ok = ["sales.pipeline", "marketing.leads"].some((x) => access.read.has(x));
+  useEffect(() => { if (ok) import("@/lib/crmApi").then((m) => m.crm.overview()).then(setOv).catch(() => setOv({ blocks: {} })); }, [ok]);
+  if (!ok) return null;
+  const K: [string, T4][] = [["needs_action", L("Needs my action", "Нужно моё действие", "Потрібна моя дія", "يحتاج إجرائي")], ["overdue", L("Overdue follow-up", "Просрочен контакт", "Прострочений контакт", "متابعة متأخرة")],
+    ["stalled", L("Stalled", "Застряли", "Застрягли", "متوقفة")], ["proposals_waiting", L("Proposals waiting", "КП ждут ответа", "КП чекають відповіді", "عروض بانتظار الرد")],
+    ["upcoming_decisions", L("Decisions in 30 days", "Решения за 30 дней", "Рішення за 30 днів", "قرارات خلال 30 يومًا")], ["no_next_action", L("No next action", "Без следующего шага", "Без наступного кроку", "بلا خطوة تالية")]];
+  return <div className="card hub-card" data-crm-card><div className="card-h"><h2><Icon n="handshake" />{T(L("Commercial", "Коммерция", "Комерція", "التجاري"))}</h2><Link className="btn ghost sm" style={{ marginInlineStart: "auto" }} href="/crm">{T(L("All", "Все", "Усі", "الكل"))}</Link></div>
+    <div className="feed">{!ov ? <div className="empty">…</div> : <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, padding: "0 8px 8px" }}>{K.map(([k, l]) => <Link key={k} className="stat" data-crm-kind={k} href="/crm?tab=dashboard">
+      <b className={`mono ${["overdue", "stalled"].includes(k) && ov.blocks?.[k]?.count ? "neg" : ""}`}>{ov.blocks?.[k]?.count || 0}</b><small>{T(l)}</small></Link>)}</div>}</div>
+    <small className="faint" style={{ padding: "0 12px 10px", display: "block" }}>{T(L("Weighted pipeline is a management estimate, not revenue.", "Взвешенная воронка — управленческая оценка, не выручка.", "Зважена воронка — управлінська оцінка, не виручка.", "المسار المرجح تقدير إداري وليس إيرادًا."))}</small></div>;
 }

@@ -112,6 +112,7 @@ export default function Today() {
         <div id="proj"><Box icon="layers" title={L("My projects", "Мои проекты", "Мої проєкти", "مشاريعي")} n={myProjects.length} more="/projects" empty={L("You are not in a project team yet.", "Вы пока не в команде проекта.", "Ви поки не в команді проєкту.", "لست في فريق مشروع بعد.")}>
           {myProjects.slice(0, 8).map((p) => { const s = projectStats(p, w.all || [], today); return <Link key={p.id} href={`/projects/${p.id}`} className="hub-row"><span style={{ minWidth: 0 }}><b>{p.title}</b><small>{s.nextMilestone ? `${T(L("Next", "Далее", "Далі", "التالي"))}: ${s.nextMilestone.title} · ${s.nextMilestone.data?.due || ""}` : `${s.open} ${T(L("open tasks", "открытых задач", "відкритих задач", "مهام مفتوحة"))}`}</small>
             <span className="bar" style={{ display: "block", marginTop: 4 }}><span style={{ width: `${s.progress}%` }} /></span></span><span className={`chip ${s.health === "late" ? "c-bad" : s.health === "risk" ? "c-warn" : "c-ok"}`}>{s.progress}%</span></Link>; })}</Box></div>
+        <CrmFollowups />
         {auto && auto.n > 0 && <div className="wide"><Box icon="cpu" title={L("Prepared by agents — approve in one click", "Подготовлено агентами — одобрите одним кликом", "Підготовлено агентами — схваліть одним кліком", "أعدّه الوكلاء — وافق بنقرة واحدة")} n={auto.n} empty={L("", "", "", "")}>
           {auto.items.map((q) => <Link key={q.id} href="/admin/system?tab=auto" className="hub-row"><span><b>{trA(q.title)}</b><small>{q.agent} · {q.at.slice(0, 10)}</small></span><span className="chip c-warn">{T(L("Review", "Посмотреть", "Переглянути", "مراجعة"))}</span></Link>)}</Box></div>}
         {d.company.length > 0 && <div className="wide"><Box icon="alert" title={L("Company: overdue items (leaders)", "Компания: просрочено (для руководства)", "Компанія: прострочено (для керівництва)", "الشركة: متأخرات")} n={d.company.length} more="/management" empty={L("", "", "", "")}>
@@ -120,4 +121,19 @@ export default function Today() {
       <SinceLast />
     </div>
   );
+}
+
+/** Phase 7: who to follow up with today — my opportunities and leads that are due or overdue (crm_followups, mine only) */
+function CrmFollowups() {
+  const { lang, access } = useApp(); const T = (x: any) => tx(x, lang as Lang);
+  const ok = ["sales.pipeline", "marketing.leads"].some((x) => access.read.has(x));
+  const [f, setF] = useState<any>(null);
+  useEffect(() => { if (ok && !DEMO) import("@/lib/crmApi").then((m) => m.crm.followups("mine")).then(setF).catch(() => setF({ opportunities: [], leads: [] })); }, [ok]);
+  if (!ok || DEMO) return null;
+  const items = [...(f?.opportunities || []).map((r: any) => ({ id: r.id, href: `/crm?opp=${r.id}`, title: `${r.number ? r.number + " · " : ""}${r.title}`, sub: r.next_action || (r.reasons || []).map((x: any) => x.text).join(" · "), due: r.next_action_due })),
+    ...(f?.leads || []).map((x: any) => ({ id: x.id, href: `/marketing/leads?r=${x.id}`, title: x.title, sub: [x.organization, x.phone, x.email].filter(Boolean).join(" · "), due: x.follow_up }))];
+  return <div id="crm-followups" className="card hub-card" data-today-crm><div className="card-h"><h2><Icon n="handshake" />{T({ en: "Commercial follow-ups", ru: "Коммерческие контакты", uk: "Комерційні контакти", ar: "المتابعات التجارية" })} <span className="chip mono">{items.length}</span></h2>
+    <Link className="btn ghost sm" style={{ marginInlineStart: "auto" }} href="/crm?tab=review">{T({ en: "All", ru: "Все", uk: "Усі", ar: "الكل" })}</Link></div>
+    <div className="feed">{!f ? <div className="empty">…</div> : items.length ? items.slice(0, 8).map((x) => <Link key={x.id} href={x.href} className="hub-row"><span style={{ minWidth: 0 }}><b>{x.title}</b><small>{x.sub}</small></span>{x.due ? <span className={`chip ${String(x.due) < todayIso() ? "c-bad" : "c-warn"}`}>{String(x.due).slice(0, 10)}</span> : null}</Link>)
+      : <div className="empty" style={{ padding: 12 }}>{T({ en: "No one to follow up with today.", ru: "Сегодня связываться не с кем.", uk: "Сьогодні нема з ким зв'язуватися.", ar: "لا متابعات اليوم." })}</div>}</div></div>;
 }

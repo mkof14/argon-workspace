@@ -29,6 +29,11 @@ async function as<T = any>(k: string, q: string, p: any[] = []): Promise<T[]> {
 }
 /** one function call as one person; returns its value */
 const call = async (k: string, fn: string, args: any[] = []) => (await as(k, `select public.${fn}(${args.map((_, i) => `$${i + 1}`).join(", ")}) r`, args.map((a) => (Array.isArray(a) ? JSON.stringify(a) : a))))[0].r;
+// v24 (Phase 7) moved this authority to the Workflow Admin capability; on the rolled-back v23 schema (B51) the
+// earlier rule applies: owners, administrators and management. The checks below follow the schema they run on.
+let V24: boolean | null = null;
+const v24 = async () => (V24 ??= (await sql("select to_regproc('public.has_cap') is not null ok"))[0].ok);
+const WFA = async () => ((await v24()) ? /Workflow Admin/ : /Only owners, administrators and management|owners and administrators/);
 const fails = async (p: Promise<any>, re: RegExp) => { await assert.rejects(p, (e: any) => { assert.match(String(e.message), re); return true; }); };
 const rec = async (section: string, title: string, status: string | null, data: Record<string, any> = {}, o: { by?: string; controlled?: boolean } = {}) =>
   (await sql(`insert into records(section, title, status, created_by, data, controlled) values ($1, $2, $3, $4, $5, $6) returning *`, [section, `${tag} ${title}`, status, U[o.by || "owner"].id, data, !!o.controlled]))[0];
@@ -493,8 +498,8 @@ test("Scenario 14 — definition V1/V2: running processes keep V1, new ones take
   assert.ok((await errs([{ id: "a", name: "A", type: "TASK", responsible: { kind: "requester" } }], { required_roles: ["pirate"] })).includes("invalid_role"));
   assert.deepEqual(await errs([{ id: "a", name: "A", type: "TASK", responsible: { kind: "requester" } }]), [], "a minimal valid process");
   // editing: Workflow Admins only (owners; management by policy) — v24 (B45): not the System Administrator by role
-  await fails(call("emp", "wf_definition_save", [{ ...base, steps: [] }]), /Workflow Admin/);
-  await fails(call("admin", "wf_definition_save", [{ ...base, steps: [] }]), /Workflow Admin/);
+  await fails(call("emp", "wf_definition_save", [{ ...base, steps: [] }]), await WFA());
+  if (await v24()) await fails(call("admin", "wf_definition_save", [{ ...base, steps: [] }]), /Workflow Admin/);
   const v1 = await call("owner", "wf_definition_save", [{ ...base, steps: [{ id: "first", name: "First", type: "TASK", responsible: { kind: "requester" } }] }]);
   assert.equal(v1.version, 1);
   const bad = await call("owner", "wf_definition_save", [{ id: v1.id, steps: [{ id: "first", name: "First", type: "TASK" }] }]);
@@ -523,8 +528,8 @@ test("Scenario 14 — definition V1/V2: running processes keep V1, new ones take
   await call("owner", "wf_definition_disable", [base.code, true]);
   const i3 = await call("emp", "wf_start", [base.code, r3.id, null]);
   const v1id = (await sql("select id from wf_definitions where code = $1 and version = 1", [base.code]))[0].id;
-  await fails(call("admin", "wf_migrate", [i3, v1id, null]), /Workflow Admin/);
-  await fails(call("emp", "wf_migrate", [i3, v1id, null]), /Workflow Admin/);
+  if (await v24()) await fails(call("admin", "wf_migrate", [i3, v1id, null]), /Workflow Admin/);
+  await fails(call("emp", "wf_migrate", [i3, v1id, null]), await WFA());
   const m = await call("owner", "wf_migrate", [i3, v1id, "back to V1 for the test"]); assert.equal(m.version, 1);
   EV.engine.versions = { v1: a.def_version, v2: b.def_version };
 });
@@ -749,15 +754,15 @@ test("Weekly review OPERATIONS numbers, the dashboard drill-down and the audit t
 // anyone an owner grants it — never the System Administrator role by itself
 test("Settings and approval authority are changed only by Workflow Admins (owners; management by policy), validated, and kept in history", async () => {
   const s = await call("emp", "ops_settings_get"); assert.equal(s.can_edit, false);
-  await fails(call("emp", "ops_settings_save", [{ due_soon_hours: 12 }, s.version]), /Workflow Admin/);
+  await fails(call("emp", "ops_settings_save", [{ due_soon_hours: 12 }, s.version]), await WFA());
   assert.equal((await call("admin", "ops_settings_get")).can_edit, false, "a System Administrator holds no business authority by role");
-  await fails(call("admin", "ops_settings_save", [{ due_soon_hours: 12 }, s.version]), /Workflow Admin/);
+  if (await v24()) await fails(call("admin", "ops_settings_save", [{ due_soon_hours: 12 }, s.version]), /Workflow Admin/);
   await fails(call("owner", "ops_settings_save", [{ due_soon_hours: 0 }, s.version]), /1–720/);
   await fails(call("owner", "ops_settings_save", [{ evil: 1 }, s.version]), /Unknown setting/);
   await fails(call("owner", "ops_settings_save", [{ due_soon_hours: 24 }, s.version - 1]), /changed by someone else/);
   const ok = await call("owner", "ops_settings_save", [{ due_soon_hours: 24 }, s.version]); assert.equal(ok.version, s.version + 1);
-  await fails(call("mgmt", "ops_policy_save", ["PURCHASE", "x", [], true]), /at least one level/); // management holds Workflow Admin by policy: validated, not refused
-  await fails(call("admin", "ops_policy_save", ["PURCHASE", "x", [{ steps: [{ kind: "role", role: "finance" }] }], true]), /Workflow Admin/);
+  await fails(call("mgmt", "ops_policy_save", ["PURCHASE", "x", [], true]), (await v24()) ? /at least one level/ : /Only owners and administrators/); // management holds Workflow Admin by policy: validated, not refused
+  if (await v24()) await fails(call("admin", "ops_policy_save", ["PURCHASE", "x", [{ steps: [{ kind: "role", role: "finance" }] }], true]), /Workflow Admin/);
   await fails(call("owner", "ops_policy_save", ["PTEST", "x", [{ steps: [{ kind: "requester" }] }], true]), /own request/);
   await fails(call("owner", "ops_policy_save", ["PTEST", "x", [{ when: { field: "record.amount", op: "exec", value: 1 }, steps: [{ kind: "role", role: "finance" }] }], true]), /Unknown operator/);
   await call("owner", "ops_policy_save", ["PTEST", "Test policy", [{ steps: [{ kind: "role", role: "finance" }] }], true]);

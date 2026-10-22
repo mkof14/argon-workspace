@@ -27,6 +27,17 @@ export const KINDS: Record<string, { icon: string; label: T4 }> = {
   wf_due_soon: { icon: "clock", label: L("Process step due soon", "Скоро срок шага процесса", "Скоро термін кроку процесу", "خطوة قريبة الاستحقاق") },
   wf_overdue: { icon: "alert", label: L("Process step overdue", "Шаг процесса просрочен", "Крок процесу прострочено", "خطوة متأخرة") },
   wf_escalated: { icon: "alert", label: L("Process step escalated to you", "Шаг процесса эскалирован вам", "Крок процесу ескальовано вам", "صُعّدت إليك خطوة") },
+  crm_opp_assigned: { icon: "handshake", label: L("An opportunity was assigned to you", "Вам назначена возможность", "Вам призначено можливість", "أُسندت إليك فرصة") },
+  crm_lead_assigned: { icon: "target", label: L("A lead was assigned to you", "Вам назначен лид", "Вам призначено лід", "أُسند إليك عميل محتمل") },
+  crm_follow_up_due: { icon: "clock", label: L("Commercial follow-up due", "Пора связаться с клиентом", "Час зв'язатися з клієнтом", "حان موعد المتابعة التجارية") },
+  crm_follow_up_overdue: { icon: "alert", label: L("Commercial follow-up overdue", "Просрочен контакт с клиентом", "Прострочено контакт із клієнтом", "متابعة تجارية متأخرة") },
+  crm_lead_follow_up: { icon: "clock", label: L("Lead follow-up due", "Пора связаться с лидом", "Час зв'язатися з лідом", "حان موعد متابعة العميل المحتمل") },
+  crm_event_follow_up: { icon: "flag", label: L("Event leads to follow up", "Лиды с выставки ждут контакта", "Ліди з виставки чекають контакту", "عملاء المعرض بانتظار المتابعة") },
+  crm_meeting_soon: { icon: "calendar", label: L("Commercial meeting soon", "Скоро коммерческая встреча", "Скоро комерційна зустріч", "اجتماع تجاري قريب") },
+  crm_proposal_expiring: { icon: "receipt", label: L("Proposal validity ends soon", "Скоро истекает срок КП", "Скоро спливає термін КП", "صلاحية العرض تنتهي قريبًا") },
+  crm_decision_due: { icon: "stamp", label: L("Customer decision expected", "Ожидается решение клиента", "Очікується рішення клієнта", "قرار العميل متوقع") },
+  crm_stalled: { icon: "alert", label: L("Opportunity stalled", "Возможность застряла", "Можливість застрягла", "فرصة متوقفة") },
+  crm_hold_review: { icon: "clock", label: L("On-hold opportunity due for review", "Пора пересмотреть приостановленную возможность", "Час переглянути призупинену можливість", "حان مراجعة الفرصة المعلقة") },
   wf_done: { icon: "check", label: L("Your request is finished", "Ваша заявка завершена", "Вашу заявку завершено", "اكتمل طلبك") },
   approval_done: { icon: "check", label: L("Approval decided", "Решение по согласованию", "Рішення щодо погодження", "قرار الموافقة") },
   due_soon: { icon: "clock", label: L("Deadline soon", "Скоро срок", "Скоро термін", "موعد قريب") },
@@ -54,6 +65,7 @@ export const CATS: { k: string; label: T4; kinds?: string[] }[] = [
   { k: "company", label: L("Company", "Компания", "Компанія", "الشركة"), kinds: ["announcement", "announcement_critical", "security"] },
   { k: "management", label: L("Management", "Руководство", "Керівництво", "الإدارة"), kinds: ["mgmt_alert", "waiting_remind", "waiting_escalated"] },
   { k: "processes", label: L("Requests & processes", "Заявки и процессы", "Заявки та процеси", "الطلبات والعمليات"), kinds: ["wf_action", "wf_due_soon", "wf_overdue", "wf_escalated", "wf_done"] },
+  { k: "commercial", label: L("Commercial", "Коммерция", "Комерція", "التجاري"), kinds: ["crm_opp_assigned", "crm_lead_assigned", "crm_follow_up_due", "crm_follow_up_overdue", "crm_lead_follow_up", "crm_event_follow_up", "crm_meeting_soon", "crm_proposal_expiring", "crm_decision_due", "crm_stalled", "crm_hold_review"] },
 ];
 export const noticeHref = (n: Notice) => n.link || (n.record_id && n.section ? `/${n.section.replace(".", "/")}?r=${n.record_id}` : "/notifications");
 const ago = (iso: string, lang: Lang) => { const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return m < 60 ? tx(L(`${Math.max(1, m)} min`, `${Math.max(1, m)} мин`, `${Math.max(1, m)} хв`, `${Math.max(1, m)} د`), lang) : m < 1440 ? tx(L(`${Math.round(m / 60)} h`, `${Math.round(m / 60)} ч`, `${Math.round(m / 60)} год`, `${Math.round(m / 60)} س`), lang) : iso.slice(0, 10); };

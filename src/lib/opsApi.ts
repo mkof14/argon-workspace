@@ -52,5 +52,6 @@ export const ops = {
   enable: (code: string, on: boolean) => rpc<any>("wf_definition_disable", { p_code: code, p_on: on }),
   settings: () => rpc<any>("ops_settings_get"),
   saveSettings: (value: any, version: number) => rpc<any>("ops_settings_save", { p_value: value, p_version: version }),
+  approvePolicy: (code: string, version: number) => rpc<any>("ops_policy_approve", { p_code: code, p_version: version }),
   savePolicy: (code: string, name: string, tiers: any[], active = true) => rpc<any>("ops_policy_save", { p_code: code, p_name: name, p_tiers: tiers, p_active: active }),
 };
