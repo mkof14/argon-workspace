@@ -31,6 +31,12 @@ export const JOBS_FNS: Record<string, JobFn> = {
     const { data: snapshots, error: e2 } = await db.rpc("mgmt_daily_snapshots"); if (e2) throw new Error(e2.message);
     return { alerts, snapshots };
   },
+  // Phase 7: commercial notices (each once per occasion); each call is bounded and says whether more is waiting
+  commercial: async (db) => {
+    const t0 = Date.now(); let n = 0, calls = 0, last: any = null;
+    do { const { data, error } = await db.rpc("crm_tick"); if (error) throw new Error(error.message); last = data; n += Number(data?.notices || 0); calls++; } while (last?.more && Date.now() - t0 < 20000);
+    return { notices: n, calls, more: !!last?.more };
+  },
   // Phase 6: process SLA (due soon, overdue, one escalation per step — never repeated) and automatic-step retries
   workflow: async (db) => {
     // each call is bounded in the database (about 2 s); repeat while more is waiting, within 20 s for this job

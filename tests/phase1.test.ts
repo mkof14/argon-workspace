@@ -46,7 +46,7 @@ test("missed runs are found; frequent jobs are expected daily until the 15-minut
   const old = runs.map((r) => (r.job === "backup" ? { ...r, started_at: "2026-10-18T09:05:00Z", finished_at: "2026-10-18T09:05:00Z" } : r));
   assert.deepEqual(missed(now, old).map((m) => m.job), ["backup"]);
   const fast = [...runs.map((r) => (r.job === "retry" ? { ...r, started_at: "2026-10-20T14:40:00Z", finished_at: "2026-10-20T14:40:00Z", trigger: "github" } : r))];
-  assert.deepEqual(missed(now, fast).map((m) => m.job), ["intake", "sla", "calendar", "notify", "announce", "workflow", "digest", "translate", "executive"], "with the 15-minute trigger seen, frequent jobs that only ran in the morning are late");
+  assert.deepEqual(missed(now, fast).map((m) => m.job), ["intake", "sla", "calendar", "notify", "announce", "workflow", "digest", "translate", "executive", "commercial"], "with the 15-minute trigger seen, frequent jobs that only ran in the morning are late");
   assert.deepEqual(missed(now, [], "2026-10-20T14:30:00Z"), [], "a fresh install is not 'missed' yet");
 });
 

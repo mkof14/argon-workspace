@@ -74,6 +74,29 @@ export async function POST(req: Request) {
         if (r.ok && (r as any).note) await markInbox(a.id, null);
         return Response.json({ ...r, action_id: a.id }, { status: r.ok ? 200 : (r as any).status || 400 });
       }
+      case "crm_propose": {
+        // Phase 7: a follow-up for an opportunity — proposed, then done only with the person's explicit yes. The opportunity
+        // is re-read under the person's own rights; a draft message is text only and is never sent from here.
+        const { data: opp } = await c.user.from("records").select("id,title,section,data").eq("id", String(b.opp || "")).maybeSingle();
+        if (!opp || opp.section !== "sales.pipeline") return new Response("Opportunity not found", { status: 404 });
+        const label = (opp.data?.number ? opp.data.number + " · " : "") + opp.title;
+        const kind = String(b.kind || "task");
+        if (kind === "draft") {
+          const who = String(b.to || opp.data?.contact || "").trim();
+          const text = (c.lang === "ru" ? `Здравствуйте${who ? ", " + who : ""}!\n\nСпасибо за время и интерес к ${opp.title}. Предлагаю следующий шаг: ${String(b.title || "короткий звонок для уточнения требований")}.\nКогда вам удобно?\n\nС уважением,\n${u.me.full_name || ""}`
+            : `Hello${who ? " " + who : ""},\n\nThank you for your time and interest in ${opp.title}. As a next step I suggest: ${String(b.title || "a short call to clarify your requirements")}.\nWhat time would suit you?\n\nBest regards,\n${u.me.full_name || ""}`);
+          return Response.json({ ok: true, draft: text, sent: false, note: "Draft only — nothing is sent. Copy it into your own e-mail after review." });
+        }
+        if (!["task", "reminder", "note", "followup"].includes(kind)) return new Response("Unknown kind", { status: 400 });
+        const title = String(b.title || "").trim().slice(0, 200); if (!title) return new Response("Title required", { status: 400 });
+        const date = /^\d{4}-\d{2}-\d{2}$/.test(String(b.date || "")) ? String(b.date) : undefined;
+        const intent = kind === "reminder" ? "create_reminder" : kind === "note" ? "note" : "create_task";
+        const { data: a, error } = await db.from("action_audit").insert({ user_id: u.me.id, source: "crm", command: `${kind}: ${title} — ${label}`, intent, risk: "low",
+          interpreted: { intent, slots: { title, date }, resolved: {}, deal: { id: opp.id, title: label }, as: kind }, status: "proposed" }).select("id").single();
+        if (error) throw error;
+        const r = await start(c, a.id, { confirm: b.confirm === true });
+        return Response.json({ ...r, action_id: a.id }, { status: r.ok ? 200 : (r as any).status || 400 });
+      }
       case "dismiss": {
         const it = await inbox(String(b.inbox || "")); if (!it) return new Response("Not found", { status: 404 });
         await db.from("voice_inbox").update({ status: "Dismissed", updated_at: new Date().toISOString() }).eq("id", it.id);

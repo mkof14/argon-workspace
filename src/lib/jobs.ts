@@ -17,6 +17,7 @@ export const JOBS: JobDef[] = [
   { id: "digest", every: "hour", label: "Morning digest (8:00 local time)" },
   { id: "translate", every: "hour", label: "Translation of new texts" },
   { id: "executive", every: "hour", label: "Management alerts and daily snapshots" },
+  { id: "commercial", every: "hour", label: "Commercial follow-ups, decisions, stalled opportunities, proposals and meetings" },
   { id: "due", every: "day", at: 480, label: "Deadline reminders (due soon, overdue)" },
   { id: "backup", every: "day", at: 540, label: "Encrypted backup" },
   { id: "agents", every: "day", at: 600, label: "Agents" },

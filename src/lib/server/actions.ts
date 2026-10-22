@@ -119,6 +119,7 @@ async function buildOps(c: Ctx, a: any, it: any): Promise<Op[]> {
     const reminder = a.intent === "create_reminder"; const follow = it.as === "followup";
     const data: any = { assignee_id: who.id, assignee: who.name, priority: "Normal", source: "voice", voice_action: a.id, ...(it.slots?.date ? { due: it.slots.date } : {}), ...(reminder ? { reminder: true } : {}),
       ...(it.project?.id ? { project_ref: it.project.id, project_ref_title: it.project.title } : {}),
+      ...(it.deal?.id ? { deal_ref: it.deal.id, deal_ref_title: it.deal.title } : {}),
       ...(who.id !== c.me.id ? { requested_by: c.me.id, requested_by_name: nameOf(c.me) } : {}) };
     const title = (follow ? T(c.lang, "Follow up: ", "Проконтролировать: ") : "") + String(it.slots?.title || "").slice(0, 200);
     return [{ op: "create", section: "company.tasks", title, status: "New", data }];
