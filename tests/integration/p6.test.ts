@@ -479,7 +479,7 @@ test("Scenario 13 — values extracted from a document are proposals: nothing is
 test("Scenario 14 — definition V1/V2: running processes keep V1, new ones take V2; published versions cannot change; validation catches every error class", async () => {
   // validation
   const base = { code: `T${run.toUpperCase().replace(/[^A-Z0-9]/g, "")}`.slice(0, 30), name: "Test", source_section: "company.requests" };
-  const errs = async (steps: any[], extra: any = {}) => (await call("admin", "wf_validate", [{ ...base, steps, ...extra }])).map((e: any) => e.code);
+  const errs = async (steps: any[], extra: any = {}) => (await call("owner", "wf_validate", [{ ...base, steps, ...extra }])).map((e: any) => e.code);
   assert.ok((await errs([{ id: "a", name: "A", type: "TASK", responsible: { kind: "requester" }, on: { success: "$complete" } }, { id: "b", name: "B", type: "TASK", responsible: { kind: "requester" } }])).includes("unreachable"));
   assert.ok((await errs([{ id: "a", name: "A", type: "TASK" }])).includes("missing_owner"));
   assert.ok((await errs([{ id: "a", name: "A", type: "AUTOMATION", action: "notify", params: { to: { kind: "requester" } }, on: { success: "b" } }, { id: "b", name: "B", type: "AUTOMATION", action: "notify", params: { to: { kind: "requester" } }, on: { success: "a" } }])).includes("loop"));
@@ -492,20 +492,21 @@ test("Scenario 14 — definition V1/V2: running processes keep V1, new ones take
   assert.ok((await errs([{ id: "a", name: "A", type: "TASK", responsible: { kind: "requester" }, script: "alert(1)" }])).includes("step_key"), "no scripts in a step");
   assert.ok((await errs([{ id: "a", name: "A", type: "TASK", responsible: { kind: "requester" } }], { required_roles: ["pirate"] })).includes("invalid_role"));
   assert.deepEqual(await errs([{ id: "a", name: "A", type: "TASK", responsible: { kind: "requester" } }]), [], "a minimal valid process");
-  // editing: only owners, administrators and management
-  await fails(call("emp", "wf_definition_save", [{ ...base, steps: [] }]), /Only owners/);
-  const v1 = await call("admin", "wf_definition_save", [{ ...base, steps: [{ id: "first", name: "First", type: "TASK", responsible: { kind: "requester" } }] }]);
+  // editing: Workflow Admins only (owners; management by policy) — v24 (B45): not the System Administrator by role
+  await fails(call("emp", "wf_definition_save", [{ ...base, steps: [] }]), /Workflow Admin/);
+  await fails(call("admin", "wf_definition_save", [{ ...base, steps: [] }]), /Workflow Admin/);
+  const v1 = await call("owner", "wf_definition_save", [{ ...base, steps: [{ id: "first", name: "First", type: "TASK", responsible: { kind: "requester" } }] }]);
   assert.equal(v1.version, 1);
-  const bad = await call("admin", "wf_definition_save", [{ id: v1.id, steps: [{ id: "first", name: "First", type: "TASK" }] }]);
-  const pubBad = await call("admin", "wf_definition_publish", [v1.id]); assert.equal(pubBad.ok, false); assert.ok(bad.errors.length > 0);
-  await call("admin", "wf_definition_save", [{ id: v1.id, steps: [{ id: "first", name: "First", type: "TASK", responsible: { kind: "requester" } }] }]);
-  assert.equal((await call("admin", "wf_definition_publish", [v1.id])).ok, true);
+  const bad = await call("owner", "wf_definition_save", [{ id: v1.id, steps: [{ id: "first", name: "First", type: "TASK" }] }]);
+  const pubBad = await call("owner", "wf_definition_publish", [v1.id]); assert.equal(pubBad.ok, false); assert.ok(bad.errors.length > 0);
+  await call("owner", "wf_definition_save", [{ id: v1.id, steps: [{ id: "first", name: "First", type: "TASK", responsible: { kind: "requester" } }] }]);
+  assert.equal((await call("owner", "wf_definition_publish", [v1.id])).ok, true);
   await fails(sql("update wf_definitions set steps = '[]' where id = $1", [v1.id]), /cannot be changed/);
   const r1 = await rec("company.requests", "on V1", "Triage", {}, { by: "emp" });
   const i1 = await call("emp", "wf_start", [base.code, r1.id, null]);
-  const nv = await call("admin", "wf_definition_new_version", [base.code]);
-  await call("admin", "wf_definition_save", [{ id: nv.id, steps: [{ id: "first", name: "First", type: "TASK", responsible: { kind: "requester" } }, { id: "second", name: "Second", type: "TASK", responsible: { kind: "requester" } }] }]);
-  assert.equal((await call("admin", "wf_definition_publish", [nv.id])).ok, true);
+  const nv = await call("owner", "wf_definition_new_version", [base.code]);
+  await call("owner", "wf_definition_save", [{ id: nv.id, steps: [{ id: "first", name: "First", type: "TASK", responsible: { kind: "requester" } }, { id: "second", name: "Second", type: "TASK", responsible: { kind: "requester" } }] }]);
+  assert.equal((await call("owner", "wf_definition_publish", [nv.id])).ok, true);
   const r2 = await rec("company.requests", "on V2", "Triage", {}, { by: "emp" });
   const i2 = await call("emp", "wf_start", [base.code, r2.id, null]);
   const a = (await sql("select def_version from wf_instances where id = $1", [i1]))[0]; const b = (await sql("select def_version from wf_instances where id = $1", [i2]))[0];
@@ -515,25 +516,26 @@ test("Scenario 14 — definition V1/V2: running processes keep V1, new ones take
   x = await inst(r2.id); await act("emp", x.run, "done");
   assert.equal((await inst(r2.id)).cur, "second", "V2 has two");
   assert.deepEqual((await sql("select state from wf_definitions where code = $1 order by version", [base.code])).map((r: any) => r.state), ["retired", "published"]);
-  // an explicit move of a running process to another version (owner / admin only)
+  // an explicit move of a running process to another version (Workflow Admins only)
   const r3 = await rec("company.requests", "migrate", "Triage", {}, { by: "emp" });
-  await call("admin", "wf_definition_disable", [base.code, false]);
+  await call("owner", "wf_definition_disable", [base.code, false]);
   await fails(call("emp", "wf_start", [base.code, r3.id, null]), /not available/);
-  await call("admin", "wf_definition_disable", [base.code, true]);
+  await call("owner", "wf_definition_disable", [base.code, true]);
   const i3 = await call("emp", "wf_start", [base.code, r3.id, null]);
   const v1id = (await sql("select id from wf_definitions where code = $1 and version = 1", [base.code]))[0].id;
-  await fails(call("mgmt", "wf_migrate", [i3, v1id, null]), /Only owners and administrators/);
-  const m = await call("admin", "wf_migrate", [i3, v1id, "back to V1 for the test"]); assert.equal(m.version, 1);
+  await fails(call("admin", "wf_migrate", [i3, v1id, null]), /Workflow Admin/);
+  await fails(call("emp", "wf_migrate", [i3, v1id, null]), /Workflow Admin/);
+  const m = await call("owner", "wf_migrate", [i3, v1id, "back to V1 for the test"]); assert.equal(m.version, 1);
   EV.engine.versions = { v1: a.def_version, v2: b.def_version };
 });
 
 /* ------------------------------------------- Scenario 15: automation idempotency, retry, dead letter ------------------------------------------- */
 test("Scenario 15 — automatic steps run at most once, failures are retried through the Phase 1 queue and give up into the dead letter", async () => {
   const code = `AU${run.toUpperCase().replace(/[^A-Z0-9]/g, "")}`.slice(0, 30);
-  const d = await call("admin", "wf_definition_save", [{ code, name: "Auto test", source_section: "marketing.events", steps: [
+  const d = await call("owner", "wf_definition_save", [{ code, name: "Auto test", source_section: "marketing.events", steps: [
     { id: "num", name: "Give a number", type: "AUTOMATION", action: "allocate_number" },
     { id: "done", name: "Done", type: "TASK", responsible: { kind: "requester" }, on: { success: "$complete" } }] }]);
-  assert.equal((await call("admin", "wf_definition_publish", [d.id])).ok, true);
+  assert.equal((await call("owner", "wf_definition_publish", [d.id])).ok, true);
   { const c0 = await call("owner", "ops_settings_get"); const nb = { ...c0.value.numbering }; delete nb["marketing.events"]; await call("owner", "ops_settings_save", [{ numbering: nb }, c0.version]); }
   await sql("delete from doc_number_formats where scope = 'ops' and doc_type = 'EVT'");
   const e1 = await rec("marketing.events", "Event 1", "Considering", {}, { by: "mgmt" });
@@ -560,10 +562,10 @@ test("Scenario 15 — automatic steps run at most once, failures are retried thr
   assert.equal((await get(e1.id)).data.number, n);
   // dead letter: a failure that never goes away gives up after the configured attempts and says so
   const code2 = `AD${run.toUpperCase().replace(/[^A-Z0-9]/g, "")}`.slice(0, 30);
-  const d2 = await call("admin", "wf_definition_save", [{ code: code2, name: "Auto dead", source_section: "company.parties", steps: [{ id: "num", name: "Give a number", type: "AUTOMATION", action: "allocate_number", on: { success: "$complete" } }] }]);
-  await call("admin", "wf_definition_publish", [d2.id]);
+  const d2 = await call("owner", "wf_definition_save", [{ code: code2, name: "Auto dead", source_section: "company.parties", steps: [{ id: "num", name: "Give a number", type: "AUTOMATION", action: "allocate_number", on: { success: "$complete" } }] }]);
+  await call("owner", "wf_definition_publish", [d2.id]);
   const p = await rec("company.parties", "Party X", "Active", {}, { by: "admin" });
-  await call("admin", "wf_start", [code2, p.id, null]);
+  await call("owner", "wf_start", [code2, p.id, null]);
   i = await inst(p.id);
   const qid = (await sql("select id from automation_queue where dedupe_key = $1", [`wf:${i.run}`]))[0].id;
   for (let k = 0; k < 6; k++) { await sql("update automation_queue set next_attempt_at = now() where id = $1 and status = 'retrying'", [qid]); await sql("select public.wf_retry_due(50)"); }
@@ -743,14 +745,19 @@ test("Weekly review OPERATIONS numbers, the dashboard drill-down and the audit t
   EV.weekly = w; EV.dashboard_counts = Object.fromEntries(Object.entries(ov.items).map(([k, v]: any) => [k, v.count]));
 });
 
-test("Settings and approval authority are changed only by owners and administrators, validated, and kept in history", async () => {
+// v24 (Phase 7, B45): business authority follows the Workflow Admin capability — owners, management by policy,
+// anyone an owner grants it — never the System Administrator role by itself
+test("Settings and approval authority are changed only by Workflow Admins (owners; management by policy), validated, and kept in history", async () => {
   const s = await call("emp", "ops_settings_get"); assert.equal(s.can_edit, false);
-  await fails(call("emp", "ops_settings_save", [{ due_soon_hours: 12 }, s.version]), /Only owners/);
+  await fails(call("emp", "ops_settings_save", [{ due_soon_hours: 12 }, s.version]), /Workflow Admin/);
+  assert.equal((await call("admin", "ops_settings_get")).can_edit, false, "a System Administrator holds no business authority by role");
+  await fails(call("admin", "ops_settings_save", [{ due_soon_hours: 12 }, s.version]), /Workflow Admin/);
   await fails(call("owner", "ops_settings_save", [{ due_soon_hours: 0 }, s.version]), /1–720/);
   await fails(call("owner", "ops_settings_save", [{ evil: 1 }, s.version]), /Unknown setting/);
   await fails(call("owner", "ops_settings_save", [{ due_soon_hours: 24 }, s.version - 1]), /changed by someone else/);
   const ok = await call("owner", "ops_settings_save", [{ due_soon_hours: 24 }, s.version]); assert.equal(ok.version, s.version + 1);
-  await fails(call("mgmt", "ops_policy_save", ["PURCHASE", "x", [], true]), /Only owners/);
+  await fails(call("mgmt", "ops_policy_save", ["PURCHASE", "x", [], true]), /at least one level/); // management holds Workflow Admin by policy: validated, not refused
+  await fails(call("admin", "ops_policy_save", ["PURCHASE", "x", [{ steps: [{ kind: "role", role: "finance" }] }], true]), /Workflow Admin/);
   await fails(call("owner", "ops_policy_save", ["PTEST", "x", [{ steps: [{ kind: "requester" }] }], true]), /own request/);
   await fails(call("owner", "ops_policy_save", ["PTEST", "x", [{ when: { field: "record.amount", op: "exec", value: 1 }, steps: [{ kind: "role", role: "finance" }] }], true]), /Unknown operator/);
   await call("owner", "ops_policy_save", ["PTEST", "Test policy", [{ steps: [{ kind: "role", role: "finance" }] }], true]);
@@ -797,8 +804,8 @@ test("Concurrency — the same step completed five times at once, two approvers 
   assert.equal((await sql("select count(*)::int n from wf_links where instance_id = $1 and kind = 'task'", [i.id]))[0].n, 1, "one order task");
   // a role level with two members deciding at the same moment
   const code = `CP${run.toUpperCase().replace(/[^A-Z0-9]/g, "")}`.slice(0, 30);
-  const d = await call("admin", "wf_definition_save", [{ code, name: "Concurrent approval", source_section: "company.requests", steps: [{ id: "ap", name: "Approve", type: "APPROVAL", policy: "PURCHASE_PAR", on: { success: "$complete" } }] }]);
-  await call("admin", "wf_definition_publish", [d.id]);
+  const d = await call("owner", "wf_definition_save", [{ code, name: "Concurrent approval", source_section: "company.requests", steps: [{ id: "ap", name: "Approve", type: "APPROVAL", policy: "PURCHASE_PAR", on: { success: "$complete" } }] }]);
+  await call("owner", "wf_definition_publish", [d.id]);
   const r2 = await rec("company.requests", "concurrent approval", "Triage", {}, { by: "emp" });
   await call("emp", "wf_start", [code, r2.id, null]);
   const ap2 = await sql("select * from approvals where record_id = $1 and status = 'pending' and approver_id = any($2)", [r2.id, [U.fin.id, U.fin2.id]]);

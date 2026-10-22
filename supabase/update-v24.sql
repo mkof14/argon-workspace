@@ -371,9 +371,10 @@ grant execute on function public.ops_settings_save(jsonb, integer) to authentica
 
 -- an edited policy is a new Draft version: it applies, but it is shown as unapproved until confirmed again
 create or replace function public.ops_policy_save(p_code text, p_name text, p_tiers jsonb, p_active boolean default true) returns jsonb language plpgsql security definer set search_path = public as $$
-declare me uuid := public.ops_viewer(); cur public.approval_policies; t jsonb; ap jsonb; e text; sec text;
+declare me uuid := public.ops_viewer(); cur public.approval_policies; t jsonb; ap jsonb; e text; sec text; v_exists boolean;
 begin
   select * into cur from public.approval_policies where code = p_code for update;
+  v_exists := found;
   sec := coalesce(cur.section, case when p_code like 'PROPOSAL%' then 'sales.proposals' end);
   if me is null or not public.has_cap(me, public._policy_cap(p_code, sec)) then
     raise exception 'Only a % changes this approval authority', case when public._policy_cap(p_code, sec) = 'commercial_admin' then 'Commercial Admin' else 'Workflow Admin' end using errcode = '42501';
@@ -388,7 +389,7 @@ begin
       e := public._wf_resp_error(ap, 'Approver'); if e is not null then raise exception '%', e using errcode = '22023'; end if;
     end loop;
   end loop;
-  if found then
+  if v_exists then
     update public.approval_policies set name = coalesce(nullif(p_name, ''), name), tiers = p_tiers, active = p_active, version = version + 1, updated_at = now(), updated_by = me,
       config_status = 'Draft', seeded = false where code = p_code;
   else
@@ -749,7 +750,7 @@ create or replace function public.wf_definition_save(p jsonb) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare me uuid := public.ops_viewer(); d public.wf_definitions; v int;
 begin
-  if me is null or not public._ops_admin(me) then raise exception 'Only a Workflow Admin edit processes (owners; management by policy; others when an owner grants it)' using errcode = '42501'; end if;
+  if me is null or not public._ops_admin(me) then raise exception 'Only a Workflow Admin may edit processes (owners; management by policy; others when an owner grants it)' using errcode = '42501'; end if;
   if p ? 'id' and coalesce(p->>'id', '') <> '' then
     select * into d from public.wf_definitions where id = (p->>'id')::uuid for update;
     if not found then raise exception 'Process not found'; end if;
@@ -778,7 +779,7 @@ create or replace function public.wf_definition_publish(p_id uuid) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare me uuid := public.ops_viewer(); d public.wf_definitions; errs jsonb;
 begin
-  if me is null or not public._ops_admin(me) then raise exception 'Only a Workflow Admin publish processes (owners; management by policy; others when an owner grants it)' using errcode = '42501'; end if;
+  if me is null or not public._ops_admin(me) then raise exception 'Only a Workflow Admin may publish processes (owners; management by policy; others when an owner grants it)' using errcode = '42501'; end if;
   select * into d from public.wf_definitions where id = p_id for update;
   if not found then raise exception 'Process not found'; end if;
   if d.state <> 'draft' then raise exception 'Only a draft can be published' using errcode = '22023'; end if;
@@ -796,7 +797,7 @@ create or replace function public.wf_definition_new_version(p_code text) returns
 language plpgsql security definer set search_path = public as $$
 declare me uuid := public.ops_viewer(); d public.wf_definitions; n public.wf_definitions;
 begin
-  if me is null or not public._ops_admin(me) then raise exception 'Only a Workflow Admin edit processes (owners; management by policy; others when an owner grants it)' using errcode = '42501'; end if;
+  if me is null or not public._ops_admin(me) then raise exception 'Only a Workflow Admin may edit processes (owners; management by policy; others when an owner grants it)' using errcode = '42501'; end if;
   if exists (select 1 from public.wf_definitions where code = p_code and state = 'draft') then raise exception 'There is already a draft of this process' using errcode = '23505'; end if;
   select * into d from public.wf_definitions where code = p_code order by version desc limit 1;
   if not found then raise exception 'Process not found'; end if;
@@ -812,7 +813,7 @@ create or replace function public.wf_definition_disable(p_code text, p_on boolea
 language plpgsql security definer set search_path = public as $$
 declare me uuid := public.ops_viewer(); d public.wf_definitions;
 begin
-  if me is null or not public._ops_admin(me) then raise exception 'Only a Workflow Admin change processes (owners; management by policy; others when an owner grants it)' using errcode = '42501'; end if;
+  if me is null or not public._ops_admin(me) then raise exception 'Only a Workflow Admin may change processes (owners; management by policy; others when an owner grants it)' using errcode = '42501'; end if;
   select * into d from public.wf_definitions where code = p_code and state = case when p_on then 'disabled' else 'published' end for update;
   if not found then raise exception 'No % version of this process', case when p_on then 'disabled' else 'published' end; end if;
   update public.wf_definitions set state = case when p_on then 'published' else 'disabled' end, disabled_at = case when p_on then null else now() end where id = d.id;
@@ -960,6 +961,22 @@ begin
   elsif o in ('gt', 'gte', 'lt', 'lte') and jsonb_typeof(r->'value') <> 'number' then return 'gt / gte / lt / lte need a number';
   end if;
   return null;
+end $$;
+
+-- v23 migration of a running process + v24: the Workflow Admin capability
+create or replace function public.wf_migrate(p_inst uuid, p_definition uuid, p_note text default null) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare me uuid := public.ops_viewer(); i public.wf_instances; d public.wf_definitions; rl text;
+begin
+  select role into rl from public.profiles where id = me;
+  if me is null or not public.has_cap(me, 'workflow_admin') then raise exception 'Only a Workflow Admin moves a running process to another version (owners; management by policy; others when an owner grants it)' using errcode = '42501'; end if;
+  select * into i from public.wf_instances where id = p_inst for update;
+  select * into d from public.wf_definitions where id = p_definition;
+  if not found or d.code <> i.def_code or d.state not in ('published', 'retired') then raise exception 'Choose a published version of the same process' using errcode = '22023'; end if;
+  if i.current_step is not null and public._wf_step(d.id, i.current_step) is null then raise exception 'Version % has no step %: it cannot take over this process', d.version, i.current_step using errcode = '22023'; end if;
+  update public.wf_instances set definition_id = d.id, def_version = d.version, updated_at = now(), version = version + 1 where id = i.id;
+  perform public._wf_event(i.id, i.current_run, me, 'migrated', i.current_step, i.def_version::text, d.version::text, jsonb_build_object('note', left(p_note, 300)));
+  return jsonb_build_object('ok', true, 'version', d.version);
 end $$;
 
 /* ---------------------------------------------------------------------------------------------
