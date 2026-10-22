@@ -15,10 +15,12 @@ test("Publishing needs a passed compliance check", () => {
   assert.equal(gateBlocks(s.gate, "Approved", { check: "Legal review needed" }), true);
   assert.equal(gateBlocks(s.gate, "Published", { check: "Passed (AI check)" }), false);
   assert.equal(gateBlocks(s.gate, "Draft", {}), false);
-  // the old single-status gate still works
+  // the build unit (v25 lifecycle): shipping statuses wait for the export and end-user check
   const b = sec("operations.builds");
-  assert.equal(gateBlocks(b.gate, "Shipping", { export_check: "Pending" }), true);
-  assert.equal(gateBlocks(b.gate, "Shipping", { export_check: "Cleared" }), false);
+  assert.equal(gateBlocks(b.gate, "Shipped", { export_check: "Pending" }), true);
+  assert.equal(gateBlocks(b.gate, "Ready for Shipment", { export_check: "In progress" }), true);
+  assert.equal(gateBlocks(b.gate, "Shipped", { export_check: "Cleared" }), false);
+  assert.equal(gateBlocks(b.gate, "Assembly", {}), false);
   for (const ok of CHECK_OK) assert.ok(CHECK_OPTIONS.includes(ok));
 });
 

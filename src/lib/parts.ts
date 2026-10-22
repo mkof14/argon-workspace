@@ -1,3 +1,4 @@
+import { buildEarly } from "./builds";
 // Parts for a build: what the configuration's bill of materials needs, what is already reserved for this build,
 // what is free in stock, what is on order — and the shortage.
 
@@ -29,7 +30,7 @@ export function buildParts(build: R, all: R[]): PartLine[] {
 /** Builds that will soon need parts that are neither reserved, free in stock nor ordered. */
 export function shortages(all: R[], today: string, days = 45) {
   const t = Date.parse(today);
-  return all.filter((b) => b.section === "operations.builds" && ["Design", "Procurement", "Assembly"].includes(b.status || ""))
+  return all.filter((b) => b.section === "operations.builds" && buildEarly(b.status))
     .map((b) => ({ b, lines: buildParts(b, all).filter((l) => l.short - l.free > 0) }))
     .filter((x) => x.lines.length && (!x.b.data?.due || Date.parse(x.b.data.due) - t <= days * 864e5));
 }

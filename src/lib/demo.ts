@@ -48,7 +48,7 @@ export function demoSeed(): Rec[] {
   out.push(
     r("operations.builds", "SD-001 · Pilot container", "Integration", S({ config: "C20 Enhanced", client: "Pilot marina (sample)", site: "Abu Dhabi marina (sample)", assembly: "United States", export_check: "In progress", owner: "Sample Engineer", due: "2026-12-15" })),
     r("operations.builds", "SD-002 · Superyacht deck unit", "Procurement", S({ config: "C20 Base", client: "Superyacht owner (sample)", site: "M/Y Example (sample)", assembly: "United States", export_check: "Not started", owner: "Sample UAE Operations", due: "2027-02-01" }), {}, 2),
-    r("operations.builds", "SD-003 · Port HQ", "Design", S({ config: "C40 HQ", client: "Port operator (sample)", site: "Gulf port (sample)", assembly: "UAE", export_check: "Not started", owner: "Sample UAE Operations", due: "2027-04-30" }), {}, 4),
+    r("operations.builds", "SD-003 · Port HQ", "Engineering", S({ config: "C40 HQ", client: "Port operator (sample)", site: "Gulf port (sample)", assembly: "UAE", export_check: "Not started", owner: "Sample UAE Operations", due: "2027-04-30" }), {}, 4),
     r("operations.procurement", "PO-0001 · Surveillance radar ×2", "Approved", S({ vendor: "Radar Vendor (sample)", item: "Short-range surveillance radar", qty: 2, amount: 0, currency: "USD", build: "SD-001" }), { company: "Radar Vendor (sample)" }),
     r("operations.procurement", "PO-0002 · Thermal PTZ camera", "Draft", S({ vendor: "Camera vendor (sample)", item: "LWIR PTZ camera", qty: 1, currency: "USD", build: "SD-001" }), {}, 2),
     r("operations.vendors", "Radar Vendor (sample)", "Under review", S({ category: "Radar", country: "USA", nda: "Sent", screening: "Cleared" }), { company: "Radar Vendor (sample)" }),

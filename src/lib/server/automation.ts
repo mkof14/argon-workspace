@@ -1,3 +1,4 @@
+import { buildClosed, buildDelivered } from "../builds";
 import { weakVendors } from "@/lib/vendors";
 import { clientLang, dunningLetter, stepFor } from "@/lib/dunning";
 import Anthropic from "@anthropic-ai/sdk";
@@ -468,7 +469,7 @@ async function briefAgent(c: Ctx, recsAll: any[], force: boolean) {
     ["Receivables open", money(inv.filter((r) => r.data?.direction === "Receivable").reduce((a, r) => a + n(r.data?.amount), 0))],
     ["Invoices overdue", overdueInv.length ? `${overdueInv.length} — ${money(overdueInv.reduce((a, r) => a + n(r.data?.amount), 0))}` : "none"],
     ["Overdue items", due.length ? `${due.length}: ${Object.entries(byDept).sort((a, b) => b[1] - a[1]).map(([d, k]) => `${d} ${k}`).join(", ")}` : "none"],
-    ["Builds in progress", String(of("operations.builds").filter((r) => r.status !== "Installed").length)],
+    ["Builds in progress", String(of("operations.builds").filter((r) => !buildClosed(r.status)).length)],
     ["Open support tickets", String(of("operations.support").filter((r) => r.status !== "Resolved").length)],
     ["Screenings pending / flagged", `${of("security.screening").filter((r) => r.status === "Pending").length} / ${of("security.screening").filter((r) => ["Flagged", "Escalated"].includes(r.status)).length}`],
     ["Approvals waiting", String(appr || 0)],

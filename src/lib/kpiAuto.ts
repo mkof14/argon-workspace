@@ -42,7 +42,7 @@ export function collectMonth(dept: string, all: Rec[], p: string): Auto {
     put("pipeline_value", of("sales.pipeline").filter((r) => !["Won", "Lost"].includes(r.status || "") && usdOnly(r)).reduce((a, r) => a + n(r.data?.value), 0), "Open pipeline now, USD");
   }
   if (dept === "operations") {
-    const done = reached("operations.builds", ["Installed"]);
+    const done = reached("operations.builds", ["Installed", "Delivered"]);
     put("builds_completed", done.length, "Builds moved to Installed this month");
     if (done.length) put("on_time_pct", (done.filter((r) => !r.data?.due || String(r.updated_at).slice(0, 10) <= r.data.due).length / done.length) * 100, "…finished by their due date");
     put("shipments", of("operations.logistics").filter((r) => ["In transit", "Customs", "Delivered"].includes(r.status || "") && inM(r.updated_at, p)).length, "Shipments moving or delivered this month");

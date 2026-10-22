@@ -75,6 +75,24 @@ const geography = f("geography", "catalog", L("Geography", "География",
 const productC = f("product", "catalog", L("Product", "Продукт", "Продукт", "المنتج"), { catalog: "products" });
 const useCase = f("use_case", "catalog", L("Use case", "Сценарий применения", "Сценарій застосування", "حالة الاستخدام"), { catalog: "use_cases" });
 
+// Phase 8: manufacturing. One build unit per physical product (operations.builds), one item master, BOM revisions,
+// configurations, test procedures and work orders — on the same record model; ledger, serials and lines in v25 tables.
+/** The default build lifecycle (configurable in Manufacturing → Settings; prerequisites are checked by the database). */
+export const BUILD_STATUSES = ["Planned", "Engineering", "Material Planning", "Procurement", "Ready for Build", "Assembly", "Integration", "Inspection", "Testing", "Rework", "Acceptance", "Ready for Shipment", "Shipped", "Delivered", "Hold", "Cancelled"];
+/** Earlier container-build statuses → the lifecycle (v25 moved the data; old automations keep working). */
+export const LEGACY_BUILD_STATUS = { Design: "Engineering", Procurement: "Procurement", Assembly: "Assembly", Integration: "Integration", Testing: "Testing", Shipping: "Shipped", Installed: "Delivered" };
+export const BUILD_DONE = ["Shipped", "Delivered", "Cancelled", "Installed"];
+export const DEF_STATES = ["Draft", "Review", "Approved", "Superseded", "Retired"];
+export const PRODUCT_LIFECYCLE = ["Concept", "Development", "Pilot", "Active", "Hold", "Retired"];
+export const ITEM_TYPES = ["Purchased Part", "Manufactured Part", "Assembly", "Subassembly", "Equipment", "Material", "Consumable", "Tool", "Software License", "Service", "Documentation Item", "Customer-Supplied Item", "Other"];
+export const WO_STATES = ["Planned", "Ready", "In Progress", "Blocked", "Completed", "Cancelled"];
+export const INSPECTION_KINDS = ["Receiving Inspection", "In-Process Inspection", "Final Inspection"];
+export const MFG_CAPS = ["manufacturing_admin", "bom_editor", "bom_approver", "inventory_manager", "build_manager", "work_order_manager", "quality_inspector", "quality_approver", "test_operator", "test_approver", "engineering_change_approver", "unit_acceptance_approver", "shipment_release_approver"];
+const productRef = f("product_ref", "ref", L("Product", "Продукт", "Продукт", "المنتج"), { ref: "technical.products" });
+const configRef = f("config_ref", "ref", L("Configuration", "Конфигурация", "Конфігурація", "التهيئة"), { ref: "technical.configurations" });
+const buildRef = f("build_ref", "ref", L("Build unit", "Единица сборки", "Одиниця збирання", "وحدة التجميع"), { ref: "operations.builds" });
+const itemRef = f("item_ref", "ref", L("Item", "Позиция", "Позиція", "الصنف"), { ref: "technical.items" });
+
 /** Tasks: one set of statuses and priorities for the whole company (v19 maps the earlier Open/Done and Medium). */
 export const TASK_STATUSES = ["New", "In progress", "Blocked", "Waiting", "Review", "Completed", "Cancelled"];
 /** Who a task waits on when its status is Waiting (Phase 5 Waiting For): a colleague, or a party outside AGRON. */
@@ -164,8 +182,8 @@ export const DEPARTMENTS = [
         fields: [f("device", "text", L("Device / model", "Устройство / модель", "Пристрій / модель", "الجهاز / الطراز")), f("protocol", "select", L("Protocol", "Протокол", "Протокол", "البروتوكول"), { options: ["REST API", "WebSocket", "MQTT", "RTSP", "ONVIF", "SNMP", "Modbus TCP", "NMEA 0183", "NMEA 2000", "OPC UA", "Vendor SDK"] }), f("sdk", "select", L("SDK / API access", "Доступ к SDK / API", "Доступ до SDK / API", "الوصول إلى SDK / API"), { options: ["Public", "NDA required", "Licensed", "Not available"] }), owner, f("icd", "url", L("Interface document (ICD)", "Интерфейсный документ (ICD)", "Інтерфейсний документ (ICD)", "وثيقة الواجهة (ICD)")), notes],
         columns: ["device", "protocol", "sdk", "owner"] },
       { key: "testing", label: L("Tests & trials", "Тесты и испытания", "Тести та випробування", "الاختبارات والتجارب"), controlled: true,
-        statuses: ["Planned", "Running", "Passed", "Failed", "Blocked"],
-        fields: [f("type", "select", L("Test type", "Тип испытания", "Тип випробування", "نوع الاختبار"), { options: ["Lab", "Bench", "Field", "Sea trial", "EMC", "Environmental", "Cyber"] }), config, f("equipment", "text", L("Equipment under test", "Испытуемое оборудование", "Обладнання, що випробовується", "المعدات قيد الاختبار")), f("date", "date", L("Date", "Дата", "Дата", "التاريخ")), owner, f("result", "long", L("Result / findings", "Результат / выводы", "Результат / висновки", "النتيجة")), link],
+        statuses: ["Planned", "Running", "Passed", "Failed", "Conditional", "Aborted", "Blocked"],
+        fields: [number, buildRef, AUTO("procedure_ref", "ref", "Test procedure (version)", "Методика (версия)", "Методика (версія)", "إجراء الاختبار", { ref: "technical.test_procedures" }), AUTO("outcome", "text", "Result", "Результат", "Результат", "النتيجة"), f("type", "select", L("Test type", "Тип испытания", "Тип випробування", "نوع الاختبار"), { options: ["Lab", "Bench", "Field", "Sea trial", "EMC", "Environmental", "Cyber"] }), config, f("equipment", "text", L("Equipment under test", "Испытуемое оборудование", "Обладнання, що випробовується", "المعدات قيد الاختبار")), f("date", "date", L("Date", "Дата", "Дата", "التاريخ")), owner, f("result", "long", L("Result / findings", "Результат / выводы", "Результат / висновки", "النتيجة")), link],
         columns: ["type", "equipment", "date", "owner"] },
       { key: "certification", label: L("Certification", "Сертификация", "Сертифікація", "الشهادات"),
         statuses: ["Not started", "Submitted", "In review", "Approved", "Rejected"],
@@ -198,7 +216,7 @@ export const DEPARTMENTS = [
         statuses: ["Active", "Planned", "Renewal due", "Retired"],
         fields: [f("type", "select", L("Type", "Тип", "Тип", "النوع"), { options: ["SaaS", "Hardware", "Network", "Cloud", "Domain", "License"] }), f("vendor", "text", L("Vendor", "Поставщик", "Постачальник", "المورّد")), owner, f("renewal", "date", L("Renewal date", "Дата продления", "Дата продовження", "تاريخ التجديد")), f("monthly_cost", "money", L("Monthly cost", "Стоимость в месяц", "Вартість на місяць", "التكلفة الشهرية")), notes],
         columns: ["type", "vendor", "renewal", "monthly_cost"] },
-      { key: "bom", label: L("Bill of materials", "Спецификация (BOM)", "Специфікація (BOM)", "قائمة المواد"), controlled: true,
+      { key: "bom", label: L("Bill of materials (earlier list)", "Спецификация (прежний список)", "Специфікація (попередній список)", "قائمة المواد (القائمة السابقة)"), controlled: true,
         statuses: ["Draft", "Approved", "Superseded"],
         fields: [config, f("item", "text", L("Item", "Позиция", "Позиція", "البند")), f("part_no", "text", L("Part number", "Артикул", "Артикул", "رقم القطعة")), f("qty", "number", L("Quantity", "Количество", "Кількість", "الكمية")), f("unit_cost", "money", L("Unit cost", "Цена за единицу", "Ціна за одиницю", "تكلفة الوحدة")), f("supplier", "text", L("Supplier", "Поставщик", "Постачальник", "المورّد")), f("matrix_id", "text", L("Compliance matrix ID", "ID в матрице комплаенса", "ID у матриці комплаєнсу", "معرّف مصفوفة الامتثال")), notes],
         columns: ["config", "item", "qty", "unit_cost", "supplier"] },
@@ -216,6 +234,50 @@ export const DEPARTMENTS = [
           f("impact_certification", "long", L("Certification notes (written by a person)", "Заметки по сертификации (пишет человек)", "Нотатки щодо сертифікації (пише людина)", "ملاحظات الشهادات (يكتبها شخص)")),
           AUTO("impact_confirmed_by", "text", "Impact confirmed by", "Влияние подтвердил", "Вплив підтвердив", "أكّد الأثر")],
         columns: ["number", "config", "priority", "owner", "due"] },
+      { key: "products", label: L("Products", "Продукты", "Продукти", "المنتجات"),
+        read: ["management", "engineering", "operations", "procurement", "sales", "finance", "security", "legal"], write: ["engineering"],
+        statuses: PRODUCT_LIFECYCLE,
+        fields: [f("code", "text", L("Product code", "Код продукта", "Код продукту", "رمز المنتج")), f("family", "text", L("Product family", "Семейство", "Сімейство", "عائلة المنتج")),
+          f("description", "long", L("Description", "Описание", "Опис", "الوصف")), f("uom", "text", L("Default unit of measure", "Единица измерения", "Одиниця виміру", "وحدة القياس")),
+          f("unit_code", "text", L("Unit number code (e.g. C20 → AGR-C20-0001)", "Код номера единиц (напр. C20 → AGR-C20-0001)", "Код номера одиниць (напр. C20 → AGR-C20-0001)", "رمز ترقيم الوحدات")),
+          f("product_owner", "person", L("Product owner", "Владелец продукта", "Власник продукту", "مالك المنتج")), f("engineering_owner", "person", L("Engineering owner", "Ответственный инженер", "Відповідальний інженер", "المسؤول الهندسي")),
+          f("manufacturing_owner", "person", L("Manufacturing owner", "Ответственный за производство", "Відповідальний за виробництво", "مسؤول التصنيع")),
+          AUTO("current_config_ref", "ref", "Current approved configuration", "Текущая утверждённая конфигурация", "Поточна затверджена конфігурація", "التهيئة المعتمدة الحالية", { ref: "technical.configurations" }), projectRef, notes],
+        columns: ["code", "family", "unit_code", "current_config_ref"] },
+      { key: "configurations", label: L("Product configurations", "Конфигурации продуктов", "Конфігурації продуктів", "تهيئات المنتجات"), controlled: true,
+        read: ["management", "engineering", "operations"], write: ["engineering"],
+        statuses: DEF_STATES,
+        fields: [AUTO("code", "text", "Configuration code", "Код конфигурации", "Код конфігурації", "رمز التهيئة"), AUTO("version", "number", "Version", "Версия", "Версія", "الإصدار"), productRef,
+          f("name", "text", L("Name", "Название", "Назва", "الاسم")), f("effective_date", "date", L("Effective date", "Дата вступления", "Дата набрання чинності", "تاريخ السريان")),
+          f("owner", "person", L("Owner", "Ответственный", "Відповідальний", "المسؤول")), projectRef, f("bom_number", "text", L("BOM", "BOM", "BOM", "قائمة المواد")),
+          AUTO("supersedes_ref", "ref", "Earlier version", "Предыдущая версия", "Попередня версія", "الإصدار السابق", { ref: "technical.configurations" }), notes],
+        columns: ["code", "version", "product_ref", "name", "effective_date"] },
+      { key: "items", label: L("Item master", "Номенклатура (Item Master)", "Номенклатура (Item Master)", "سجل الأصناف"), controlled: true,
+        read: ["management", "engineering", "operations", "procurement", "finance"], write: ["engineering", "operations", "procurement"],
+        statuses: ["Draft", "Active", "Hold", "Obsolete"],
+        fields: [number, f("manufacturer", "text", L("Manufacturer", "Производитель", "Виробник", "الشركة المصنعة")), f("mpn", "text", L("Manufacturer part number", "Артикул производителя", "Артикул виробника", "رقم قطعة المصنع")),
+          f("description", "long", L("Description", "Описание", "Опис", "الوصف")), f("category", "text", L("Category", "Категория", "Категорія", "الفئة")), f("uom", "text", L("Unit of measure", "Единица измерения", "Одиниця виміру", "وحدة القياس")),
+          f("item_type", "select", L("Item type", "Тип позиции", "Тип позиції", "نوع الصنف"), { options: ITEM_TYPES }), vendorRef,
+          f("lead_time_days", "number", L("Lead time, days", "Срок поставки, дней", "Термін постачання, днів", "مدة التوريد بالأيام")), f("ref_cost", "money", L("Reference cost", "Справочная цена", "Довідкова ціна", "التكلفة المرجعية")), currency,
+          f("classification", "select", L("Classification (entered, not inferred)", "Классификация (вводится, не выводится)", "Класифікація (вводиться, не виводиться)", "التصنيف (يُدخل ولا يُستنتج)"), { options: ["Unrestricted", "Internal", "Controlled — entered", "US Persons Only"] }),
+          f("serialized", "check", L("Serialized", "Серийный учёт", "Серійний облік", "مرقّم تسلسلياً")), f("lot_controlled", "check", L("Lot-controlled", "Учёт партий", "Облік партій", "تتبّع الدفعات")),
+          f("inspection_required", "check", L("Receiving inspection required", "Входной контроль обязателен", "Вхідний контроль обов'язковий", "يتطلب فحص الاستلام")), f("critical", "check", L("Critical material", "Критичный материал", "Критичний матеріал", "مادة حرجة")),
+          f("shelf_life_days", "number", L("Shelf life, days", "Срок хранения, дней", "Термін зберігання, днів", "مدة الصلاحية بالأيام")), f("storage", "text", L("Storage requirements", "Условия хранения", "Умови зберігання", "متطلبات التخزين")), notes],
+        columns: ["number", "item_type", "manufacturer", "mpn", "uom"] },
+      { key: "boms", label: L("BOM revisions", "Ревизии BOM", "Ревізії BOM", "مراجعات قائمة المواد"), controlled: true,
+        read: ["management", "engineering", "operations"], write: ["engineering"],
+        statuses: DEF_STATES,
+        fields: [number, AUTO("revision", "text", "Revision", "Ревизия", "Ревізія", "المراجعة"), configRef, f("change_reason", "long", L("Change reason", "Причина изменения", "Причина зміни", "سبب التغيير")),
+          f("owner", "person", L("Owner", "Ответственный", "Відповідальний", "المسؤول")), f("effective_date", "date", L("Effective date", "Дата вступления", "Дата набрання чинності", "تاريخ السريان")),
+          AUTO("ecr_ref", "ref", "Engineering change", "Инженерное изменение", "Інженерна зміна", "التغيير الهندسي", { ref: "technical.changes" }), AUTO("line_count", "number", "Lines", "Строк", "Рядків", "البنود"), notes],
+        columns: ["number", "revision", "config_ref", "owner", "line_count"] },
+      { key: "test_procedures", label: L("Test procedures", "Методики испытаний", "Методики випробувань", "إجراءات الاختبار"), controlled: true,
+        read: ["management", "engineering", "operations"], write: ["engineering"],
+        statuses: DEF_STATES,
+        fields: [AUTO("code", "text", "Procedure code", "Код методики", "Код методики", "رمز الإجراء"), AUTO("version", "number", "Version", "Версия", "Версія", "الإصدار"),
+          f("category", "select", L("Category", "Категория", "Категорія", "الفئة"), { options: ["Power", "UPS / battery", "Generator", "HVAC", "Networking", "Communications", "Sensors", "Software", "Integration", "Failover", "Environmental", "Other"] }),
+          f("document_ref", "ref", L("Controlled document", "Управляемый документ", "Керований документ", "المستند الخاضع للرقابة"), { ref: "company.documents" }), notes],
+        columns: ["code", "version", "category", "document_ref"] },
     ],
   },
   {
@@ -223,11 +285,27 @@ export const DEPARTMENTS = [
     label: L("Operations", "Операции", "Операції", "العمليات"),
     read: INTERNAL, write: ["operations", "management"],
     sections: [
-      { key: "builds", label: L("Container builds", "Сборка контейнеров", "Збирання контейнерів", "تجميع الحاويات"), board: true,
-        statuses: ["Design", "Procurement", "Assembly", "Integration", "Testing", "Shipping", "Installed"],
-        gate: { status: "Shipping", field: "export_check", equals: "Cleared", msg: L("Export and end-user check must be Cleared before shipping.", "Перед отгрузкой экспортная проверка и проверка конечного пользователя должны быть в статусе Cleared.", "Перед відвантаженням експортна перевірка та перевірка кінцевого користувача мають бути в статусі Cleared.", "يجب أن يكون فحص التصدير والمستخدم النهائي Cleared قبل الشحن.") },
-        fields: [f("deal_ref", "ref", L("Deal (linked)", "Сделка (связь)", "Угода (зв'язок)", "الصفقة (مرتبطة)"), { ref: "sales.pipeline" }), f("screening_ref", "ref", L("Screening (linked)", "Санкционная проверка (связь)", "Санкційна перевірка (зв'язок)", "الفحص (مرتبط)"), { ref: "security.screening" }), config, f("client", "text", L("Client", "Клиент", "Клієнт", "العميل")), f("site", "text", L("Site / vessel", "Объект / судно", "Об'єкт / судно", "الموقع / السفينة")), f("assembly", "select", L("Assembly location", "Место сборки", "Місце збирання", "موقع التجميع"), { options: ["United States", "UAE"] }), f("export_check", "select", L("Export / end-user check", "Экспортная проверка", "Експортна перевірка", "فحص التصدير"), { options: SCREEN }), f("vin", "text", L("Van VIN (Sprinter only)", "VIN вэна (только Sprinter)", "VIN вена (лише Sprinter)", "رقم VIN للشاحنة (Sprinter فقط)")), f("euc", "select", L("End-user certificate", "Сертификат конечного пользователя", "Сертифікат кінцевого користувача", "شهادة المستخدم النهائي"), { options: ["Not requested", "Requested", "Signed", "Not required"] }), owner, due, notes],
-        columns: ["config", "client", "site", "assembly", "export_check", "due"] },
+      { key: "builds", label: L("Build units", "Единицы сборки", "Одиниці збирання", "وحدات التجميع"), board: true, controlled: true,
+        statuses: BUILD_STATUSES,
+        gate: { statuses: ["Ready for Shipment", "Shipped"], field: "export_check", in: ["Cleared"], msg: L("Export and end-user check must be Cleared before shipping.", "Перед отгрузкой экспортная проверка и проверка конечного пользователя должны быть в статусе Cleared.", "Перед відвантаженням експортна перевірка та перевірка кінцевого користувача мають бути в статусі Cleared.", "يجب أن يكون فحص التصدير والمستخدم النهائي Cleared قبل الشحن.") },
+        fields: [number, productRef, AUTO("config_ref", "ref", "Configuration (pinned)", "Конфигурация (закреплена)", "Конфігурація (закріплена)", "التهيئة (مثبتة)", { ref: "technical.configurations" }),
+          AUTO("bom_ref", "ref", "BOM revision (pinned)", "Ревизия BOM (закреплена)", "Ревізія BOM (закріплена)", "مراجعة قائمة المواد (مثبتة)", { ref: "technical.boms" }), projectRef, partyRef,
+          f("target", "date", L("Target completion", "Плановое завершение", "Планове завершення", "الإنجاز المستهدف")), f("planned_start", "date", L("Planned start", "Плановый старт", "Плановий старт", "البدء المخطط")),
+          f("location", "text", L("Build location", "Место сборки", "Місце збирання", "موقع التجميع")), f("destination", "text", L("Shipment destination", "Пункт назначения", "Пункт призначення", "وجهة الشحن")), priority,
+          f("restricted", "check", L("Restricted build (team only)", "Ограниченная сборка (только команда)", "Обмежене збирання (лише команда)", "تجميع مقيّد (للفريق فقط)")),
+          f("status_reason", "text", L("Reason for the status (Hold, Cancelled)", "Причина статуса (Hold, Cancelled)", "Причина статусу (Hold, Cancelled)", "سبب الحالة")),
+          f("status_exception", "text", L("Exception to the prerequisites (Build Manager)", "Исключение из условий (Build Manager)", "Виняток з умов (Build Manager)", "استثناء من المتطلبات")),
+          f("deal_ref", "ref", L("Deal (linked)", "Сделка (связь)", "Угода (зв'язок)", "الصفقة (مرتبطة)"), { ref: "sales.pipeline" }), f("screening_ref", "ref", L("Screening (linked)", "Санкционная проверка (связь)", "Санкційна перевірка (зв'язок)", "الفحص (مرتبط)"), { ref: "security.screening" }), config, f("client", "text", L("Client", "Клиент", "Клієнт", "العميل")), f("site", "text", L("Site / vessel", "Объект / судно", "Об'єкт / судно", "الموقع / السفينة")), f("assembly", "select", L("Assembly location", "Место сборки", "Місце збирання", "موقع التجميع"), { options: ["United States", "UAE"] }), f("export_check", "select", L("Export / end-user check", "Экспортная проверка", "Експортна перевірка", "فحص التصدير"), { options: SCREEN }), f("vin", "text", L("Van VIN (Sprinter only)", "VIN вэна (только Sprinter)", "VIN вена (лише Sprinter)", "رقم VIN للشاحنة (Sprinter فقط)")), f("euc", "select", L("End-user certificate", "Сертификат конечного пользователя", "Сертифікат кінцевого користувача", "شهادة المستخدم النهائي"), { options: ["Not requested", "Requested", "Signed", "Not required"] }), owner, due, notes],
+        columns: ["number", "product_ref", "config_ref", "client", "export_check", "target"] },
+      { key: "work_orders", label: L("Work orders", "Наряды на работы", "Наряди на роботи", "أوامر العمل"), controlled: true,
+        read: ["management", "engineering", "operations"], write: ["operations", "engineering", "management"],
+        statuses: WO_STATES,
+        fields: [number, buildRef, f("operation", "text", L("Operation", "Операция", "Операція", "العملية")), f("assembly", "text", L("Assembly", "Узел", "Вузол", "المجموعة")),
+          f("assignee", "person", L("Assigned to", "Исполнитель", "Виконавець", "المكلف")), f("team", "text", L("Team", "Команда", "Команда", "الفريق")), f("planned", "date", L("Planned date", "Плановая дата", "Планова дата", "التاريخ المخطط")),
+          f("instructions", "long", L("Instructions", "Инструкции", "Інструкції", "التعليمات")), f("tools", "text", L("Required tools", "Инструменты", "Інструменти", "الأدوات المطلوبة")),
+          f("inspection_required", "select", L("Inspection after the work", "Контроль после работ", "Контроль після робіт", "الفحص بعد العمل"), { options: INSPECTION_KINDS }),
+          f("status_reason", "text", L("Reason (Blocked, Cancelled)", "Причина (Blocked, Cancelled)", "Причина (Blocked, Cancelled)", "السبب")), notes],
+        columns: ["number", "build_ref", "operation", "assignee", "planned"] },
       { key: "requests", label: L("Purchase requests", "Заявки на закупку", "Заявки на закупівлю", "طلبات الشراء"),
         read: [...INTERNAL], write: [...INTERNAL],
         statuses: ["Draft", "Submitted", "Technical review", "Quotations", "Vendor selection", "Approval", "Approved", "Ordered", "Receiving", "Closed", "Rejected", "Cancelled"],
@@ -267,7 +345,7 @@ export const DEPARTMENTS = [
         statuses: ["Prospect", "Under review", "Approved", "Active", "On hold", "Inactive", "Blocked"],
         fields: [f("category", "text", L("Supplies", "Что поставляет", "Що постачає", "ما يورّده")), country, contact, partyRef, f("nda", "select", L("NDA", "NDA", "NDA", "اتفاقية عدم الإفصاح"), { options: ["None", "Sent", "Signed"] }), f("screening", "select", L("Restricted-party screening", "Проверка по санкционным спискам", "Перевірка за санкційними списками", "فحص القوائم المحظورة"), { options: SCREEN }), notes],
         columns: ["category", "country", "nda", "screening"] },
-      { key: "inventory", label: L("Inventory & serials", "Склад и серийные номера", "Склад і серійні номери", "المخزون والأرقام التسلسلية"),
+      { key: "inventory", label: L("Inventory & serials (earlier list)", "Склад и серийные номера (прежний список)", "Склад і серійні номери (попередній список)", "المخزون والأرقام التسلسلية (القائمة السابقة)"),
         statuses: ["In stock", "Reserved", "Installed", "In repair", "Returned"],
         fields: [f("build_ref", "ref", L("Build (linked)", "Сборка (связь)", "Збирання (зв'язок)", "التجميع (مرتبط)"), { ref: "operations.builds" }), f("part_no", "text", L("Part number", "Артикул", "Артикул", "رقم القطعة")), f("serial", "text", L("Serial number", "Серийный номер", "Серійний номер", "الرقم التسلسلي")), f("model", "text", L("Model", "Модель", "Модель", "الطراز")), f("location", "text", L("Location", "Местонахождение", "Місцезнаходження", "الموقع")), f("build", "text", L("Build / container", "Сборка / контейнер", "Збирання / контейнер", "التجميع / الحاوية")), notes],
         columns: ["serial", "model", "location", "build"] },
@@ -290,7 +368,7 @@ export const DEPARTMENTS = [
         columns: ["audience"] },
       { key: "quality", label: L("Quality control & NCR", "Контроль качества и несоответствия", "Контроль якості та невідповідності", "مراقبة الجودة وعدم المطابقة"),
         statuses: ["Planned", "Inspection", "Non-conformance", "Corrective action", "Closed"],
-        fields: [f("build", "text", L("Build / container", "Сборка / контейнер", "Збирання / контейнер", "التجميع / الحاوية")), f("check_type", "select", L("Check", "Проверка", "Перевірка", "الفحص"), { options: ["Incoming inspection", "In-process", "Factory acceptance (FAT)", "Site acceptance (SAT)"] }), f("result", "select", L("Result", "Результат", "Результат", "النتيجة"), { options: ["Pass", "Conditional", "Fail"] }), f("date", "date", L("Date", "Дата", "Дата", "التاريخ")), owner, f("findings", "long", L("Findings & corrective action", "Замечания и корректирующие действия", "Зауваження та коригувальні дії", "الملاحظات والإجراء التصحيحي")), link],
+        fields: [number, AUTO("inspection_kind", "text", "Inspection", "Контроль", "Контроль", "الفحص"), buildRef, f("work_order_ref", "ref", L("Work order", "Наряд", "Наряд", "أمر العمل"), { ref: "operations.work_orders" }), itemRef, f("build", "text", L("Build / container", "Сборка / контейнер", "Збирання / контейнер", "التجميع / الحاوية")), f("check_type", "select", L("Check", "Проверка", "Перевірка", "الفحص"), { options: ["Incoming inspection", "In-process", "Factory acceptance (FAT)", "Site acceptance (SAT)"] }), f("result", "select", L("Result", "Результат", "Результат", "النتيجة"), { options: ["Pass", "Conditional", "Fail"] }), f("date", "date", L("Date", "Дата", "Дата", "التاريخ")), owner, f("findings", "long", L("Findings & corrective action", "Замечания и корректирующие действия", "Зауваження та коригувальні дії", "الملاحظات والإجراء التصحيحي")), link],
         columns: ["build", "check_type", "result", "date", "owner"] },
       { key: "fleet", label: L("Installed base & SLA", "Установленные системы и SLA", "Встановлені системи та SLA", "الأنظمة المركبة واتفاقيات الخدمة"),
         statuses: ["Active", "Maintenance due", "Warranty claim", "Decommissioned"],
@@ -915,10 +993,13 @@ export const DEPARTMENTS = [
         columns: ["number", "handler", "department", "due"] },
       { key: "issues", label: L("Issues", "Проблемы", "Проблеми", "المشكلات"),
         statuses: ["Open", "Investigating", "Action required", "Verification", "Closed", "Cancelled"],
-        fields: [number, f("type", "select", L("Type", "Тип", "Тип", "النوع"), { options: ["Quality", "Delivery", "Technical", "Process", "Supplier", "Documentation", "Other"] }),
+        fields: [number, f("type", "select", L("Type", "Тип", "Тип", "النوع"), { options: ["Quality", "Nonconformance", "Delivery", "Technical", "Process", "Supplier", "Documentation", "Other"] }),
           f("severity", "select", L("Severity", "Серьёзность", "Серйозність", "الخطورة"), { options: ["Low", "Medium", "High", "Critical"] }), f("owner", "person", L("Owner", "Ответственный", "Відповідальний", "المسؤول")), due,
           f("description", "long", L("What happened", "Что случилось", "Що сталося", "ما حدث")), projectRef, vendorRef,
-          AUTO("source_ref", "ref", "Raised from", "Источник", "Джерело", "المصدر", { ref: "operations.receipts" }), AUTO("purchase_ref", "ref", "Purchase record", "Закупка", "Закупівля", "سجل الشراء", { ref: "operations.procurement" })],
+          AUTO("source_ref", "ref", "Raised from", "Источник", "Джерело", "المصدر", { ref: "operations.receipts" }), AUTO("purchase_ref", "ref", "Purchase record", "Закупка", "Закупівля", "سجل الشراء", { ref: "operations.procurement" }),
+          buildRef, f("work_order_ref", "ref", L("Work order", "Наряд", "Наряд", "أمر العمل"), { ref: "operations.work_orders" }), itemRef,
+          f("serial", "text", L("Serial", "Серийный номер", "Серійний номер", "الرقم التسلسلي")), f("lot", "text", L("Lot", "Партия", "Партія", "الدفعة")),
+          AUTO("disposition", "text", "Disposition", "Решение", "Рішення", "القرار"), AUTO("disposition_by", "text", "Disposition by", "Решение принял", "Рішення прийняв", "قرّره")],
         columns: ["number", "type", "severity", "owner", "due"] },
       { key: "travel", label: L("Travel & event requests", "Поездки и мероприятия", "Поїздки та заходи", "طلبات السفر والفعاليات"),
         statuses: ["Request", "Approval", "Planning", "Booked", "Ready", "Completed", "Expense", "Closed", "Rejected", "Cancelled"],
@@ -1018,9 +1099,9 @@ export const DEPT_COLORS = {
 // Section icons
 export const SECTION_ICONS = {
   "technical.equipment": "radar", "technical.rnd": "flask", "technical.software": "code", "technical.integration": "plug", "technical.testing": "check",
-  "technical.certification": "badge", "technical.docs": "file", "technical.it": "server", "technical.bom": "layers", "technical.changes": "git", "technical.systems": "pulse", "technical.metrics": "trend", "security.metrics": "trend", "finance.metrics": "trend", "sales.metrics": "trend", "operations.metrics": "trend", "hr.metrics": "trend", "legal.metrics": "trend",
+  "technical.certification": "badge", "technical.docs": "file", "technical.it": "server", "technical.bom": "layers", "technical.changes": "git", "technical.products": "container", "technical.configurations": "grid", "technical.items": "box", "technical.boms": "layers", "technical.test_procedures": "clipboard", "technical.systems": "pulse", "technical.metrics": "trend", "security.metrics": "trend", "finance.metrics": "trend", "sales.metrics": "trend", "operations.metrics": "trend", "hr.metrics": "trend", "legal.metrics": "trend",
   "marketing.channels": "link", "marketing.metrics": "trend",
-  "operations.builds": "container", "operations.procurement": "cart", "operations.vendors": "store", "operations.inventory": "box", "operations.logistics": "truck",
+  "operations.builds": "container", "operations.work_orders": "clipboard", "operations.procurement": "cart", "operations.vendors": "store", "operations.inventory": "box", "operations.logistics": "truck",
   "operations.installation": "anchor", "operations.support": "headset", "operations.comms": "megaphone", "operations.quality": "check", "operations.fleet": "map",
   "finance.budget": "pie", "finance.expenses": "receipt", "finance.invoices": "file", "finance.costing": "calc", "finance.leasing": "key",
   "finance.investors": "trend", "finance.tax": "landmark", "finance.cashflow": "trend", "finance.insurance": "umbrella",

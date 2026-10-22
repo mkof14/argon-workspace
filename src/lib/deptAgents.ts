@@ -1,6 +1,7 @@
 // Department agents: what each department's agent notices and what it proposes.
 // Pure functions over records (no I/O, no local imports), so the rules are tested directly; the server executes the result.
 import type { Action } from "./automation";
+import { buildDelivered, buildShipping, buildTesting } from "./builds";
 
 type R = { id: string; section: string; title: string; status: string | null; data: Record<string, any>; controlled?: boolean; created_at?: string; updated_at?: string };
 export type Th = { remind_before: number; escalate_after: number; stalled_deal: number; /** 90-day forecast, computed by the caller (lib/cashforecast) */ /** SLA of a support request, computed by the caller (lib/sla) */ sla?: (t: any, fleet: any[]) => { respond: string; resolve: string; respondBy: string; resolveBy: string; tier: string; severity: string } | null; /** Collection letters, computed by the caller (lib/dunning) */ dun?: { stepFor: (late: number) => number; langOf: (inv: any, all: any[]) => any; letter: (step: number, lang: any, v: { title: string; sum: string; due: string; late: number; client: string }) => { subject: string; body: string } }; /** Project money of a won deal, computed by the caller (lib/margin) */ margin?: (deal: any, all: any[]) => { forecastPct: number | null; targetPct: number | null; low: boolean; over: boolean; committed: number; planned: number | null }; /** Vendors delivering late too often, computed by the caller (lib/vendors) */ vendors?: (all: any[]) => { vendor: string; onTime: number | null; avgDelay: number | null; received: number; defectPct: number | null }[]; /** Parts shortages for builds, computed by the caller (lib/parts) */ parts?: (all: any[], today: string) => { b: any; lines: { line: any; short: number; free: number }[] }[]; cash?: { opening: number | null; gap: { week: number; start: string; balance: number } | null; lines: { id: string; title: string; usd: number; date: string; kind: string }[] } };
@@ -196,23 +197,23 @@ export function operationsFindings(all: R[], today: string, _th: Th): Finding[] 
   const builds = of(all, "operations.builds"); const byId = new Map(all.map((r) => [r.id, r]));
   const linked = (sec: string, key: string, id: string) => all.filter((r) => r.section === sec && r.data?.[key] === id);
   // Export control before anything ships
-  for (const b of builds) if (["Shipping", "Testing"].includes(b.status || "") && b.data?.export_check !== "Cleared")
-    out.push({ rec: b, level: b.status === "Shipping" ? "bad" : "warn", who: b.status === "Shipping" ? ["leads", "role:security", "role:operations"] : ["role:operations", "role:security"], key: `ops-export|${b.id}|${b.status}`, repeat: 3, text: `Build “${b.title}” is at ${b.status} but the export check is “${b.data?.export_check || "Not started"}”. It must not ship until cleared.` });
+  for (const b of builds) if ((buildShipping(b.status) || buildTesting(b.status)) && b.data?.export_check !== "Cleared")
+    out.push({ rec: b, level: buildShipping(b.status) ? "bad" : "warn", who: buildShipping(b.status) ? ["leads", "role:security", "role:operations"] : ["role:operations", "role:security"], key: `ops-export|${b.id}|${b.status}`, repeat: 3, text: `Build “${b.title}” is at ${b.status} but the export check is “${b.data?.export_check || "Not started"}”. It must not ship until cleared.` });
   // End-user certificate: ask for it while the build is still being tested, not on the shipping day
-  for (const b of builds) if (["Integration", "Testing"].includes(b.status || "") && !["Signed", "Not required"].includes(b.data?.euc))
+  for (const b of builds) if (buildTesting(b.status) && !["Signed", "Not required"].includes(b.data?.euc))
     out.push({ rec: { ...b, data: { ...b.data, euc: b.data?.euc || "Not requested" } }, level: "warn", who: ["role:operations", "role:sales", "role:legal"], key: `ops-euc|${b.id}|${b.status}`, repeat: 7, text: `Build “${b.title}” is at ${b.status} and the end-user certificate is “${b.data?.euc || "Not requested"}”. It cannot ship without a signed certificate.` });
   for (const l of of(all, "operations.logistics")) {
     const b = byId.get(l.data?.build_ref);
     if (["In transit", "Customs"].includes(l.status || "") && b && b.data?.export_check !== "Cleared") out.push({ rec: l, level: "bad", who: ["leads", "role:security"], key: `ops-ship-exp|${l.id}`, repeat: 3, text: `Shipment “${l.title}” is ${l.status} while build “${b.title}” has no export clearance.` });
     if (["In transit", "Customs"].includes(l.status || "") && isDate(l.data?.due) && days(l.data.due, today) >= 1) out.push({ rec: l, level: "warn", who: ["role:operations"], key: `ops-late|${l.id}`, repeat: 3, text: `Shipment “${l.title}” (${l.data?.carrier || ""} ${l.data?.tracking || ""}) was due on ${l.data.due} and is still ${l.status}.` });
     // Delivered → installation is planned for the build
-    if (l.status === "Delivered" && b && b.status !== "Installed" && !linked("operations.installation", "build_ref", b.id).length)
+    if (l.status === "Delivered" && b && !buildDelivered(b.status) && !linked("operations.installation", "build_ref", b.id).length)
       out.push({ rec: b, level: "info", who: ["role:operations"], key: `ops-inst|${b.id}`, text: `Build “${b.title}” is delivered — an installation record is prepared.`, action: { type: "create", section: "operations.installation", title: "Installation — {title}", status: "Planned", link: "build_ref", fields: { site: "{site}", owner: "{owner}", due: addDays(today, 14) } }, why: "Shipment delivered" });
   }
   // Commissioned → build installed, unit added to the fleet with warranty and first service
   for (const i of of(all, "operations.installation")) {
     const b = byId.get(i.data?.build_ref); if (i.status !== "Commissioned" || !b) continue;
-    if (b.status !== "Installed") out.push({ rec: b, level: "info", who: ["role:operations"], key: `ops-done|${b.id}`, text: `Installation “${i.title}” is commissioned — build “${b.title}” moves to Installed.`, action: { type: "set", field: "status", value: "Installed" }, why: "Installation commissioned" });
+    if (!buildDelivered(b.status)) out.push({ rec: b, level: "info", who: ["role:operations"], key: `ops-done|${b.id}`, text: `Installation “${i.title}” is commissioned — build “${b.title}” moves to Delivered.`, action: { type: "set", field: "status", value: "Delivered" }, why: "Installation commissioned" });
     if (!linked("operations.fleet", "build_ref", b.id).length) out.push({ rec: b, level: "info", who: ["role:operations"], key: `ops-fleet|${b.id}`, text: `“${b.title}” is commissioned — the unit is added to the fleet with a 12-month warranty and a service in 6 months.`,
       action: { type: "create", section: "operations.fleet", title: "{title}", status: "Active", link: "build_ref", fields: { client: "{client}", site: "{site}", config: "{config}", commissioned: today, warranty_end: addDays(today, 365), next_service: addDays(today, 182) } }, why: "Installation commissioned" });
   }

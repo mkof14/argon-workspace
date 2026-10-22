@@ -1,4 +1,5 @@
 "use client";
+import { buildClosed, buildDelivered } from "@/lib/builds";
 import { useMemo, useRef, useState } from "react";
 import Icon from "./Icon";
 import { useApp, findSection, SECTIONS } from "./App";
@@ -68,7 +69,7 @@ export default function ReportBuilder({ recs }: { recs: Rec[] }) {
         { h: "Meetings and calls in period", head: ["Date", "Client", "Type", "Next step"], rows: of("sales.activities").filter(inPeriod).map((r) => [r.data?.date || "", r.data?.client || "", r.data?.type || "", r.data?.next_step || ""]), empty: "No activities recorded in the period." },
       ] };
       case "ops": return { title: "Operations report", sub: period, blocks: [
-        { h: "Summary", kv: [["Builds in progress", String(builds.filter((r) => r.status !== "Installed").length)], ["Installed", String(builds.filter((r) => r.status === "Installed").length)], ["Open purchase orders", String(of("operations.procurement").filter((r) => !["Received", "Cancelled"].includes(r.status || "")).length)], ["Open support tickets", String(of("operations.support").filter(OPEN).length)]] },
+        { h: "Summary", kv: [["Builds in progress", String(builds.filter((r) => !buildClosed(r.status)).length)], ["Installed", String(builds.filter((r) => buildDelivered(r.status)).length)], ["Open purchase orders", String(of("operations.procurement").filter((r) => !["Received", "Cancelled"].includes(r.status || "")).length)], ["Open support tickets", String(of("operations.support").filter(OPEN).length)]] },
         { h: "Container builds by stage", head: ["Stage", "Builds", ""], rows: stageRows("operations.builds", builds) },
         { h: "Builds", head: ["Build", "Client", "Configuration", "Stage", "Export check", "Due", "Owner"], rows: builds.map((r) => [r.title, r.data?.client || "", r.data?.config || "", r.status || "", r.data?.export_check || "", r.data?.due || "", r.data?.owner || ""]), empty: "No builds yet." },
         { h: "Open purchase orders", head: ["PO", "Vendor", "Item", "Amount", "ETA", "Status"], rows: of("operations.procurement").filter((r) => !["Received", "Cancelled"].includes(r.status || "")).map((r) => [r.title, r.data?.vendor || "", r.data?.item || "", n(r.data?.amount) ? `${n(r.data?.amount).toLocaleString("en-US")} ${r.data?.currency || ""}` : "", r.data?.eta || "", r.status || ""]), empty: "No open purchase orders." },
@@ -111,7 +112,7 @@ export default function ReportBuilder({ recs }: { recs: Rec[] }) {
       default: return { title: "Executive brief", sub: period, blocks: [
         { h: "Key numbers", kv: [
           ...(access.read.has("sales.pipeline") ? [["Open pipeline", usd(pipeV)], ["Weighted forecast", usd(weighted)], ["Won in period", usd(won.reduce((a, r) => a + n(r.data?.value), 0))]] as [string, string][] : []),
-          ...(access.read.has("operations.builds") ? [["Builds in progress", String(builds.filter((r) => r.status !== "Installed").length)]] as [string, string][] : []),
+          ...(access.read.has("operations.builds") ? [["Builds in progress", String(builds.filter((r) => !buildClosed(r.status)).length)]] as [string, string][] : []),
           ...(access.read.has("finance.invoices") ? [["Receivable", usd(recv.reduce((a, r) => a + n(r.data?.amount), 0))], ["Payable", usd(pay.reduce((a, r) => a + n(r.data?.amount), 0))]] as [string, string][] : []),
           ["Overdue items", String(overdue.length)],
           ...(matrix.length ? [["Equipment cleared by counsel", `${matrix.filter((r) => r.status === "Counsel approved").length} of ${matrix.length}`]] as [string, string][] : []),

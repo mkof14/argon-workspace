@@ -8,7 +8,7 @@ type R = { id: string; section: string; status?: string | null; data: Record<str
 
 /** Statuses that mean "the goods leave". */
 export const SHIP_GUARD: Record<string, string[]> = {
-  "operations.builds": ["Shipping", "Installed"],
+  "operations.builds": ["Ready for Shipment", "Shipped", "Delivered", "Shipping", "Installed"],
   "operations.logistics": ["In transit", "Customs", "Delivered"],
 };
 /** End-user certificate states that allow shipping. */

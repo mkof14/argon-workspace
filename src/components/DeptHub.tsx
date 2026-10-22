@@ -1,4 +1,5 @@
 "use client";
+import { buildClosed, buildDelivered } from "@/lib/builds";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Icon from "./Icon";
@@ -153,8 +154,8 @@ export default function DeptHub({ dept }: { dept: string }) {
     /* ------------------------------ Operations ------------------------------ */
     if (dept === "operations") {
       const builds = of("operations.builds"), po = of("operations.procurement"), lg = of("operations.logistics"), fleet = of("operations.fleet"), sup = of("operations.support");
-      const late = ["Shipping", "Installed"];
-      kpis.push({ l: L("Builds in progress", "Сборки в работе"), v: String(builds.filter((r) => r.status !== "Installed").length), s: `${builds.filter((r) => r.data?.due && dayDiff(r.data.due) < 0 && r.status !== "Installed").length} ${T(L("late", "просрочено"))}`, href: "/operations/builds" });
+      const late = ["Shipping", "Installed", "Ready for Shipment", "Shipped", "Delivered", "Cancelled"];
+      kpis.push({ l: L("Builds in progress", "Сборки в работе"), v: String(builds.filter((r) => !buildClosed(r.status)).length), s: `${builds.filter((r) => r.data?.due && dayDiff(r.data.due) < 0 && r.status !== "Installed").length} ${T(L("late", "просрочено"))}`, href: "/operations/builds" });
       kpis.push({ l: L("Open purchase orders", "Открытые заказы"), v: String(po.filter((r) => ["Approved", "Ordered"].includes(r.status || "")).length), s: usd(po.filter((r) => ["Approved", "Ordered"].includes(r.status || "") && (r.data?.currency || "USD") === "USD").reduce((a, r) => a + n(r.data?.amount), 0)), href: "/operations/procurement" });
       kpis.push({ l: L("Shipments in transit / customs", "Грузы в пути / на таможне"), v: String(lg.filter((r) => ["In transit", "Customs"].includes(r.status || "")).length), href: "/operations/logistics" });
       kpis.push({ l: L("Open support tickets", "Открытые заявки сервиса"), v: String(sup.filter(OPEN).length), s: `${sup.filter((r) => OPEN(r) && ["High", "Critical"].includes(r.data?.severity)).length} ${T(L("high or critical", "высокий или критический"))}`, href: "/operations/support" });

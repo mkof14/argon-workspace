@@ -141,7 +141,7 @@ export function describe(rule: Rule, label: (sectionId: string) => string) {
 export const DEFAULT_RULES: Rule[] = [
   { id: "deal-won", name: "Deal won → build, invoice and team notice", enabled: true, mode: "suggest", on: "status", section: "sales.pipeline", status: "Won",
     actions: [
-      { type: "create", section: "operations.builds", title: "{title}", status: "Design", link: "deal_ref", fields: { client: "{client}", config: "{config}" } },
+      { type: "create", section: "operations.builds", title: "{title}", status: "Planned", link: "deal_ref", fields: { client: "{client}", config: "{config}" } },
       { type: "create", section: "finance.invoices", title: "Invoice — {title}", status: "Draft", link: "deal_ref", fields: { direction: "Receivable", counterparty: "{client}", amount: "{value}", currency: "{currency}" } },
       { type: "notify", to: "role:operations", message: "Deal “{title}” is won. A container build and a draft invoice were prepared." },
       { type: "notify", to: "role:finance", message: "Deal “{title}” is won ({value} {currency}). A draft invoice is ready to check." },
@@ -158,10 +158,10 @@ export const DEFAULT_RULES: Rule[] = [
     ] },
   { id: "vendor-screen", name: "Vendor under review → screening", enabled: true, mode: "suggest", on: "status", section: "operations.vendors", status: "Under review",
     actions: [{ type: "create", section: "security.screening", title: "{title}", status: "Pending", fields: { party: "{title}", party_type: "Vendor", country: "{country}", date: "{today}" } }] },
-  { id: "build-installed", name: "Build installed → acceptance task", enabled: true, mode: "suggest", on: "status", section: "operations.builds", status: "Installed",
+  { id: "build-installed", name: "Build delivered → acceptance task", enabled: true, mode: "suggest", on: "status", section: "operations.builds", status: "Delivered",
     actions: [
       { type: "create", section: "company.tasks", title: "Client acceptance — {title}", status: "New", fields: { assignee: "{owner}", priority: "High" } },
-      { type: "notify", to: "role:finance", message: "Build “{title}” is installed. Check the final invoice." },
+      { type: "notify", to: "role:finance", message: "Build “{title}” is delivered. Check the final invoice." },
     ] },
   { id: "hire-onboard", name: "New team member → onboarding", enabled: true, mode: "suggest", on: "created", section: "hr.team",
     actions: [{ type: "create", section: "hr.onboarding", title: "Onboarding — {title}", status: "To do", fields: { person: "{title}", due: "{start}" } }] },

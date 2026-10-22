@@ -3,7 +3,8 @@
 
 type R = { id: string; section: string; title: string; status: string | null; data: Record<string, any>; controlled?: boolean; updated_at?: string };
 const same = (a: any, b: any) => !!a && !!b && String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
-export const BUILD_STEPS = ["Design", "Procurement", "Assembly", "Integration", "Testing", "Shipping", "Installed"];
+import { PORTAL_PHASES, portalPhase } from "./builds";
+export const BUILD_STEPS = PORTAL_PHASES;
 
 export function portalView(client: R, all: R[]) {
   const ok = all.filter((r) => !r.controlled);
@@ -19,8 +20,8 @@ export function portalView(client: R, all: R[]) {
     orders: builds.map((b) => {
       const ship = ofBuild("operations.logistics").filter((l) => l.data?.build_ref === b.id)[0];
       const inst = ofBuild("operations.installation").filter((l) => l.data?.build_ref === b.id)[0];
-      const step = Math.max(0, BUILD_STEPS.indexOf(b.status || ""));
-      return { id: b.id, title: b.title, config: b.data?.config || "", status: b.status, step, of: BUILD_STEPS.length - 1, due: b.data?.due || null,
+      const step = portalPhase(b.status);
+      return { id: b.id, title: b.title, config: b.data?.config || "", status: BUILD_STEPS[step], step, of: BUILD_STEPS.length - 1, due: b.data?.due || null,
         shipping: ship ? { status: ship.status, eta: ship.data?.due || null, carrier: ship.data?.carrier || null, tracking: ship.data?.tracking || null, from: ship.data?.from || null, to: ship.data?.to || null } : null,
         installation: inst ? { status: inst.status, date: inst.data?.due || null, site: inst.data?.site || null } : null };
     }),

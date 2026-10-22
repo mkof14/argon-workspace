@@ -1,4 +1,5 @@
 "use client";
+import { buildClosed, buildDelivered } from "@/lib/builds";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import Icon from "./Icon";
@@ -41,7 +42,7 @@ export default function Reports() {
       access.read.has("sales.pipeline") && { l: t("r_pipeline", lang), v: money(open.reduce((a, r) => a + num(r.data?.value), 0)), s: `${open.length} ${t("r_deals", lang)}`, c: DEPT_COLORS.sales, href: "/sales/pipeline", i: "funnel" },
       access.read.has("sales.pipeline") && { l: t("r_won_q", lang), v: money(won.reduce((a, r) => a + num(r.data?.value), 0)), s: `${won.length} ${t("r_deals", lang)}`, c: DEPT_COLORS.sales, href: "/sales/pipeline", i: "trend" },
       access.read.has("finance.invoices") && { l: t("r_receivable", lang), v: money(recv.reduce((a, r) => a + num(r.data?.amount), 0)), s: `${t("r_payable", lang)} ${money(pay.reduce((a, r) => a + num(r.data?.amount), 0))}`, c: DEPT_COLORS.finance, href: "/finance/invoices", i: "coins" },
-      access.read.has("operations.builds") && { l: t("r_builds", lang), v: String(of("operations.builds").filter((r) => r.status !== "Installed").length), s: `${of("operations.builds").filter((r) => r.status === "Installed").length} ${t("r_installed", lang)}`, c: DEPT_COLORS.operations, href: "/operations/builds", i: "container" },
+      access.read.has("operations.builds") && { l: t("r_builds", lang), v: String(of("operations.builds").filter((r) => !buildClosed(r.status)).length), s: `${of("operations.builds").filter((r) => buildDelivered(r.status)).length} ${t("r_installed", lang)}`, c: DEPT_COLORS.operations, href: "/operations/builds", i: "container" },
       { l: t("r_overdue", lang), v: String(overdue.length), s: `${due.filter((x) => x.d >= 0).length} ${t("r_next14", lang)}`, c: "#E5484D", href: "#attention", i: "clock" },
       access.read.has("legal.matrix") && { l: t("r_compliance", lang), v: `${matrix.filter((r) => r.status === "Counsel approved").length}/${matrix.length}`, s: `${matrix.filter((r) => ["Restricted", "Prohibited"].includes(r.data?.risk)).length} ${t("r_restricted", lang)}`, c: DEPT_COLORS.legal, href: "/legal/matrix", i: "grid" },
     ].filter(Boolean) as any[];

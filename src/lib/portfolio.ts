@@ -1,3 +1,4 @@
+import { buildShipping } from "./builds";
 // Project portfolio: every won deal with a project, its progress, next step, dates, money and a traffic light.
 // Red: a step is more than 14 days late, a client invoice is more than 30 days overdue, the margin is low,
 // or shipping is within 14 days and compliance is missing. Amber: anything late, overdue, missing or short.
@@ -31,7 +32,7 @@ export function portfolio(all: R[], today: string, h: Helpers = {}): Row[] {
     const maxOver = over.reduce((m, i) => Math.max(m, days(String(i.data.due).slice(0, 10), today)), 0);
     const builds = all.filter((b) => b.section === "operations.builds" && b.data?.deal_ref === deal.id);
     const shipSoon = isDate(ship) && days(today, ship) <= 45; const shipVerySoon = isDate(ship) && days(today, ship) <= 14;
-    const missing = shipSoon && h.ship ? builds.flatMap((b) => DONE.test(b.status || "") || b.status === "Shipping" ? [] : h.ship!(b)) : [];
+    const missing = shipSoon && h.ship ? builds.flatMap((b) => DONE.test(b.status || "") || buildShipping(b.status) ? [] : h.ship!(b)) : [];
     const money = h.money ? h.money(deal, all) : null;
     const reasons: Reason[] = [];
     if (late.length) reasons.push({ k: "late", n: late.length });

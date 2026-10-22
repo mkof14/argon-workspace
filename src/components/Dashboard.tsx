@@ -1,4 +1,5 @@
 "use client";
+import { buildClosed, buildDelivered } from "@/lib/builds";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import Icon from "./Icon";
@@ -37,7 +38,7 @@ export default function Dashboard({ depts }: { depts: any[] }) {
   const hello = { en: hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening", ru: hour < 12 ? "Доброе утро" : hour < 18 ? "Добрый день" : "Добрый вечер", uk: hour < 12 ? "Доброго ранку" : hour < 18 ? "Добрий день" : "Добрий вечір", ar: hour < 12 ? "صباح الخير" : "مساء الخير" }[lang];
 
   const kpis = [
-    access.read.has("operations.builds") && { k: "kpi_builds", v: builds.filter((b) => b.status !== "Installed").length, href: "/operations/builds", c: DEPT_COLORS.operations, i: "container" },
+    access.read.has("operations.builds") && { k: "kpi_builds", v: builds.filter((b) => !buildClosed(b.status)).length, href: "/operations/builds", c: DEPT_COLORS.operations, i: "container" },
     access.read.has("sales.pipeline") && { k: "kpi_pipeline", v: openDeals.length, sub: money(openDeals.reduce((a, d) => a + (Number(d.data?.value) || 0), 0)), href: "/sales/pipeline", c: DEPT_COLORS.sales, i: "funnel" },
     access.read.has("legal.issues") && { k: "kpi_legal", v: issues.filter((i) => i.status !== "Resolved").length, href: "/legal/issues", c: DEPT_COLORS.legal, i: "scale" },
     access.read.has("operations.procurement") && { k: "kpi_po", v: pos.filter((p) => !["Received", "Cancelled"].includes(p.status || "")).length, href: "/operations/procurement", c: DEPT_COLORS.technical, i: "cart" },
