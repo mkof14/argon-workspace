@@ -98,6 +98,8 @@ test("meeting record: generated as a draft, becomes the record only when the org
   await p.click("aside.drawer >> button.btn.primary:has-text('Save')");
   assert.ok(await waitFor(async () => !!(await sql("select data->>'minutes' m from records where id = $1", [D.meet.id]))[0].m), "minutes saved as a draft");
   assert.equal((await sql("select coalesce(data->>'minutes_state', 'draft') s from records where id = $1", [D.meet.id]))[0].s, "draft");
+  // saving closes the record (as every save does); the organizer opens it again to approve
+  await p.goto(`${APP}/company/meetings?r=${D.meet.id}`); await p.waitForSelector("#f-title", { timeout: 20000 });
   await p.click("[data-approve-minutes]", { timeout: 15000 });
   assert.ok(await waitFor(async () => (await sql("select data->>'minutes_state' s, data->>'minutes_approved_by' b from records where id = $1", [D.meet.id]))[0].s === "approved"), "approved by the organizer");
   await shot(p, "meeting-record"); await p.context().close();
