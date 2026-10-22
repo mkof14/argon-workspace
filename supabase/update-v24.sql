@@ -1814,7 +1814,7 @@ begin
           where x.data->>'nda_ref' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' and c.id = (x.data->>'nda_ref')::uuid
             and c.section = 'legal.contracts' and public.record_visible_for(p.id, c)) c1 on true
         left join lateral (select c.status, c.data->>'end_date' end_date, c.updated_at from public.records c
-          where c1.ok is null and c.data ? 'deal_ref' and c.data->>'deal_ref' = x.id::text and c.section = 'legal.contracts' and c.data->>'type' = 'NDA'
+          where c1.ok is null and c.data ? 'deal_ref' and c.data->>'deal_ref' = x.id::text and (c.section || '') = 'legal.contracts' and c.data->>'type' = 'NDA'
             and public.record_visible_for(p.id, c) order by c.updated_at desc limit 1) c2 on true
         left join lateral (select case when l.data->>'event_ref' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then (l.data->>'event_ref')::uuid end ev
           from public.records l where x.lead_ref is not null and l.id = x.lead_ref and l.section = 'marketing.leads') ld on true) t
