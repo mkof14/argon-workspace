@@ -389,6 +389,7 @@ drop function if exists public.mfg_bom_create(p_config uuid, p_title text, p_not
 drop function if exists public.mfg_bom_effectivity(p_bom uuid, p_eff jsonb) cascade;
 drop function if exists public.mfg_bom_get(p_bom uuid) cascade;
 drop function if exists public.mfg_bom_lines_save(p_bom uuid, p_lines jsonb) cascade;
+drop function if exists public.mfg_cap_label(p_cap text) cascade;
 drop function if exists public.mfg_cap_names() cascade;
 drop function if exists public.mfg_cfg() cascade;
 drop function if exists public.mfg_change_impact(p_ecr uuid) cascade;

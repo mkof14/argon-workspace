@@ -109,8 +109,7 @@ where not exists (select 1 from public.doc_number_formats f where f.scope = 'ops
 update public.ops_settings set value = jsonb_set(value, '{numbering}', coalesce(value->'numbering', '{}'::jsonb) || jsonb_build_object(
     'technical.items', coalesce(value->'numbering'->>'technical.items', 'ITM'), 'technical.boms', coalesce(value->'numbering'->>'technical.boms', 'BOM'),
     'operations.work_orders', coalesce(value->'numbering'->>'operations.work_orders', 'WO'), 'operations.quality', coalesce(value->'numbering'->>'operations.quality', 'INS'),
-    'technical.testing', coalesce(value->'numbering'->>'technical.testing', 'TST'), 'technical.configurations', coalesce(value->'numbering'->>'technical.configurations', 'CFG'),
-    'technical.test_procedures', coalesce(value->'numbering'->>'technical.test_procedures', 'TP')))
+    'technical.testing', coalesce(value->'numbering'->>'technical.testing', 'TST')))
   where id;
 -- an approval of a BOM revision or a configuration is for its exact content (the line set is a hash kept on the record)
 update public.ops_settings set value = jsonb_set(value, '{material}', coalesce(value->'material', '{}'::jsonb) || jsonb_build_object(
@@ -296,11 +295,18 @@ $$;
 revoke execute on function public._mfg_can_read(uuid, text) from public, anon, authenticated;
 
 -- a capability check that answers with the reason (the functions raise it)
+create or replace function public.mfg_cap_label(p_cap text) returns text language sql immutable as $$
+  select case p_cap when 'bom_editor' then 'BOM Editor' when 'bom_approver' then 'BOM Approver' when 'manufacturing_admin' then 'Manufacturing Admin' when 'inventory_manager' then 'Inventory Manager'
+    when 'build_manager' then 'Build Manager' when 'work_order_manager' then 'Work Order Manager' when 'quality_inspector' then 'Quality Inspector' when 'quality_approver' then 'Quality Approver'
+    when 'test_operator' then 'Test Operator' when 'test_approver' then 'Test Approver' when 'engineering_change_approver' then 'Engineering Change Approver'
+    when 'unit_acceptance_approver' then 'Unit Acceptance Approver' when 'shipment_release_approver' then 'Shipment Release Approver' when 'policy_approver' then 'Policy Approver'
+    else initcap(replace(p_cap, '_', ' ')) end
+$$;
 create or replace function public._mfg_need(p_uid uuid, p_cap text, p_what text) returns void language plpgsql stable security definer set search_path = public as $$
 begin
   if p_uid is null then raise exception 'Not signed in' using errcode = '42501'; end if;
   if not public.has_cap(p_uid, p_cap) then
-    raise exception '% needs the % capability (an owner grants it; a System Administrator does not hold it by role)', p_what, initcap(replace(p_cap, '_', ' ')) using errcode = '42501';
+    raise exception '% needs the % capability (an owner grants it; a System Administrator does not hold it by role)', p_what, public.mfg_cap_label(p_cap) using errcode = '42501';
   end if;
 end $$;
 revoke execute on function public._mfg_need(uuid, text, text) from public, anon, authenticated;
@@ -844,7 +850,8 @@ begin
       nn := public.ops_number('technical.boms', null);
       d := d || jsonb_build_object('number', nn, 'revision', 'A');
     elsif new.section in ('technical.configurations', 'technical.test_procedures') then
-      if coalesce(d->>'code', '') = '' then d := d || jsonb_build_object('code', public.ops_number(new.section, null)); end if;
+      -- the code of a configuration or procedure (shared by its versions) from its own numbering format
+      if coalesce(d->>'code', '') = '' then d := d || jsonb_build_object('code', public.allocate_doc_number('ops', case when new.section = 'technical.configurations' then 'CFG' else 'TP' end, null, null)); end if;
       if coalesce(d->>'version', '') = '' then d := d || jsonb_build_object('version', 1); end if;
     elsif new.section = 'operations.builds' and coalesce(d->>'number', '') = '' and coalesce(d->>'product_ref', '') <> '' then
       select * into ref from public.records where id = public.as_uuid(d->>'product_ref') and section = 'technical.products';
@@ -986,7 +993,7 @@ begin
   if not public._mfg_can_write(me, 'technical.boms') then raise exception 'You cannot write BOMs' using errcode = '42501'; end if;
   insert into public.records(section, title, status, controlled, created_by, data)
   values ('technical.boms', left(coalesce(nullif(trim(p_title), ''), 'BOM — ' || c.title), 300), 'Draft', c.controlled, me,
-    jsonb_strip_nulls(jsonb_build_object('config_ref', c.id, 'config_ref_title', c.title, 'product_ref', c.data->>'product_ref', 'product_ref_title', c.data->>'product_ref_title',
+    jsonb_strip_nulls(jsonb_build_object('config_ref', c.id, 'config_ref_title', c.title, 'config_code', c.data->>'code', 'product_ref', c.data->>'product_ref', 'product_ref_title', c.data->>'product_ref_title',
       'owner_id', me, 'owner', public._wf_name(me), 'change_reason', 'First revision', 'notes', left(p_notes, 2000), 'line_count', 0, 'lines_hash', public._mfg_lines_hash(null))))
   returning * into r;
   perform public._mfg_audit(me, 'bom_created', r.id, null, jsonb_build_object('number', r.data->>'number', 'revision', r.data->>'revision'));
@@ -1195,7 +1202,7 @@ language sql stable security definer set search_path = public as $$
 $$;
 revoke execute on function public._mfg_bom_rows(uuid) from public, anon, authenticated;
 
-create or replace function public.mfg_bom_compare(p_a uuid, p_b uuid) returns jsonb language plpgsql stable security definer set search_path = public as $$
+create or replace function public.mfg_bom_compare(p_a uuid, p_b uuid) returns jsonb language plpgsql volatile security definer set search_path = public as $$
 declare me uuid := public.mfg_viewer(); a public.records; b public.records; res jsonb;
 begin
   a := public._mfg_rec(me, p_a, 'technical.boms', 'BOM revision'); b := public._mfg_rec(me, p_b, 'technical.boms', 'BOM revision');
@@ -1319,9 +1326,10 @@ grant execute on function public.mfg_alternates(uuid) to authenticated;
        its prerequisites; material requirements and the material plan; a purchase request from a shortage
    --------------------------------------------------------------------------------------------- */
 -- the BOM revision that applies to a unit of a configuration: approved, and its effectivity covers the unit
+-- (a BOM belongs to the configuration code: every approved version of the configuration builds with it)
 create or replace function public._mfg_applicable_bom(p_config uuid, p_seq int, p_unit uuid) returns uuid language sql stable security definer set search_path = public as $$
-  select b.id from public.records b
-  where b.section = 'technical.boms' and b.data->>'config_ref' = p_config::text and b.status = 'Approved'
+  select b.id from public.records b, public.records c
+  where c.id = p_config and b.section = 'technical.boms' and (b.data->>'config_code' = c.data->>'code' or b.data->>'config_ref' = p_config::text) and b.status = 'Approved'
     and case coalesce(b.data->'effectivity'->>'kind', 'all_future')
           when 'after_unit' then p_seq is null or p_seq >= coalesce((b.data->'effectivity'->>'from_seq')::int, 0)
           when 'units' then p_unit is not null and coalesce(b.data->'effectivity'->'units', '[]'::jsonb) ? p_unit::text
@@ -1894,7 +1902,11 @@ begin
   if p_key is not null and exists (select 1 from public.mfg_txns t where t.idem_key like 'alc:' || p_key || '%') then raise exception 'This allocation was recorded already' using errcode = '23505'; end if;
   if u.id is not null then
     select greatest(r.required - r.consumed - r.allocated, 0) into need from public._mfg_req(u.id, me) r where r.item_id = it.id;
-    if need is null then raise exception 'This item is not in the unit''s BOM revision' using errcode = '22023'; end if;
+    -- an approved alternate for this unit takes the place of the item it substitutes
+    if need is null then
+      select greatest(r.required - r.consumed - r.allocated, 0) into need from public._mfg_req(u.id, me) r where public._mfg_alt_ok(r.item_id, it.id, u) is not null limit 1;
+    end if;
+    if need is null then raise exception 'This item is not in the unit''s BOM revision (nor an approved alternate for it)' using errcode = '22023'; end if;
     if p_qty > need and (length(trim(coalesce(p_reason, ''))) < 5 or not public.has_cap(me, 'inventory_manager')) then
       raise exception 'The unit needs % more; allocating more needs an Inventory Manager and the reason', need using errcode = '23514';
     end if;
@@ -2193,7 +2205,7 @@ revoke execute on function public._mfg_routing(public.records) from public, anon
 create or replace function public._mfg_wo_insert(u public.records, p_actor uuid, st jsonb, p_status text, p_extra jsonb) returns public.records language plpgsql security definer set search_path = public as $$
 declare w public.records; doc public.records; dv uuid; docs jsonb := '[]'::jsonb; x jsonb; lbl text;
 begin
-  for x in select * from jsonb_array_elements(coalesce(st->'documents', '[]'::jsonb)) loop
+  for x in select * from jsonb_array_elements(case when jsonb_typeof(st->'documents') = 'array' then st->'documents' else '[]'::jsonb end) loop
     select * into doc from public.records where id = public.as_uuid(x->>'doc_ref') and section = 'company.documents';
     if not found then continue; end if;
     dv := coalesce(public.as_uuid(x->>'doc_version'), public._mfg_doc_current(doc.id));
@@ -2205,7 +2217,8 @@ begin
     jsonb_strip_nulls(jsonb_build_object('build_ref', u.id, 'build_ref_title', coalesce(u.data->>'number', u.title), 'project_ref', u.data->>'project_ref', 'project_ref_title', u.data->>'project_ref_title',
       'routing_key', st->>'key', 'operation', coalesce(st->>'operation', st->>'name'), 'assembly', st->>'assembly', 'sequence', public._num(st->'seq'), 'team', st->>'team',
       'assignee_id', public.as_uuid(st->>'assignee_id'), 'assignee', case when public.as_uuid(st->>'assignee_id') is not null then public._wf_name(public.as_uuid(st->>'assignee_id')) end,
-      'planned', st->>'planned', 'instructions', left(st->>'instructions', 8000), 'tools', left(st->>'tools', 2000), 'materials', st->'materials', 'checklist', st->'checklist',
+      'planned', st->>'planned', 'instructions', left(st->>'instructions', 8000), 'tools', left(st->>'tools', 2000),
+      'materials', case when jsonb_typeof(st->'materials') = 'array' then st->'materials' end, 'checklist', case when jsonb_typeof(st->'checklist') = 'array' then st->'checklist' end,
       'inspection_required', case when coalesce(st->>'inspection', '') <> '' then st->>'inspection' end, 'evidence_required', case when coalesce((st->>'evidence')::boolean, false) then true end,
       'documents', case when jsonb_array_length(docs) > 0 then docs end,
       'doc_version_id', case when jsonb_array_length(docs) > 0 then docs->0->>'version_id' end)) || coalesce(p_extra, '{}'::jsonb))
@@ -2329,7 +2342,7 @@ grant execute on function public.mfg_software_install(uuid, jsonb) to authentica
 -- complete a work order: checklist, materials consumed, serials installed, software, evidence — all or nothing
 create or replace function public.mfg_wo_complete(p_wo uuid, p jsonb) returns jsonb language plpgsql security definer set search_path = public as $$
 declare me uuid := public.mfg_viewer(); w public.records; u public.records; x jsonb; it public.records; sid uuid; iid uuid; done jsonb := '{}'::jsonb; c jsonb; miss text[] := '{}';
-  cons jsonb := '[]'::jsonb; inst jsonb := '[]'::jsonb; soft jsonb := '[]'::jsonb; key text := nullif(p->>'key', ''); k int := 0; insp uuid; dep record; n int;
+  cons jsonb := '[]'::jsonb; inst jsonb := '[]'::jsonb; soft jsonb := '[]'::jsonb; key text := nullif(p->>'key', ''); k int := 0; insp uuid; dep public.records; n int;
 begin
   w := public._mfg_rec(me, p_wo, 'operations.work_orders', 'Work order', true);
   if not public._mfg_wo_actor_ok(me, w) then raise exception 'This work order is assigned to someone else' using errcode = '42501'; end if;
@@ -2381,7 +2394,8 @@ begin
     values ('operations.quality', left('Inspection — ' || coalesce(w.data->>'operation', w.title) || ' — ' || coalesce(u.data->>'number', u.title), 300), 'Planned', u.controlled, me,
       jsonb_strip_nulls(jsonb_build_object('inspection_kind', case when w.data->>'inspection_required' in ('Final Inspection', 'Final') then 'Final Inspection' else 'In-Process Inspection' end,
         'build_ref', u.id, 'build_ref_title', coalesce(u.data->>'number', u.title), 'work_order_ref', w.id, 'work_order_ref_title', coalesce(w.data->>'number', w.title),
-        'build', coalesce(u.data->>'number', u.title), 'check_type', 'In-process', 'checklist', w.data->'inspection_checklist')))
+        'build', coalesce(u.data->>'number', u.title), 'check_type', 'In-process', 'checklist', w.data->'inspection_checklist',
+        'reinspection_of', w.data->>'reinspection_of', 'issue_ref', w.data->>'rework_of')))
     returning id into insp;
   end if;
   perform public._mfg_sys_patch(w.id, 'Completed', jsonb_strip_nulls(jsonb_build_object('completed_at', to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), 'completed_by', public._wf_name(me), 'completed_by_id', me,
@@ -2463,7 +2477,7 @@ revoke execute on function public.mfg_doc_impact(uuid) from public, anon;
 grant execute on function public.mfg_doc_impact(uuid) to authenticated;
 
 -- the shop floor: only what the person can act on (no values, no customer)
-create or replace function public.mfg_queue() returns jsonb language plpgsql stable security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+create or replace function public.mfg_queue() returns jsonb language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
 declare me uuid := public.mfg_viewer(); insp boolean;
 begin
   if me is null or not public._mfg_can_read(me, 'operations.work_orders') then raise exception 'Not allowed' using errcode = '42501'; end if;
@@ -2617,7 +2631,7 @@ begin
       'controlled', r.controlled));
   end if;
   perform public._mfg_sys_patch(r.id, case when res = 'Fail' then 'Non-conformance' else 'Closed' end, jsonb_strip_nulls(jsonb_build_object('result', res,
-    'recorded_at', to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), 'recorded_by_id', me, 'inspector_id', me, 'inspector', public._wf_name(me), 'owner', public._wf_name(me),
+    'recorded_at', to_char(clock_timestamp() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'), 'recorded_by_id', me, 'inspector_id', me, 'inspector', public._wf_name(me), 'owner', public._wf_name(me),
     'date', to_char(current_date, 'YYYY-MM-DD'), 'findings', left(p->>'notes', 4000), 'checklist_result', done, 'issue_ref', iss, 'fail_state', fail_state)));
   -- a passed reinspection closes the loop of the nonconformance it followed (the issue goes to verification)
   if r.data ? 'reinspection_of' and res = 'Pass' and coalesce(r.data->>'issue_ref', '') <> '' then
@@ -2745,7 +2759,7 @@ begin
   r := public._mfg_rec(me, p_run, 'technical.testing', 'Test run', true);
   if not (r.data ? 'procedure_ref') then raise exception 'This is an earlier test record: edit it in its section' using errcode = '55000'; end if;
   if coalesce(r.data->>'recorded_at', '') <> '' then raise exception 'This run is recorded already (%): a retest is a new run', r.data->>'outcome' using errcode = '23505'; end if;
-  if outcome not in ('Pass', 'Fail', 'Conditional', 'Aborted') then raise exception 'Choose the result: Pass, Fail, Conditional or Aborted (it is never assumed)' using errcode = '22023'; end if;
+  if coalesce(outcome, '') not in ('Pass', 'Fail', 'Conditional', 'Aborted') then raise exception 'Choose the result: Pass, Fail, Conditional or Aborted (it is never assumed)' using errcode = '22023'; end if;
   perform public.ops_secret_check(coalesce(p->'values', '{}'::jsonb));
   for f in select * from jsonb_array_elements(coalesce(r.data->'fields', '[]'::jsonb)) loop
     v := p->'values'->(f->>'key');
@@ -2781,7 +2795,7 @@ begin
       'build_ref', u.id, 'test_ref', r.id, 'source_title', coalesce(r.data->>'number', r.title), 'controlled', r.controlled));
   end if;
   perform public._mfg_sys_patch(r.id, case outcome when 'Pass' then 'Passed' when 'Fail' then 'Failed' when 'Conditional' then 'Conditional' else 'Aborted' end,
-    jsonb_strip_nulls(jsonb_build_object('outcome', outcome, 'recorded_at', to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), 'recorded_by_id', me, 'operator_id', coalesce(public.as_uuid(r.data->>'operator_id'), me),
+    jsonb_strip_nulls(jsonb_build_object('outcome', outcome, 'recorded_at', to_char(clock_timestamp() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'), 'recorded_by_id', me, 'operator_id', coalesce(public.as_uuid(r.data->>'operator_id'), me),
       'owner', public._wf_name(me), 'date', to_char(current_date, 'YYYY-MM-DD'), 'environment', left(p->>'environment', 1000), 'result', left(p->>'notes', 4000), 'measured', vals,
       'deterministic', jsonb_build_object('rule_failures', to_jsonb(fails), 'missing', to_jsonb(missing), 'check', suggested), 'issue_ref', iss)));
   perform public._mfg_audit(me, 'test', r.id, u.id, jsonb_strip_nulls(jsonb_build_object('procedure', r.data->>'procedure_code', 'version', r.data->>'procedure_version', 'outcome', outcome, 'rule_failures', cardinality(fails), 'issue', iss)));
@@ -3012,7 +3026,7 @@ create or replace function public._mfg_affected(p_bom uuid) returns table (unit_
                     when u.data->>'bom_ref' = p_bom::text then 'incorporated'
                     when exists (select 1 from public.mfg_unit_dispositions d where d.unit_id = u.id and d.bom_id = p_bom) then 'decided'
                     else 'needs a decision' end
-  from public.records n join public.records u on u.section = 'operations.builds' and u.data->>'config_ref' = n.data->>'config_ref' and coalesce(u.data->>'released_at', '') <> ''
+  from public.records n join public.records u on u.section = 'operations.builds' and coalesce(u.data->>'config_code', '~') = coalesce(n.data->>'config_code', '') and coalesce(u.data->>'released_at', '') <> ''
   where n.id = p_bom and n.status = 'Approved' and u.data->>'bom_ref' is distinct from null
     and case coalesce(n.data->'effectivity'->>'kind', 'all_future')
           when 'all_future' then u.data->>'bom_ref' = p_bom::text
@@ -3023,7 +3037,7 @@ create or replace function public._mfg_affected(p_bom uuid) returns table (unit_
 $$;
 revoke execute on function public._mfg_affected(uuid) from public, anon, authenticated;
 
-create or replace function public.mfg_change_impact(p_ecr uuid) returns jsonb language plpgsql stable security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+create or replace function public.mfg_change_impact(p_ecr uuid) returns jsonb language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
 declare me uuid := public.mfg_viewer(); e public.records; boms uuid[]; cmp jsonb := '[]'::jsonb; b uuid; old uuid; removed uuid[] := '{}';
 begin
   e := public._mfg_rec(me, p_ecr, 'technical.changes', 'Engineering change');
@@ -3135,7 +3149,7 @@ begin
     out := out || jsonb_build_array(jsonb_build_object('kind', 'instruction_changed', 'level', 'attention', 'ref', x.id, 'text', 'A newer approved instruction exists for ' || coalesce(x.num, '') || ' (it keeps its version until moved)'));
   end loop;
   -- engineering change: a newer revision reaches this unit and no decision is recorded
-  for x in select n.id, n.data->>'number' num, n.data->>'revision' rev from public.records n where n.section = 'technical.boms' and n.status = 'Approved' and n.data->>'config_ref' = u.data->>'config_ref'
+  for x in select n.id, n.data->>'number' num, n.data->>'revision' rev from public.records n where n.section = 'technical.boms' and n.status = 'Approved' and n.data->>'config_code' = u.data->>'config_code'
            and n.id::text is distinct from u.data->>'bom_ref' and coalesce(n.data->>'ecr_ref', '') <> '' and exists (select 1 from public._mfg_affected(n.id) a where a.unit_id = u.id and a.state = 'needs a decision') loop
     out := out || jsonb_build_array(jsonb_build_object('kind', 'ecr_impact', 'level', 'block', 'ref', x.id, 'text', 'Engineering change: BOM ' || coalesce(x.num, '') || ' rev ' || coalesce(x.rev, '') || ' applies to this unit — decide Incorporate or Keep current'));
   end loop;
@@ -3537,7 +3551,7 @@ grant execute on function public.corp_search(text, text[], uuid, text, uuid, tex
    --------------------------------------------------------------------------------------------- */
 create or replace function public._mfg_base(p_viewer uuid, p_only uuid default null, p_with_acceptance boolean default true) returns void
 language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
-declare x record; bl jsonb; ac jsonb;
+declare x public.records; bl jsonb; ac jsonb;
 begin
   if to_regclass('pg_temp.mfg_uv') is null then
     create temp table mfg_uv (id uuid primary key, number text, title text, status text, kind text, product text, product_ref uuid, config text, project_ref uuid, owner_id text, owner text,
@@ -3582,6 +3596,7 @@ begin
       when 'ready_shipment' then u.status = 'Ready for Shipment'
       when 'hold' then u.kind = 'hold'
       when 'done' then u.kind = 'done'
+      when 'cancelled' then u.kind = 'cancelled'
       else false end
     order by u.target nulls last, u.number;
 end $$;
@@ -3641,10 +3656,11 @@ begin
   if p_kind in ('inspections_required', 'failed_tests', 'nonconformances') then return coalesce((select jsonb_agg(x) from public._mfg_record_rows(p_kind, me, 500) x), '[]'::jsonb); end if;
   if p_kind not in ('units', 'ready_for_build', 'in_assembly', 'blocked', 'shortages', 'late_purchases', 'late', 'ready_acceptance', 'ready_shipment', 'hold', 'done', 'all') then raise exception 'Unknown list' using errcode = '22023'; end if;
   perform public._mfg_base(me);
-  return coalesce((select jsonb_agg(x) from public._mfg_list_rows(case when p_kind = 'all' then 'units' else p_kind end, me) x
+  return coalesce((select jsonb_agg(x) from (select y from public._mfg_list_rows(case when p_kind = 'all' then 'units' else p_kind end, me) y
+                                               union all select y from public._mfg_list_rows('done', me) y where p_kind = 'all'
+                                               union all select y from public._mfg_list_rows('cancelled', me) y where p_kind = 'all') z(x)
     where (p_filter->>'product' is null or (select u.product_ref::text from pg_temp.mfg_uv u where u.id = (x->>'id')::uuid) = p_filter->>'product')
-      and (p_filter->>'q' is null or lower(concat_ws(' ', x->>'number', x->>'title', x->>'product', x->>'config')) like '%' || lower(p_filter->>'q') || '%')), '[]'::jsonb)
-    || case when p_kind = 'all' then coalesce((select jsonb_agg(x) from public._mfg_list_rows('done', me) x), '[]'::jsonb) else '[]'::jsonb end;
+      and (p_filter->>'q' is null or lower(concat_ws(' ', x->>'number', x->>'title', x->>'product', x->>'config')) like '%' || lower(p_filter->>'q') || '%')), '[]'::jsonb);
 end $$;
 revoke execute on function public.mfg_list(text, jsonb) from public, anon;
 grant execute on function public.mfg_list(text, jsonb) to authenticated;
@@ -3907,9 +3923,9 @@ begin
       from public.records q where q.section = 'operations.quality' and q.data->>'result' = 'Fail' and public.record_visible_for(me, q)), '[]'::jsonb));
   elsif p_intent = 'bom_diff' then
     -- "What changed from BOM revision A to B?" — arg: "<BOM number or product or unit> A B" (the last two words are the revisions)
-    a := upper(regexp_replace(coalesce(arg, ''), '^.*\m([A-Z]{1,2})\M\s+(?:to\s+|→\s*|->\s*)?\m([A-Z]{1,2})\M\s*$', '\1', 'i'));
-    b := upper(regexp_replace(coalesce(arg, ''), '^.*\m([A-Z]{1,2})\M\s+(?:to\s+|→\s*|->\s*)?\m([A-Z]{1,2})\M\s*$', '\2', 'i'));
-    if a !~ '^[A-Z]{1,2}$' or b !~ '^[A-Z]{1,2}$' then return jsonb_build_object('kind', 'unavailable', 'note', 'Say the two revisions, e.g. «BOM AGR-BOM-0001 revision A to B»'); end if;
+    a := upper((regexp_match(coalesce(arg, ''), '\m([A-Z]{1,2})\M\s*(?:to|→|->|-)\s*\m([A-Z]{1,2})\M\s*$', 'i'))[1]);
+    b := upper((regexp_match(coalesce(arg, ''), '\m([A-Z]{1,2})\M\s*(?:to|→|->|-)\s*\m([A-Z]{1,2})\M\s*$', 'i'))[2]);
+    if a is null or b is null or a !~ '^[A-Z]{1,2}$' or b !~ '^[A-Z]{1,2}$' then return jsonb_build_object('kind', 'unavailable', 'note', 'Say the two revisions, e.g. «BOM AGR-BOM-0001 revision A to B»'); end if;
     select x2.* into bb from public.records x2 where x2.section = 'technical.boms' and upper(x2.data->>'revision') = b and public.record_visible_for(me, x2)
       and (lower(coalesce(arg, '')) like '%' || lower(x2.data->>'number') || '%' or lower(coalesce(arg, '')) like '%' || lower(coalesce(x2.data->>'product_ref_title', '~')) || '%' or lower(coalesce(arg, '')) like '%' || lower(coalesce(x2.data->>'config_ref_title', '~')) || '%')
       order by x2.created_at desc limit 1;
@@ -3929,7 +3945,7 @@ begin
   end if;
   -- the questions about one unit (or a product): "the C40" picks the active unit of that product
   u := public._mfg_find_unit(me, arg);
-  if u.id is null and arg is not null then
+  if u.id is null and arg is not null and arg !~ '\d{3,}' then
     select p.* into pr from public.records p where p.section = 'technical.products' and (lower(p.data->>'code') = lower(arg) or lower(p.title) = lower(arg) or lower(arg) like '%' || lower(p.data->>'code') || '%') and public.record_visible_for(me, p) limit 1;
     if pr.id is not null then
       select x2.* into u from public.records x2 where x2.section = 'operations.builds' and x2.data->>'product_ref' = pr.id::text and public.mfg_status_kind(x2.status) not in ('done', 'cancelled') and public.record_visible_for(me, x2) order by x2.created_at limit 1;
@@ -4022,7 +4038,7 @@ grant execute on function public.mfg_settings_save(jsonb, integer) to authentica
 
 /* ----- notices: each occasion once; bounded per call ----- */
 create or replace function public.mfg_tick() returns jsonb language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
-declare x record; n int := 0; t0 timestamptz := clock_timestamp(); more boolean := false; who uuid; today date := current_date; k text; h uuid; bl jsonb;
+declare x public.records; n int := 0; t0 timestamptz := clock_timestamp(); more boolean := false; who uuid; today date := current_date; k text; h uuid; bl jsonb;
 begin
   if auth.uid() is not null then raise exception 'Not allowed' using errcode = '42501'; end if;
   -- work orders past their planned date (to the person they are assigned to)
@@ -4412,7 +4428,7 @@ begin
     select id into cid from public.records where section = 'technical.configurations' and data->>'legacy_config' = c.cfg limit 1;
     if cid is null then continue; end if;
     insert into public.records(section, title, status, data) values ('technical.boms', 'BOM — ' || c.cfg || ' (from the earlier BOM list)', 'Draft',
-      jsonb_build_object('config_ref', cid, 'config_ref_title', (select title from public.records where id = cid), 'product_ref', (select data->>'product_ref' from public.records where id = cid),
+      jsonb_build_object('config_ref', cid, 'config_ref_title', (select title from public.records where id = cid), 'config_code', (select data->>'code' from public.records where id = cid), 'product_ref', (select data->>'product_ref' from public.records where id = cid),
         'change_reason', 'Migrated from the earlier BOM list (v25)', 'p8_migrated', true))
     returning id into bid;
     n := 0;
