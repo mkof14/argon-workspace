@@ -219,6 +219,21 @@ test("attention: deterministic order, score = sum of its parts, explanation for 
   EV.attention = { top: a.slice(0, 5).map((x) => [x.title, x.attention_score, x.why.parts.map((p: any) => `${p.code}+${p.points}`).join(" ")]) };
 });
 
+test("decision aging: Scenario 5 — a decision pending past the threshold becomes an open loop and a management attention item", async () => {
+  const p = await project("Decision aging"); await task(p.id, "x");
+  const d = await rec("company.decisions", "Choose the radar supplier", "Proposed", { project_ref: p.id, date: D(-(CFG.decision_age_days + 4)), responsible_id: U.mgmt.id });
+  const loop = (await as("mgmt", "select * from public.open_loops($1)", [p.id])).find((l) => l.record_id === d.id);
+  assert.ok(loop, "open loop"); assert.equal(loop.kind, "decision_pending"); assert.equal(loop.severity, "high"); assert.equal(loop.next_action, "decide");
+  assert.ok(codes(await health("mgmt", p.id)).includes("decisions_waiting"), "and it lowers the project's health");
+  const all = await as("mgmt", "select * from public.attention_items(500)");
+  const a = all.find((x) => x.record_id === d.id);
+  if (a || all.length < 500) {
+    assert.ok(a, "management attention item");
+    assert.ok(a.why.parts.some((x: any) => x.code === "executive"), "needs an executive decision"); assert.ok(a.why.parts.some((x: any) => x.code === "aging"));
+  }
+  EV.scenario5 = { loop: [loop.kind, loop.severity, loop.age_days], attention: a ? [a.attention_score, a.why.parts.map((x: any) => x.code)] : "list full" };
+});
+
 /* ------------------------------------------------ B1 Portfolio ------------------------------------------------ */
 test("portfolio: aggregation equals its projects; hidden projects never count; empty portfolios show; projects need no portfolio", async () => {
   const pf = await rec("company.portfolios", "PRODUCT DEVELOPMENT", "Active", { owner_id: U.mgmt.id, priority: "High", target: D(200) });
