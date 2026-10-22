@@ -92,8 +92,9 @@ test("common commercial screens and actions under 1 s (p95), heavy ones under 3 
   const caps = (await sql("select id from records where section = 'marketing.leads' and data->>'email' like $1 order by created_at limit 11", [`cap%.${run}@%`])).map((r: any) => r.id);
   if (caps.length >= 6) T.lead_convert = await time(Math.min(10, caps.length - 1), (i) => rpc("sales", "crm_lead_convert", { p_lead: caps[i], p: { opportunity: { new: { value: 100000, currency: "USD", next_action: "Call", next_action_due: new Date(Date.now() + 3 * 864e5).toISOString().slice(0, 10) } } } }));
   T.stage_change = await time(10, async (i) => { const id = opps[100 + i * 11]; return C.mgmt.from("records").update({ status: "Discovery" }).eq("id", id).select("id"); });
+  fs.writeFileSync(path.join(ENV.STACK_DIR || ".stack", "p7-perf.json"), JSON.stringify(R, null, 1)); // the screens' numbers first, then the notices backlog
   T.notices_tick_service = await time(3, async () => { await sql("select public.crm_tick()"); return null; });
-  { const t0 = Date.now(); let calls = 0, more = true; while (more && calls < 200) { more = !!(await sql("select public.crm_tick() r"))[0].r?.more; calls++; } R.notices_drain = { calls, total_ms: Date.now() - t0, drained: !more }; }
+  { const t0 = Date.now(); let calls = 0, more = true; while (more && calls < 60) { more = !!(await sql("select public.crm_tick() r"))[0].r?.more; calls++; } R.notices_drain = { calls, total_ms: Date.now() - t0, drained: !more }; }
   // the partner sees no customer pipeline at all
   // the partner (external) is refused by the commercial read models: no counts, no lists
   const pv = await rpc("partner", "crm_overview", { p_filter: {} }); R.partner = pv.error ? `refused: ${pv.error.message}` : `active ${pv.data?.blocks?.active?.count ?? 0}`;

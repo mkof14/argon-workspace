@@ -1737,7 +1737,9 @@ create type public.crm_vrow as (id uuid, title text, stage text, kind text, data
       nda text, nda_since timestamptz, hold_review date, geography text, product text, use_case text, source text, introduced_by uuid, lead_ref uuid, event_ref uuid, restricted boolean,
       health text, reasons jsonb);
 
-create or replace function public._crm_base(p_viewer uuid) returns void
+-- p_only: one opportunity (its detail view) — the same rules, without building the whole working set
+drop function if exists public._crm_base(uuid);
+create or replace function public._crm_base(p_viewer uuid, p_only uuid default null) returns void
 language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 declare p record; secs text[]; fu jsonb := coalesce(public.crm_cfg()->'followup', '{}'::jsonb); pid text; today date := (now() at time zone 'utc')::date;
   st jsonb := coalesce(public.crm_cfg()->'pipeline', '[]'::jsonb);
@@ -1746,7 +1748,7 @@ begin
     create temp table crm_meta (viewer uuid, at timestamptz) on commit drop;
     create temp table crm_v of public.crm_vrow (id with options primary key, health with options not null default 'Healthy', reasons with options not null default '[]'::jsonb) on commit drop;
   end if;
-  if exists (select 1 from pg_temp.crm_meta m where m.viewer is not distinct from p_viewer and m.at = statement_timestamp()) then return; end if;
+  if p_only is null and exists (select 1 from pg_temp.crm_meta m where m.viewer is not distinct from p_viewer and m.at = statement_timestamp()) then return; end if;
   truncate pg_temp.crm_v; delete from pg_temp.crm_meta;
   select pp.id, pp.role, coalesce(pp.us_person, false) us into p from public.profiles pp where pp.id = p_viewer and not pp.disabled;
   if found and p.role is not null and p.role not in ('partner', 'vendor', 'investor', 'pending') then
@@ -1767,7 +1769,7 @@ begin
         nullif(r.data->>'geography', ''), nullif(r.data->>'product', ''), nullif(r.data->>'use_case', ''), nullif(r.data->>'source', ''), case when r.data->>'introduced_by_ref' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then (r.data->>'introduced_by_ref')::uuid end,
         case when r.data->>'lead_ref' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then (r.data->>'lead_ref')::uuid end, coalesce((r.data->>'restricted')::boolean, false)
       from public.records r left join (select distinct on (x->>'stage') x->>'stage' stage, x s from jsonb_array_elements(st) x) ss on ss.stage = r.status
-      where r.section = 'sales.pipeline'
+      where r.section = 'sales.pipeline' and (p_only is null or r.id = p_only)
         and (coalesce(r.controlled, true) = false or p.us)
         and (not coalesce((r.data->>'restricted')::boolean, false) or p.role in ('owner', 'management') or r.created_by = p.id
              or coalesce(r.data->>'owner_id', '') = pid or coalesce(r.data->>'next_action_owner_id', '') = pid
@@ -1835,10 +1837,10 @@ begin
       where z.id = v.id;
     end if;
   end if;
-  analyze pg_temp.crm_v;
-  insert into pg_temp.crm_meta(viewer, at) values (p_viewer, statement_timestamp());
+  if p_only is null then analyze pg_temp.crm_v; end if;
+  if p_only is null then insert into pg_temp.crm_meta(viewer, at) values (p_viewer, statement_timestamp()); end if;
 end $$;
-revoke execute on function public._crm_base(uuid) from public, anon, authenticated;
+revoke execute on function public._crm_base(uuid, uuid) from public, anon, authenticated;
 
 -- one opportunity as a list row
 create or replace function public._crm_row(v public.crm_vrow) returns jsonb language sql stable as $$
@@ -1915,11 +1917,14 @@ declare me uuid := public.crm_viewer(); out jsonb := '{}'::jsonb; k text; f json
 begin
   if me is null then raise exception 'Not signed in' using errcode = '42501'; end if;
   perform public._crm_base(me);
-  foreach k in array array['needs_action', 'active', 'proposals_waiting', 'responses', 'upcoming_decisions', 'stalled', 'wins', 'losses', 'attention_all', 'risk', 'no_next_action', 'overdue', 'hold_review', 'nda_unsigned'] loop
-    out := out || jsonb_build_object(k, (select jsonb_build_object('count', count(*),
-      'value', public._crm_sums(coalesce(jsonb_agg(jsonb_build_object('currency', v.currency, 'amount', coalesce(v.final, v.negotiated, v.quoted, v.value))), '[]'::jsonb)))
-      from pg_temp.crm_v v where public._crm_kind_ok(v, k, me) and public._crm_match(v, f, null)));
-  end loop;
+  -- all blocks in one pass over the working set: per block and currency the count and the sum, then per block
+  select coalesce(jsonb_object_agg(z.k, jsonb_build_object('count', z.n, 'value', z.vals)), '{}'::jsonb) into out from (
+    select kk.k, coalesce(sum(y.n), 0)::int n, coalesce(jsonb_object_agg(y.cur, y.s) filter (where y.s is not null), '{}'::jsonb) vals
+    from unnest(array['needs_action', 'active', 'proposals_waiting', 'responses', 'upcoming_decisions', 'stalled', 'wins', 'losses', 'attention_all', 'risk', 'no_next_action', 'overdue', 'hold_review', 'nda_unsigned']) kk(k)
+    left join (select b.k, coalesce(v.currency, '(no currency)') cur, count(*) n, sum(coalesce(v.final, v.negotiated, v.quoted, v.value)) s
+               from pg_temp.crm_v v cross join unnest(array['needs_action', 'active', 'proposals_waiting', 'responses', 'upcoming_decisions', 'stalled', 'wins', 'losses', 'attention_all', 'risk', 'no_next_action', 'overdue', 'hold_review', 'nda_unsigned']) b(k)
+               where public._crm_match(v, f, null) and public._crm_kind_ok(v, b.k, me) group by 1, 2) y on y.k = kk.k
+    group by kk.k) z;
   return jsonb_build_object('at', now(), 'blocks', out,
     'pipeline', coalesce((select jsonb_agg(z order by z.ord) from (
       select s.ord, s.stage, s.kind, count(v.id) n,
@@ -2034,7 +2039,7 @@ declare me uuid := public.crm_viewer(); r public.records; v public.crm_vrow;
 begin
   select * into r from public.records where id = p_id and section = 'sales.pipeline';
   if me is null or not found or not public.record_visible_for(me, r) then raise exception 'Opportunity not found' using errcode = 'P0002'; end if;
-  perform public._crm_base(me);
+  perform public._crm_base(me, p_id);
   select * into v from pg_temp.crm_v where id = p_id;
   return jsonb_build_object('record', jsonb_build_object('id', r.id, 'title', r.title, 'status', r.status, 'data', r.data, 'version', r.version, 'controlled', r.controlled, 'updated_at', r.updated_at),
     'row', public._crm_row(v),
@@ -2558,6 +2563,13 @@ grant execute on function public.crm_email_link(text, text, uuid, boolean, text,
    14. Commercial notices (service role, every hour): follow-up due or overdue, meeting approaching, proposal
        expiring, expected decision, stalled, lead follow-up, on-hold review — each once per occasion (keys)
    --------------------------------------------------------------------------------------------- */
+-- an occasion already notified to this person (the notice key is unique per person): checked before the full notice
+-- rules, so a repeated tick passes quickly over what it has already done and reaches the rest
+create or replace function public._crm_seen(p_user uuid, p_key text) returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.notifications n where n.user_id = p_user and n.key = p_key)
+$$;
+revoke execute on function public._crm_seen(uuid, text) from public, anon, authenticated;
+
 create or replace function public.crm_tick() returns jsonb language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
 declare fu jsonb := coalesce(public.crm_cfg()->'followup', '{}'::jsonb); x record; n int := 0; t0 timestamptz := clock_timestamp(); more boolean := false; who uuid; today date := current_date;
   soon int := coalesce((fu->>'due_soon_days')::int, 2); u uuid;
@@ -2566,23 +2578,23 @@ begin
   -- opportunities: the next action, the expected decision, the review date of a hold
   for x in select r.* from public.records r where r.section = 'sales.pipeline' and public.crm_stage_kind(r.status) in ('open', 'hold')
              and (public._crm_date(r.data->>'next_action_due') <= today + soon or public._crm_date(r.data->>'expected_decision') <= today or public._crm_date(r.data->>'hold_review') <= today)
-           order by r.updated_at limit 2000 loop
+           order by r.updated_at loop
     if clock_timestamp() - t0 > interval '2 seconds' then more := true; exit; end if;
     who := coalesce(public.as_uuid(x.data->>'next_action_owner_id'), public.as_uuid(x.data->>'owner_id'));
     continue when who is null;
     if public.crm_stage_kind(x.status) = 'open' and public._crm_date(x.data->>'next_action_due') between today and today + soon then
-      if public.notify_user(who, 'crm_follow_up_due', x.id, 'crm-fu:' || x.id || ':' || (x.data->>'next_action_due'), 'Follow-up due ' || (x.data->>'next_action_due') || ': ' || coalesce(x.data->>'number', '') || ' ' || x.title,
+      if not public._crm_seen(who, 'crm-fu:' || x.id || ':' || (x.data->>'next_action_due')) and public.notify_user(who, 'crm_follow_up_due', x.id, 'crm-fu:' || x.id || ':' || (x.data->>'next_action_due'), 'Follow-up due ' || (x.data->>'next_action_due') || ': ' || coalesce(x.data->>'number', '') || ' ' || x.title,
         coalesce(x.data->>'next_action', ''), null, '/crm?opp=' || x.id) then n := n + 1; end if;
     elsif public.crm_stage_kind(x.status) = 'open' and public._crm_date(x.data->>'next_action_due') < today then
-      if public.notify_user(who, 'crm_follow_up_overdue', x.id, 'crm-od:' || x.id || ':' || (x.data->>'next_action_due'), 'Follow-up overdue: ' || coalesce(x.data->>'number', '') || ' ' || x.title,
+      if not public._crm_seen(who, 'crm-od:' || x.id || ':' || (x.data->>'next_action_due')) and public.notify_user(who, 'crm_follow_up_overdue', x.id, 'crm-od:' || x.id || ':' || (x.data->>'next_action_due'), 'Follow-up overdue: ' || coalesce(x.data->>'number', '') || ' ' || x.title,
         'Was due ' || (x.data->>'next_action_due') || ' — ' || coalesce(x.data->>'next_action', ''), null, '/crm?opp=' || x.id) then n := n + 1; end if;
     end if;
     if public.crm_stage_kind(x.status) = 'open' and public._crm_date(x.data->>'expected_decision') <= today then
-      if public.notify_user(who, 'crm_decision_due', x.id, 'crm-dec:' || x.id || ':' || (x.data->>'expected_decision'), 'Expected decision ' || (x.data->>'expected_decision') || ': ' || coalesce(x.data->>'number', '') || ' ' || x.title,
+      if not public._crm_seen(who, 'crm-dec:' || x.id || ':' || (x.data->>'expected_decision')) and public.notify_user(who, 'crm_decision_due', x.id, 'crm-dec:' || x.id || ':' || (x.data->>'expected_decision'), 'Expected decision ' || (x.data->>'expected_decision') || ': ' || coalesce(x.data->>'number', '') || ' ' || x.title,
         'Update the expected decision date or record the decision', null, '/crm?opp=' || x.id) then n := n + 1; end if;
     end if;
     if public.crm_stage_kind(x.status) = 'hold' and public._crm_date(x.data->>'hold_review') <= today then
-      if public.notify_user(who, 'crm_hold_review', x.id, 'crm-hold:' || x.id || ':' || (x.data->>'hold_review'), 'On hold — review today: ' || coalesce(x.data->>'number', '') || ' ' || x.title,
+      if not public._crm_seen(who, 'crm-hold:' || x.id || ':' || (x.data->>'hold_review')) and public.notify_user(who, 'crm_hold_review', x.id, 'crm-hold:' || x.id || ':' || (x.data->>'hold_review'), 'On hold — review today: ' || coalesce(x.data->>'number', '') || ' ' || x.title,
         coalesce(x.data->>'hold_reason', ''), null, '/crm?opp=' || x.id) then n := n + 1; end if;
     end if;
   end loop;
@@ -2591,18 +2603,18 @@ begin
     for x in select r.id, r.title, r.data, coalesce((select max(coalesce(public._crm_date(a.data->>'date')::timestamptz, a.created_at)) from public.records a
                where a.data->>'deal_ref' = r.id::text and a.section in ('sales.activities', 'company.meetings', 'sales.proposals') and coalesce(a.status, '') not in ('Cancelled', 'Planned')), r.created_at) last_at
              from public.records r where r.section = 'sales.pipeline' and public.crm_stage_kind(r.status) = 'open' and coalesce(r.data->>'owner_id', '') <> ''
-               and r.updated_at < now() - make_interval(days => coalesce((fu->>'no_interaction_days')::int, 14)) order by r.updated_at limit 1000 loop
+               and r.updated_at < now() - make_interval(days => coalesce((fu->>'no_interaction_days')::int, 14)) order by r.updated_at loop
       if clock_timestamp() - t0 > interval '2 seconds' then more := true; exit; end if;
       continue when x.last_at >= now() - make_interval(days => coalesce((fu->>'no_interaction_days')::int, 14));
-      if public.notify_user((x.data->>'owner_id')::uuid, 'crm_stalled', x.id, 'crm-st:' || x.id || ':' || left(x.last_at::text, 10), 'Stalled: ' || coalesce(x.data->>'number', '') || ' ' || x.title,
+      if not public._crm_seen((x.data->>'owner_id')::uuid, 'crm-st:' || x.id || ':' || left(x.last_at::text, 10)) and public.notify_user((x.data->>'owner_id')::uuid, 'crm_stalled', x.id, 'crm-st:' || x.id || ':' || left(x.last_at::text, 10), 'Stalled: ' || coalesce(x.data->>'number', '') || ' ' || x.title,
         'No interaction since ' || left(x.last_at::text, 10), null, '/crm?opp=' || x.id) then n := n + 1; end if;
     end loop;
   end if;
   -- sent proposals about to expire
   if not more then
-    for x in select r.* from public.records r where r.section = 'sales.proposals' and r.status = 'Sent' and public._crm_date(r.data->>'valid_until') between today and today + coalesce((fu->>'proposal_expiry_days')::int, 7) limit 1000 loop
+    for x in select r.* from public.records r where r.section = 'sales.proposals' and r.status = 'Sent' and public._crm_date(r.data->>'valid_until') between today and today + coalesce((fu->>'proposal_expiry_days')::int, 7) loop
       u := coalesce(public.as_uuid(x.data->>'owner_id'), x.created_by); continue when u is null;
-      if public.notify_user(u, 'crm_proposal_expiring', x.id, 'crm-px:' || x.id || ':' || (x.data->>'valid_until'), 'Proposal valid until ' || (x.data->>'valid_until') || ': ' || x.title,
+      if not public._crm_seen(u, 'crm-px:' || x.id || ':' || (x.data->>'valid_until')) and public.notify_user(u, 'crm_proposal_expiring', x.id, 'crm-px:' || x.id || ':' || (x.data->>'valid_until'), 'Proposal valid until ' || (x.data->>'valid_until') || ': ' || x.title,
         'Follow up before it expires, or make a new version', null, '/sales/proposals?r=' || x.id) then n := n + 1; end if;
     end loop;
   end if;
@@ -2610,10 +2622,10 @@ begin
   if not more then
     for x in select r.* from public.records r where r.section = 'company.meetings' and coalesce(r.status, 'Scheduled') = 'Scheduled'
                and (coalesce(r.data->>'deal_ref', '') <> '' or coalesce(r.data->>'party_ref', '') <> '' or coalesce(r.data->>'event_ref', '') <> '')
-               and public._crm_date(r.data->>'date') between today and today + 1 limit 1000 loop
+               and public._crm_date(r.data->>'date') between today and today + 1 loop
       continue when (public._crm_date(x.data->>'date') + coalesce(nullif(x.data->>'time', ''), '09:00')::time) > (now() at time zone 'utc') + make_interval(hours => coalesce((fu->>'meeting_soon_hours')::int, 24));
       for u in select distinct z::uuid from (select x.data->>'organizer_id' z union all select jsonb_array_elements_text(coalesce(x.data->'participants_ids', '[]'::jsonb))) q where z ~ '^[0-9a-f-]{36}$' loop
-        if public.notify_user(u, 'crm_meeting_soon', x.id, 'crm-mt:' || x.id || ':' || (x.data->>'date') || ':' || u, 'Meeting ' || (x.data->>'date') || ' ' || coalesce(x.data->>'time', '') || ': ' || x.title,
+        if not public._crm_seen(u, 'crm-mt:' || x.id || ':' || (x.data->>'date') || ':' || u) and public.notify_user(u, 'crm_meeting_soon', x.id, 'crm-mt:' || x.id || ':' || (x.data->>'date') || ':' || u, 'Meeting ' || (x.data->>'date') || ' ' || coalesce(x.data->>'time', '') || ': ' || x.title,
           concat_ws(' · ', x.data->>'party_ref_title', x.data->>'deal_ref_title', x.data->>'place'), null, '/company/meetings?r=' || x.id) then n := n + 1; end if;
       end loop;
     end loop;
@@ -2621,9 +2633,9 @@ begin
   -- leads (and event leads) to follow up
   if not more then
     for x in select r.* from public.records r where r.section = 'marketing.leads' and coalesce(r.status, 'New') in ('New', 'Reviewing', 'Qualified')
-               and public._crm_date(r.data->>'follow_up') <= today and coalesce(r.data->>'owner_id', '') <> '' limit 2000 loop
+               and public._crm_date(r.data->>'follow_up') <= today and coalesce(r.data->>'owner_id', '') <> '' loop
       if clock_timestamp() - t0 > interval '2 seconds' then more := true; exit; end if;
-      if public.notify_user((x.data->>'owner_id')::uuid, case when coalesce(x.data->>'event_ref', '') <> '' then 'crm_event_follow_up' else 'crm_lead_follow_up' end, x.id,
+      if not public._crm_seen((x.data->>'owner_id')::uuid, 'crm-lf:' || x.id || ':' || (x.data->>'follow_up')) and public.notify_user((x.data->>'owner_id')::uuid, case when coalesce(x.data->>'event_ref', '') <> '' then 'crm_event_follow_up' else 'crm_lead_follow_up' end, x.id,
         'crm-lf:' || x.id || ':' || (x.data->>'follow_up'), 'Follow up ' || x.title, concat_ws(' · ', x.data->>'organization', x.data->>'event_ref_title', 'due ' || (x.data->>'follow_up')), null, '/crm?lead=' || x.id) then n := n + 1; end if;
     end loop;
   end if;

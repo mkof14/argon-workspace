@@ -12,6 +12,9 @@ end $$;
 drop trigger if exists records_crm_a_guard on public.records;
 drop trigger if exists records_crm_before on public.records;
 drop trigger if exists records_crm_after on public.records;
+drop index if exists public.records_crm_act_last_idx;
+drop index if exists public.records_crm_meet_last_idx;
+drop index if exists public.records_crm_prop_last_idx;
 drop index if exists public.records_opp_number_uq;
 drop index if exists public.records_prp_version_uq;
 drop index if exists public.records_deal_ref_idx;
@@ -385,6 +388,22 @@ begin
   return null;
 end $$;
 
+-- wf_migrate as in update-v23.sql
+create or replace function public.wf_migrate(p_inst uuid, p_definition uuid, p_note text default null) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare me uuid := public.ops_viewer(); i public.wf_instances; d public.wf_definitions; rl text;
+begin
+  select role into rl from public.profiles where id = me;
+  if me is null or rl not in ('owner', 'admin') then raise exception 'Only owners and administrators move a running process to another version' using errcode = '42501'; end if;
+  select * into i from public.wf_instances where id = p_inst for update;
+  select * into d from public.wf_definitions where id = p_definition;
+  if not found or d.code <> i.def_code or d.state not in ('published', 'retired') then raise exception 'Choose a published version of the same process' using errcode = '22023'; end if;
+  if i.current_step is not null and public._wf_step(d.id, i.current_step) is null then raise exception 'Version % has no step %: it cannot take over this process', d.version, i.current_step using errcode = '22023'; end if;
+  update public.wf_instances set definition_id = d.id, def_version = d.version, updated_at = now(), version = version + 1 where id = i.id;
+  perform public._wf_event(i.id, i.current_run, me, 'migrated', i.current_step, i.def_version::text, d.version::text, jsonb_build_object('note', left(p_note, 300)));
+  return jsonb_build_object('ok', true, 'version', d.version);
+end $$;
+
 -- _ops_admin as in update-v23.sql
 create or replace function public._ops_admin(p_uid uuid) returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.profiles p where p.id = p_uid and not p.disabled and p.role in ('owner', 'admin', 'management'))
@@ -518,6 +537,7 @@ end $$;
 
 -- the v24 functions and the working-set type (the append-only guard stays: it protects the history tables, which stay)
 drop function if exists public._crm_base(p_viewer uuid);
+drop function if exists public._crm_base(p_viewer uuid, p_only uuid);
 drop function if exists public._crm_blank(v jsonb);
 drop function if exists public._crm_can_write(p_uid uuid, p_section text);
 drop function if exists public._crm_date(t text);
@@ -592,6 +612,7 @@ drop function if exists public.ops_policy_approve(p_code text, p_version integer
 drop function if exists public.records_crm_after();
 drop function if exists public.records_crm_before();
 drop function if exists public.records_crm_guard();
+drop function if exists public._crm_seen(p_user uuid, p_key text);
 drop type if exists public.crm_vrow cascade;
 
 -- statuses back to the earlier names (only where v24 moved them). The numbers, versions, organisation links and
