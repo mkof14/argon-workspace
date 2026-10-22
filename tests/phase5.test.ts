@@ -62,11 +62,11 @@ const codesIn = (re: RegExp, src = SQL) => [...new Set([...src.matchAll(re)].map
 const fn = (name: string) => SQL.slice(SQL.indexOf(`create or replace function public.${name}(`), SQL.indexOf("end $$;", SQL.indexOf(`create or replace function public.${name}(`)));
 test("texts: every health reason, open-loop kind, next action, attention part and change kind the database returns has words in 4 languages", () => {
   const health = codesIn(/\(\s*'([a-z_]+)', case when b\./g);
-  const ol = fn("_open_loops");
+  const ol = fn("_open_loops_calc");
   const loops = codesIn(/select (?:distinct on \(a\.chain_id\) )?'([a-z_]+)',? (?:kind, )?'(?:task|project|decision|approval|document|meeting)'/g, ol);
   const next = codesIn(/jsonb_build_object\('code', '[a-z_]+'(?:[^()]|\([^()]*\))*\),\s*'([a-z_]+)'/g, ol).concat(codesIn(/when [^']*'([a-z_]+)'(?= when| else)/g, fn("_attention").slice(fn("_attention").indexOf("'project_health:'"), fn("_attention").indexOf("public.mgmt_link('company.projects'"))), ["review_project"]);
-  const pb = SQL.slice(SQL.indexOf("('severity', (sw->>s.sev)"), SQL.indexOf(") x(code, pts, n)"));
-  const parts = [...new Set([...pb.matchAll(/^\s*\('([a-z_]+)', /gm)].map((m) => m[1]))];
+  const pb = SQL.slice(SQL.indexOf("('severity', t.p_severity"), SQL.indexOf(") x(code, pts, n)", SQL.indexOf("('severity', t.p_severity")));
+  const parts = [...new Set([...pb.matchAll(/\('([a-z_]+)', t\./g)].map((m) => m[1]))];
   const changes = codesIn(/select '([a-z_]+)' k, a\.created_at/g).concat(codesIn(/union all select '([a-z_]+)', (?:a\.created_at|max\(a\.created_at\)|ap\.decided_at|\(public\.mgmt_date|now\(\))/g));
   assert.ok(health.length >= 17, `health codes found: ${health}`); assert.ok(loops.length >= 25, `loop kinds found: ${loops}`); assert.ok(parts.length >= 9, `${parts}`); assert.ok(changes.length >= 12, `${changes}`);
   for (const [map, codes, what] of [[HEALTH_REASON, health, "health"], [LOOP_KIND, loops, "loop"], [NEXT_ACTION, next, "next action"], [ATTENTION_PART, parts, "attention"], [CHANGE_KIND, changes, "change"]] as const)

@@ -1,26 +1,26 @@
 {
  "langs": {
   "en": {
-   "pages": 116,
-   "size": 5840462,
-   "version": "2.37"
+   "pages": 119,
+   "size": 5908582,
+   "version": "2.38"
   },
   "ru": {
-   "pages": 123,
-   "size": 6316239,
-   "version": "2.37"
+   "pages": 125,
+   "size": 6374431,
+   "version": "2.38"
   },
   "uk": {
-   "pages": 120,
-   "size": 6275148,
-   "version": "2.37"
+   "pages": 123,
+   "size": 6340781,
+   "version": "2.38"
   },
   "ar": {
-   "pages": 112,
-   "size": 6528034,
-   "version": "2.37"
+   "pages": 115,
+   "size": 6606397,
+   "version": "2.38"
   }
  },
- "version": "2.37",
- "built": "2026-10-21"
+ "version": "2.38",
+ "built": "2026-10-22"
 }
