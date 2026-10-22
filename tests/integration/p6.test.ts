@@ -9,7 +9,8 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { ENV, makeUser, pool, sql, uid } from "./_stack.ts";
+import { ENV, admin, makeUser, pool, signIn, sql, uid } from "./_stack.ts";
+import { retrieve } from "../../src/lib/server/retrieval.ts";
 
 const run = uid(); const tag = `p6${run}`;
 const D = (n: number) => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
@@ -425,6 +426,13 @@ test("Scenario 12 — Assistant: «What purchases need my approval?» answers fr
   const c = await call("hrEmp", "ops_assistant", ["horoscope", null]); assert.equal(c.kind, "unavailable");
   const bud = await call("mgmt", "ops_assistant", ["budget", PROJ.id]); assert.equal(bud.kind, "calculation"); assert.match(bud.formula, /Remaining = Budget/);
   const proc = await call("emp", "ops_assistant", ["process", (await get(pr.record)).data.number]); assert.equal(proc.kind, "fact"); assert.equal(proc.items[0].processes[0].step, "Approval");
+  // the same question through the Assistant's retrieval, as the signed-in approver (row-level security on)
+  const lead = (await signIn(U.salesLead.email)).c;
+  const r = await retrieve(lead, { id: U.salesLead.id, role: "sales" }, { q: "What purchases need my approval?" });
+  assert.ok(r.intents.includes("ops_my_approvals")); assert.ok(r.sources.some((x) => x.id === pr.record && /approval level 1/.test(x.excerpt) && /USD 1200/.test(x.excerpt)), "the request is a numbered source with its amount");
+  assert.ok(r.facts.some((f) => /Operations \(my_approvals, fact\)/.test(f)));
+  const other = await retrieve((await signIn(U.hrEmp.email)).c, { id: U.hrEmp.id, role: "hr" }, { q: "What purchases need my approval?" });
+  assert.ok(!other.sources.some((x) => x.id === pr.record)); assert.ok(other.facts.some((f) => /unavailable/.test(f)));
   EV.scenarios.s12 = { answer: { kind: a.kind, item: it }, other: b.kind };
 });
 
@@ -552,6 +560,10 @@ test("Scenario 15 — automatic steps run at most once, failures are retried thr
   i = await inst(p.id); assert.equal(i.status, "blocked"); assert.match(i.blocker, /gave up after 5 attempts/);
   // an administrator retries it by hand (after fixing the cause) — the same step run, never a second one
   await fails(act("emp", i.run, "retry"), /Only the process owner/);
+  // the Phase 1 scheduler's workflow job runs the same retries and the SLA tick (service role)
+  const { JOBS_FNS } = await import("../../src/lib/server/schedule.ts");
+  const j = await JOBS_FNS.workflow(admin(), { deadline: Date.now() + 20000 } as any);
+  assert.ok(j && typeof j.due_soon === "number" && j.retries, "the workflow job answers with its counts");
   EV.automation = { retried: { attempts: 2, status: "completed" }, dead: { attempts: q.attempts, status: q.status } };
 });
 
@@ -746,4 +758,41 @@ test("Rule model: allow-listed fields and operators only; evaluation is determin
   assert.match(await er({ field: "record.a", op: "eq", value: 1, code: "x" }), /Unknown key/);
   assert.match(await er({ all: [] }), /1–20/);
   assert.equal(await er({ field: "facts.amount", op: "lte", value: 5000 }), null);
+});
+
+/* ------------------------------------------- Scenario 15 (cont.): the same completion at the same moment ------------------------------------------- */
+test("Concurrency — the same step completed five times at once, two approvers deciding the same level at once: one result each", async () => {
+  const res = await call("emp", "ops_request_create", ["purchase", `${tag} Concurrent`, { item: "Gloves", qty: 10, est_amount: 300, currency: "USD" }, null]);
+  let i = await inst(res.record);
+  const five = await Promise.allSettled(Array.from({ length: 5 }, () => act("emp", i.run, "submit")));
+  assert.equal(five.filter((x) => x.status === "fulfilled").length, 1, "one completion wins");
+  for (const x of five.filter((y) => y.status === "rejected") as PromiseRejectedResult[]) assert.match(String(x.reason?.message), /already done|could not serialize|deadlock/);
+  assert.equal((await sql("select count(*)::int n from wf_step_runs where instance_id = $1 and step_id = 'tech_review'", [i.id]))[0].n, 1, "one next step");
+  i = await inst(res.record); await act("eng", i.run, "approved");
+  i = await inst(res.record);
+  await sql("insert into records(section, title, status, data) values ('operations.quotations', $1, 'Received', $2)", [`${tag} QC`, { request_ref: res.record, vendor_ref: VENDOR.id, amount: 300, currency: "USD", valid_until: D(10) }]);
+  await act("proc", i.run, "submit"); const q = (await sql("select id from records where section = 'operations.quotations' and data->>'request_ref' = $1", [res.record]))[0].id;
+  await call("proc", "ops_select_quote", [res.record, q, "Only vendor that can deliver this week"]);
+  // the same approval decided twice at the same moment (a double click, two tabs): one decision, one purchase record
+  await call("owner", "ops_policy_save", ["PURCHASE_PAR", "Parallel test", [{ steps: [{ kind: "role", role: "finance", label: "Finance" }] }], true]);
+  const a = (await pendingFor(res.record))[0];
+  const two = await Promise.allSettled([decide("salesLead", a.id, "approved"), decide("salesLead", a.id, "approved")]);
+  assert.equal(two.filter((x) => x.status === "fulfilled").length, 1, "the same decision twice: one wins");
+  i = await inst(res.record); assert.equal(i.cur, "order");
+  assert.equal((await sql("select count(*)::int n from records where section = 'operations.procurement' and data->>'request_ref' = $1", [res.record]))[0].n, 1, "one purchase record");
+  assert.equal((await sql("select count(*)::int n from wf_links where instance_id = $1 and kind = 'task'", [i.id]))[0].n, 1, "one order task");
+  // a role level with two members deciding at the same moment
+  const code = `CP${run.toUpperCase().replace(/[^A-Z0-9]/g, "")}`.slice(0, 30);
+  const d = await call("admin", "wf_definition_save", [{ code, name: "Concurrent approval", source_section: "company.requests", steps: [{ id: "ap", name: "Approve", type: "APPROVAL", policy: "PURCHASE_PAR", on: { success: "$complete" } }] }]);
+  await call("admin", "wf_definition_publish", [d.id]);
+  const r2 = await rec("company.requests", "concurrent approval", "Triage", {}, { by: "emp" });
+  await call("emp", "wf_start", [code, r2.id, null]);
+  const ap2 = await sql("select * from approvals where record_id = $1 and status = 'pending' and approver_id = any($2)", [r2.id, [U.fin.id, U.fin2.id]]);
+  assert.equal(ap2.length, 2);
+  const both = await Promise.allSettled([decide("fin", ap2.find((a: any) => a.approver_id === U.fin.id).id, "approved"), decide("fin2", ap2.find((a: any) => a.approver_id === U.fin2.id).id, "approved")]);
+  assert.equal(both.filter((x) => x.status === "fulfilled").length, 1, "one approver decides; the other finds it decided");
+  const done = await inst(r2.id); assert.equal(done.status, "completed");
+  assert.equal((await sql("select count(*)::int n from wf_events where instance_id = $1 and kind = 'completed'", [done.id]))[0].n, 1, "completed once");
+  assert.equal((await sql("select count(*)::int n from approvals where record_id = $1 and status = 'approved'", [r2.id]))[0].n, 1);
+  EV.concurrency = { five_completions: five.map((x) => x.status), approvers: both.map((x) => x.status) };
 });

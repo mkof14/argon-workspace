@@ -383,8 +383,9 @@ begin
     end if;
   end loop;
   for v in select x #>> '{}' from jsonb_path_query(d, 'strict $.**') x where jsonb_typeof(x) = 'string' loop
-    -- any run of 13–19 digits (spaces or dashes allowed) that passes the card checksum
-    for digits in select regexp_replace(m[1], '[ -]', '', 'g') from regexp_matches(v, '((?:\d[ -]?){12,18}\d)', 'g') m loop
+    -- a card number as people write it: 13–19 digits in one run, or groups of four (Amex 4-6-5) separated by one
+    -- space or dash, starting 3–6 and passing the card checksum (identifiers such as record ids never match)
+    for digits in select regexp_replace(m[1], '[ -]', '', 'g') from regexp_matches(v, '(?:^|[^0-9A-Za-z-])(\d{13,19}|\d{4}([ -])\d{4}\2\d{4}\2\d{1,7}|\d{4}([ -])\d{6}\3\d{5})(?![0-9A-Za-z])', 'g') m loop
       if length(digits) between 13 and 19 and digits ~ '^[3-6]' and public._luhn(digits) then raise exception 'A card number cannot be stored in Workspace' using errcode = '23514'; end if;
     end loop;
     if upper(v) ~ '(^|[^A-Z0-9])[A-Z]{2}\d{2}( ?[A-Z0-9]){11,30}($|[^A-Z0-9])' and regexp_replace(v, '\s', '', 'g') ~ '\d{8}' then
@@ -3010,17 +3011,22 @@ end $$;
    21. Party directory: one organisation per name across vendors, clients, partners and agencies; each of those
        records gets party_ref. Nothing is moved or merged: the original records stay where they are.
    --------------------------------------------------------------------------------------------- */
-insert into public.records(section, title, status, controlled, data)
-select 'company.parties', min(r.title), 'Active', bool_or(r.controlled),
-  jsonb_strip_nulls(jsonb_build_object('country', max(r.data->>'country'), 'backfilled', true, 'key', lower(regexp_replace(r.title, '\s+', ' ', 'g'))))
-from public.records r
-where r.section in ('operations.vendors', 'sales.clients', 'sales.partners', 'marketing.agencies') and coalesce(r.data->>'party_ref', '') = '' and trim(coalesce(r.title, '')) <> ''
-  and not exists (select 1 from public.records p where p.section = 'company.parties' and p.data->>'key' = lower(regexp_replace(r.title, '\s+', ' ', 'g')))
-group by lower(regexp_replace(r.title, '\s+', ' ', 'g'));
-update public.records r set data = r.data || jsonb_build_object('party_ref', p.id, 'party_ref_title', p.title)
-from public.records p
-where r.section in ('operations.vendors', 'sales.clients', 'sales.partners', 'marketing.agencies') and coalesce(r.data->>'party_ref', '') = ''
-  and p.section = 'company.parties' and p.data->>'key' = lower(regexp_replace(r.title, '\s+', ' ', 'g'));
+-- once (the first time v23 is applied): applying v23 again changes nothing
+do $$ begin
+  if coalesce((public.ops_cfg()->>'parties_backfilled')::boolean, false) then return; end if;
+  insert into public.records(section, title, status, controlled, data)
+  select 'company.parties', min(r.title), 'Active', bool_or(r.controlled),
+    jsonb_strip_nulls(jsonb_build_object('country', max(r.data->>'country'), 'backfilled', true, 'key', lower(regexp_replace(r.title, '\s+', ' ', 'g'))))
+  from public.records r
+  where r.section in ('operations.vendors', 'sales.clients', 'sales.partners', 'marketing.agencies') and coalesce(r.data->>'party_ref', '') = '' and trim(coalesce(r.title, '')) <> ''
+    and not exists (select 1 from public.records p where p.section = 'company.parties' and p.data->>'key' = lower(regexp_replace(r.title, '\s+', ' ', 'g')))
+  group by lower(regexp_replace(r.title, '\s+', ' ', 'g'));
+  update public.records r set data = r.data || jsonb_build_object('party_ref', p.id, 'party_ref_title', p.title)
+  from public.records p
+  where r.section in ('operations.vendors', 'sales.clients', 'sales.partners', 'marketing.agencies') and coalesce(r.data->>'party_ref', '') = ''
+    and p.section = 'company.parties' and p.data->>'key' = lower(regexp_replace(r.title, '\s+', ' ', 'g'));
+  update public.ops_settings set value = value || '{"parties_backfilled": true}'::jsonb where id;
+end $$;
 
 /* ---------------------------------------------------------------------------------------------
    22. Settings changes (owners and administrators), approval policies (same), job grants

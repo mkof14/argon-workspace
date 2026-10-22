@@ -11,7 +11,10 @@ fp() {
   $PG -c "select jsonb_build_object(
     'records', (select count(*) from records),
     'records_md5', (select md5(string_agg(id::text || ':' || version || ':' || coalesce(status, '') || ':' || md5(data::text) || ':' || controlled, ',' order by id)) from records),
-    'activity', (select count(*) from activity), 'approvals', (select count(*) from approvals),
+    'tasks', (select count(*) from records where section = 'company.tasks'), 'projects', (select count(*) from records where section = 'company.projects'),
+    'documents', (select count(*) from records where section = 'company.documents'), 'decisions', (select count(*) from records where section = 'company.decisions'),
+    'portfolios', (select count(*) from records where section = 'company.portfolios'),
+    'activity', (select count(*) from activity), 'activity_md5', (select md5(string_agg(id::text, ',' order by id)) from activity), 'approvals', (select count(*) from approvals),
     'approvals_md5', (select md5(string_agg(id::text || status || coalesce(basis_hash, ''), ',' order by id)) from approvals),
     'comments', (select count(*) from comments), 'notifications', (select count(*) from notifications), 'document_versions', (select count(*) from document_versions),
     'wf_definitions', (select count(*) from wf_definitions), 'wf_instances', (select count(*) from wf_instances),
