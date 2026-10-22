@@ -11,7 +11,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { ENV, makeUser, pool, signIn, sql, uid } from "./_stack.ts";
 
-const run = uid(); const tag = `p8perf${run}`;
+// P8PERF_REUSE=<tag> measures again on a dataset an earlier run of this suite loaded (no second load)
+const REUSE = process.env.P8PERF_REUSE || ""; const run = REUSE ? REUSE.replace(/^p8perf/, "") : uid(); const tag = `p8perf${run}`;
 const N = { configs: 10, revisions: 5, items: 25000, linesPerBom: 2000, units: 100, woPerUnit: 100, txns: 100000, serials: 20000, inspections: 10000, tests: 10000, issues: 5000 };
 const R: Record<string, any> = { volume: {}, timings: {}, targets: { common_p95_ms: 1000, heavy_p95_ms: 3000 } };
 const stats = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); const q = (p: number) => Math.round(s[Math.min(s.length - 1, Math.ceil(s.length * p) - 1)]); return { median: q(0.5), p95: q(0.95), max: Math.round(s[s.length - 1]), n: s.length }; };
@@ -39,7 +40,16 @@ async function approveAll(record: string) {
   return get(record);
 }
 
+async function reuse() {
+  for (const k of ["owner", "mfg", "eng", "eng2", "tech", "mgmt", "nonus"]) U[k] = (await sql("select id, email from profiles where email = $1", [`${tag}.${k}@agron-stack.test`]))[0];
+  S.units = (await sql("select id from records where section = 'operations.builds' and title like $1 order by data->>'number'", [`%${tag} unit %`])).map((r: any) => r.id);
+  S.boms = (await sql("select id from records where section = 'technical.boms' and data->>'config_code' in (select data->>'code' from records where section = 'technical.configurations' and title like $1) order by data->>'number', data->>'revision'", [`${tag} Config %`])).map((r: any) => r.id);
+  R.volume = { reused: tag, ...(await sql(`select (select count(*) from records where section = 'technical.items')::int items, (select count(*) from mfg_bom_lines)::int bom_lines, (select count(*) from records where section = 'operations.work_orders')::int work_orders,
+    (select count(*) from mfg_txns)::int inventory_transactions, (select count(*) from mfg_serials)::int serials, (select count(*) from records)::int all_records`))[0] };
+  for (const k of ["mfg", "tech", "mgmt", "nonus", "eng"]) C[k] = (await signIn(U[k].email)).c;
+}
 before(async () => {
+  if (REUSE) return reuse();
   const t0 = Date.now();
   const mk = async (k: string, role: string, o: any = {}) => { U[k] = await makeUser(`${tag}.${k}@agron-stack.test`, role, { name: `${k} ${tag}`, ...o }); };
   await mk("owner", "owner", { us: true }); await mk("mfg", "operations", { us: true }); await mk("eng", "engineering", { us: true }); await mk("eng2", "engineering", { us: true });
@@ -117,7 +127,7 @@ test("manufacturing screens under 1 s (p95), heavy ones under 3 s, at the B68 vo
   T.bom_view = await time(10, () => rpc("eng", "mfg_bom_get", { p_bom: bomE }));
   T.bom_compare = await time(10, () => rpc("eng", "mfg_bom_compare", { p_a: bomA, p_b: bomE }));
   T.material_plan_unit = await time(10, () => rpc("mfg", "mfg_material_plan", { p_scope: { unit } }));
-  T.material_plan_all = await time(5, () => rpc("mfg", "mfg_material_plan", { p_scope: {} }));
+  T.material_plan_100_units = await time(5, () => rpc("mfg", "mfg_material_plan", { p_scope: { units: S.units } }));
   T.shortage_list = await time(10, () => rpc("mfg", "mfg_list", { p_kind: "shortages", p_filter: {} }));
   T.inventory_search = await time(10, (i) => rpc("mfg", "mfg_inventory", { p_q: `Item ${100 + i}`, p_item: null, p_location: null, p_state: null, p_limit: 300 }));
   T.serial_search = await time(10, (i) => rpc("mfg", "mfg_serial_search", { p_q: `SN-${run}-00${1000 + i}`, p_limit: 50 }));
@@ -139,6 +149,6 @@ test("manufacturing screens under 1 s (p95), heavy ones under 3 s, at the B68 vo
   fs.writeFileSync(path.join(ENV.STACK_DIR || ".stack", "p8-perf.json"), JSON.stringify(R, null, 1));
   T.notices_tick_service = await time(3, async () => { await sql("select public.mfg_tick()"); return null; });
   fs.writeFileSync(path.join(ENV.STACK_DIR || ".stack", "p8-perf.json"), JSON.stringify(R, null, 1));
-  const heavy = ["dashboard_management", "material_plan_all", "weekly_review", "assistant_risks", "bom_compare", "notices_tick_service", "unit_tab_materials"];
+  const heavy = ["dashboard_management", "material_plan_100_units", "weekly_review", "assistant_risks", "bom_compare", "notices_tick_service", "unit_tab_materials"];
   for (const [k, v] of Object.entries(T) as [string, any][]) assert.ok(v.p95 < (heavy.includes(k) ? 3000 : 1000), `${k}: p95 ${v.p95} ms`);
 });

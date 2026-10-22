@@ -27,7 +27,7 @@ export default function ShopFloor() {
     <Scan onWo={open} />
     {wo ? <WorkOrder id={wo} onClose={() => open(null)} /> : <>
       <nav className="dtabs" style={{ ["--dc" as any]: "#0F766E", overflowX: "auto" }} aria-label={T(W.shop)}>
-        {GROUPS.map(([k, l]) => <button key={k} data-group={k} className={g === k ? "on" : ""} onClick={() => setG(k)}>{T(l)} <span className="chip mono">{(data?.[k] || []).length}</span></button>)}
+        {GROUPS.map(([k, l]) => <button key={k} data-group={k} className={g === k ? "on" : ""} onClick={() => setG(k)}>{T(l)} <span className="chip mono">{data?.counts?.[k] ?? (data?.[k] || []).length}</span></button>)}
       </nav>
       <Err e={err} />
       {!data ? <Wait /> : <div className="card feed" data-queue={g}>{(data[g] || []).length ? (data[g] || []).map((w: any) => <button key={w.id} className="row" data-wo={w.id} onClick={() => open(w.id)} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: 6, textAlign: "start", width: "100%", padding: "12px", borderBottom: "1px solid var(--line, #eee)", minHeight: 56 }}>

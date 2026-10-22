@@ -161,6 +161,18 @@ test("Shop floor on a phone — start, checklist, install the allocated serial, 
   await p.context().close();
 });
 
+test("Tablet and phone widths — dashboard, unit view, quality and labels fit without horizontal scrolling", { skip }, async () => {
+  for (const vp of [{ width: 820, height: 1180 }, PHONE]) {
+    const p = await login(U.mfg.email, vp); const seen: Record<string, boolean> = {};
+    for (const [k, url, sel] of [["dashboard", "/mfg", "[data-block]"], ["unit", `/mfg?unit=${R.unit.id}`, "[data-unit-view]"], ["materials", `/mfg?unit=${R.unit.id}&utab=materials`, "[data-utab]"], ["quality", "/mfg?tab=quality", "[data-insp-due]"], ["labels", "/mfg?tab=labels", "[data-labels]"], ["shopfloor", "/build", "[data-scan]"]] as const) {
+      await p.goto(`${APP}${url}`); await p.waitForSelector(sel, { timeout: 15000 }); await p.waitForTimeout(400);
+      seen[k] = await noHScroll(p); assert.ok(seen[k], `${k} fits ${vp.width} px`);
+    }
+    await shot(p, `fit-${vp.width}`);
+    (EV.fit ||= {})[vp.width] = seen; await p.context().close();
+  }
+});
+
 test("An external partner — no manufacturing screen, no shop floor, a scanned code opens nothing", { skip }, async () => {
   const p = await login(U.partner.email); await p.goto(`${APP}/mfg`);
   await p.waitForTimeout(1500);

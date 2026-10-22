@@ -354,6 +354,12 @@ create table if not exists public.mfg_bom_lines (
   unique (bom_id, line_no)
 );
 create index if not exists mfg_bom_lines_bom_idx on public.mfg_bom_lines(bom_id, parent_id);
+-- the exploded requirement of an approved BOM revision (its lines never change after approval, so it is computed once,
+-- when it is approved): total quantity per item over all levels, the primary line of an alternate group counting
+create table if not exists public.mfg_bom_need (
+  bom_id uuid not null, item_id uuid not null, req numeric not null, opt boolean not null default false, primary key (bom_id, item_id));
+alter table public.mfg_bom_need enable row level security;
+revoke all on public.mfg_bom_need from anon, authenticated;
 create index if not exists mfg_bom_lines_item_idx on public.mfg_bom_lines(item_id);
 
 -- approved alternates and substitutions (procurement proposes, engineering authority decides)
@@ -516,11 +522,18 @@ end $$;
 -- record lookups the manufacturing engines make (each an index probe)
 create index if not exists records_mfg_section_idx on public.records (section, status)
   where section in ('technical.products', 'technical.configurations', 'technical.items', 'technical.boms', 'technical.test_procedures', 'operations.builds', 'operations.work_orders', 'operations.quality', 'technical.testing');
-create index if not exists records_build_ref_idx on public.records ((data->>'build_ref')) where data ? 'build_ref';
-create index if not exists records_item_ref_idx on public.records ((data->>'item_ref')) where data ? 'item_ref';
-create index if not exists records_product_ref_idx on public.records ((data->>'product_ref')) where data ? 'product_ref';
-create index if not exists records_config_ref_idx on public.records ((data->>'config_ref')) where data ? 'config_ref';
-create index if not exists records_wo_ref_idx on public.records ((data->>'work_order_ref')) where data ? 'work_order_ref';
+drop index if exists public.records_build_ref_idx; -- an earlier test cut of v25 had it partial (equality lookups could not use it)
+create index if not exists records_mfg_build_ref_idx on public.records ((data->>'build_ref'), section);
+create index if not exists records_mfg_request_ref_idx on public.records ((data->>'request_ref'), section); -- the v23 one is partial: equality lookups by request could not use it
+drop index if exists public.records_item_ref_idx; -- an earlier test cut of v25 had it partial (equality lookups could not use it)
+create index if not exists records_mfg_item_ref_idx on public.records ((data->>'item_ref'), section);
+drop index if exists public.records_product_ref_idx; -- an earlier test cut of v25 had it partial (equality lookups could not use it)
+create index if not exists records_mfg_product_ref_idx on public.records ((data->>'product_ref'), section);
+drop index if exists public.records_config_ref_idx; -- an earlier test cut of v25 had it partial (equality lookups could not use it)
+create index if not exists records_mfg_config_ref_idx on public.records ((data->>'config_ref'), section);
+drop index if exists public.records_wo_ref_idx; -- an earlier test cut of v25 had it partial (equality lookups could not use it)
+create index if not exists records_mfg_work_order_ref_idx on public.records ((data->>'work_order_ref'), section);
+create index if not exists mfg_bom_lines_parent_idx on public.mfg_bom_lines (parent_id) where parent_id is not null;
 create index if not exists records_bom_number_idx on public.records ((data->>'number'), (data->>'revision')) where section = 'technical.boms';
 create unique index if not exists records_mfg_number_uq on public.records (section, (data->>'number'))
   where section in ('technical.items', 'operations.builds', 'operations.work_orders', 'operations.quality', 'technical.testing') and data ? 'number' and coalesce(data->>'number', '') <> '';
@@ -655,6 +668,38 @@ $$;
 revoke execute on function public._mfg_cost_ok(uuid) from public, anon, authenticated;
 
 -- an item (a record of the item master) as this person may see it, or null
+-- whether a person may open an item record — the same rule as record_visible_for for technical.items (section
+-- access for the role, US persons only for controlled items, externals only their company's), written as plain SQL
+-- so the planner inlines it into set-based reads instead of calling a function for every BOM line
+create or replace function public._mfg_ivis(p_uid uuid, i public.records) returns boolean language sql stable as $f$
+  select exists (select 1 from public.profiles pp where pp.id = p_uid and not pp.disabled
+    and (pp.role in ('owner', 'admin') or exists (select 1 from public.section_access a where a.role = pp.role and a.section = 'technical.items'))
+    and (i.controlled is not distinct from false or coalesce(pp.us_person, false))
+    and (not coalesce(pp.role in ('partner', 'vendor', 'investor', 'pending'), true) or coalesce(i.company = '*' or i.company = pp.company, false)))
+$f$;
+revoke execute on function public._mfg_ivis(uuid, public.records) from public, anon, authenticated;
+
+-- whether a person may open a work order, inspection, test run, issue or logistics record, written as plain SQL so
+-- set-based reads inline it. p_hidden: the restricted units this person may not open (from _mfg_hidden_units). It is
+-- record_visible_for for these sections exactly: the role's access, US persons only, the company rule, and
+-- _mfg_follow_ok — a record of a restricted unit the person may not open is theirs only if they are one of its people.
+create or replace function public._mfg_cvis(p_uid uuid, r public.records, p_hidden text[]) returns boolean language sql stable as $f$
+  select exists (select 1 from public.profiles pp where pp.id = p_uid and not pp.disabled
+      and (pp.role in ('owner', 'admin') or exists (select 1 from public.section_access a where a.role = pp.role and a.section = r.section))
+      and (r.controlled is not distinct from false or coalesce(pp.us_person, false))
+      and (not coalesce(pp.role in ('partner', 'vendor', 'investor', 'pending'), true) or coalesce(r.company = '*' or r.company = pp.company, false)))
+    and (coalesce(r.data->>'build_ref', '') = '' or not (r.data->>'build_ref' = any (p_hidden))
+         or r.created_by = p_uid or coalesce(r.data->>'owner_id', '') = p_uid::text or coalesce(r.data->>'assignee_id', '') = p_uid::text or coalesce(r.data->>'inspector_id', '') = p_uid::text
+         or coalesce(r.data->>'operator_id', '') = p_uid::text or coalesce(r.data->'team_ids', '[]'::jsonb) ? p_uid::text)
+$f$;
+revoke execute on function public._mfg_cvis(uuid, public.records, text[]) from public, anon, authenticated;
+
+-- the restricted build units a person may not open (their records follow the rule above)
+create or replace function public._mfg_hidden_units(p_uid uuid) returns text[] language sql stable security definer set search_path = public as $f$
+  select coalesce(array_agg(b.id::text), '{}') from public.records b where b.section = 'operations.builds' and coalesce((b.data->>'restricted')::boolean, false) and not public._mfg_unit_ok(p_uid, b)
+$f$;
+revoke execute on function public._mfg_hidden_units(uuid) from public, anon, authenticated;
+
 create or replace function public._mfg_item(p_uid uuid, p_item uuid) returns public.records language plpgsql stable security definer set search_path = public as $$
 declare r public.records;
 begin
@@ -902,6 +947,7 @@ begin
           from public.records r where r.section = 'technical.boms' and r.data->>'number' = new.data->>'number' and r.id <> new.id and r.status = 'Approved';
       end if;
       perform public._mfg_audit(me, 'bom_approved', new.id, null, jsonb_build_object('number', new.data->>'number', 'revision', new.data->>'revision', 'lines_hash', new.data->>'lines_hash', 'effectivity', new.data->'effectivity'));
+      perform public._mfg_bom_need_fill(new.id); -- its requirement, once (the lines cannot change any more)
     elsif new.section = 'technical.configurations' and new.status = 'Approved' then
       perform public._mfg_sys_patch(r.id, 'Superseded', jsonb_build_object('superseded_by', new.id))
         from public.records r where r.section = 'technical.configurations' and r.data->>'code' = new.data->>'code' and r.id <> new.id and r.status = 'Approved';
@@ -1050,6 +1096,26 @@ revoke execute on function public.mfg_bom_lines_save(uuid, jsonb) from public, a
 grant execute on function public.mfg_bom_lines_save(uuid, jsonb) to authenticated;
 
 -- a BOM revision as a tree with each line's level, item and the quantity per unit through its assemblies
+-- the exploded requirement of one BOM revision (used live for drafts, stored once for approved revisions)
+create or replace function public._mfg_bom_explode(p_bom uuid) returns table (item_id uuid, req numeric, opt boolean) language sql stable security definer set search_path = public as $$
+  with recursive t as (
+    select l.id, l.parent_id, l.item_id, l.qty ext, l.required, l.alt_group, l.line_no from public.mfg_bom_lines l where l.bom_id = p_bom and l.parent_id is null
+    union all
+    select l.id, l.parent_id, l.item_id, t.ext * l.qty, l.required and t.required, l.alt_group, l.line_no from public.mfg_bom_lines l join t on l.parent_id = t.id where l.bom_id = p_bom),
+  leaf as (select t.* from t where not exists (select 1 from public.mfg_bom_lines c where c.bom_id = p_bom and c.parent_id = t.id)),
+  prim as (select lf.*, (lf.alt_group is null or lf.line_no = min(lf.line_no) over (partition by lf.parent_id, lf.alt_group)) is_primary from leaf lf)
+  select p.item_id, coalesce(sum(p.ext) filter (where p.is_primary and p.required), 0), bool_and(not (p.is_primary and p.required)) from prim p group by p.item_id
+$$;
+revoke execute on function public._mfg_bom_explode(uuid) from public, anon, authenticated;
+
+create or replace function public._mfg_bom_need_fill(p_bom uuid) returns void language plpgsql security definer set search_path = public as $$
+begin
+  if exists (select 1 from public.mfg_bom_need where bom_id = p_bom) then return; end if;
+  if not exists (select 1 from public.records where id = p_bom and section = 'technical.boms' and status in ('Approved', 'Superseded')) then return; end if;
+  insert into public.mfg_bom_need(bom_id, item_id, req, opt) select p_bom, e.item_id, e.req, coalesce(e.opt, false) from public._mfg_bom_explode(p_bom) e on conflict do nothing;
+end $$;
+revoke execute on function public._mfg_bom_need_fill(uuid) from public, anon, authenticated;
+
 create or replace function public.mfg_bom_get(p_bom uuid) returns jsonb language plpgsql stable security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
 declare me uuid := public.mfg_viewer(); b public.records;
 begin
@@ -1066,11 +1132,11 @@ begin
         from public.mfg_bom_lines l where l.bom_id = b.id and l.parent_id is null
         union all
         select l.id, l.line_no, l.parent_id, l.item_id, l.qty, l.uom, l.position, l.required, l.alt_group, l.notes, t.level + 1, t.ext_qty * l.qty, t.sort || l.line_no
-        from public.mfg_bom_lines l join t on l.parent_id = t.id)
+        from public.mfg_bom_lines l join t on l.parent_id = t.id where l.bom_id = b.id)
       select jsonb_agg(jsonb_build_object('id', t.id, 'line', t.line_no, 'parent', t.parent_id, 'level', t.level, 'qty', t.qty, 'ext_qty', t.ext_qty, 'uom', t.uom, 'position', t.position,
           'required', t.required, 'alt_group', t.alt_group, 'notes', t.notes,
-          'has_children', exists (select 1 from public.mfg_bom_lines c where c.parent_id = t.id),
-          'item', case when i.id is not null and public.record_visible_for(me, i) then jsonb_build_object('id', i.id, 'number', i.data->>'number', 'title', i.title, 'type', i.data->>'item_type',
+          'has_children', exists (select 1 from public.mfg_bom_lines c where c.bom_id = b.id and c.parent_id = t.id),
+          'item', case when i.id is not null and public._mfg_ivis(me, i) then jsonb_build_object('id', i.id, 'number', i.data->>'number', 'title', i.title, 'type', i.data->>'item_type',
                   'mpn', i.data->>'mpn', 'manufacturer', i.data->>'manufacturer', 'serialized', coalesce((i.data->>'serialized')::boolean, false), 'status', i.status)
                   else jsonb_build_object('hidden', true, 'title', 'An item you may not open') end) order by t.sort)
       from t left join public.records i on i.id = t.item_id), '[]'::jsonb));
@@ -1197,7 +1263,7 @@ language sql stable security definer set search_path = public as $$
     select l.id, l.line_no, ''::text as parent_path, l.item_id, l.qty, l.qty as ext_qty, l.uom, l.position, l.required, l.alt_group from public.mfg_bom_lines l where l.bom_id = p_bom and l.parent_id is null
     union all
     select l.id, l.line_no, t.parent_path || '/' || t.item_id::text, l.item_id, l.qty, t.ext_qty * l.qty, l.uom, l.position, l.required, l.alt_group
-    from public.mfg_bom_lines l join t on l.parent_id = t.id)
+    from public.mfg_bom_lines l join t on l.parent_id = t.id where l.bom_id = p_bom)
   select line_no, parent_path, item_id, qty, ext_qty, uom, position, required, alt_group from t
 $$;
 revoke execute on function public._mfg_bom_rows(uuid) from public, anon, authenticated;
@@ -1222,7 +1288,7 @@ begin
   moves as (select x.line_no la, y.line_no lb, x.item_id, x.parent_path pa, y.parent_path pb, x.qty qa, y.qty qb from ua2 x join ub2 y on y.item_id = x.item_id and y.parent_path <> x.parent_path),
   ua3 as (select * from ua2 where line_no not in (select la from moves)),
   ub3 as (select * from ub2 where line_no not in (select lb from moves)),
-  nm as (select i.id, i.data->>'number' num, i.title, public.record_visible_for(me, i) ok from public.records i where i.section = 'technical.items' and i.id in (select item_id from mfg_cmp_a union select item_id from mfg_cmp_b)),
+  nm as (select i.id, i.data->>'number' num, i.title, public._mfg_ivis(me, i) ok from public.records i where i.section = 'technical.items' and i.id in (select item_id from mfg_cmp_a union select item_id from mfg_cmp_b)),
   lab as (select id, case when ok then jsonb_build_object('id', id, 'number', num, 'title', title) else jsonb_build_object('hidden', true, 'title', 'An item you may not open') end j from nm)
   select jsonb_build_object(
     'a', jsonb_build_object('id', a.id, 'number', a.data->>'number', 'revision', a.data->>'revision', 'status', a.status),
@@ -1316,7 +1382,7 @@ begin
       'note', a.decision_note, 'ecr', a.ecr_id,
       'affected_units', (select count(distinct x.unit_id) from public.mfg_installs x where x.item_id = a.substitute_id and x.removed_at is null)) order by a.proposed_at desc)
     from public.mfg_alternates a join public.records i on i.id = a.item_id join public.records s on s.id = a.substitute_id
-    where (p_item is null or a.item_id = p_item or a.substitute_id = p_item) and public.record_visible_for(me, i) and public.record_visible_for(me, s)), '[]'::jsonb);
+    where (p_item is null or a.item_id = p_item or a.substitute_id = p_item) and public._mfg_ivis(me, i) and public.record_visible_for(me, s)), '[]'::jsonb);
 end $$;
 revoke execute on function public.mfg_alternates(uuid) from public, anon;
 grant execute on function public.mfg_alternates(uuid) to authenticated;
@@ -1438,48 +1504,53 @@ grant execute on function public.mfg_unit_status(uuid, text, text, text) to auth
 /* material requirements of one unit: the leaf lines of its pinned BOM revision (assemblies explode into their
    lines), required quantities through the assemblies, allocated / consumed / installed for this unit, free stock,
    open purchases for this unit, the shortage. Free stock is what is Available (allocated stock is not free). */
-create or replace function public._mfg_req(p_unit uuid, p_viewer uuid) returns table (item_id uuid, bom_qty numeric, required numeric, allocated numeric, consumed numeric,
+-- the material requirement of a set of units, per unit and item, in one pass: the stored requirement of each pinned
+-- approved BOM revision (exploded live for a draft), the unit's allocations, consumption and purchases, the free
+-- (Available) stock of the item and the stock of an approved alternate
+create or replace function public._mfg_req_set(p_units uuid[]) returns table (unit_id uuid, item_id uuid, bom_qty numeric, required numeric, allocated numeric, consumed numeric,
   free_available numeric, ordered numeric, received numeric, requested numeric, expected date, late boolean, alt_available numeric, optional boolean)
-language plpgsql stable security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
-declare u public.records; bid uuid; grace int := coalesce((public.mfg_cfg()->>'late_purchase_grace_days')::int, 0);
+language plpgsql stable security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off rows 20000 as $$
+declare grace int := coalesce((public.mfg_cfg()->>'late_purchase_grace_days')::int, 0); ids_t text[] := array(select x::text from unnest(p_units) x);
 begin
-  select * into u from public.records where id = p_unit;
-  bid := public.as_uuid(u.data->>'bom_ref');
-  if bid is null then return; end if;
   return query
-  with recursive t as (
-    select l.id, l.parent_id, l.item_id, l.qty ext, l.required, l.alt_group, l.line_no from public.mfg_bom_lines l where l.bom_id = bid and l.parent_id is null
-    union all
-    select l.id, l.parent_id, l.item_id, t.ext * l.qty, l.required and t.required, l.alt_group, l.line_no from public.mfg_bom_lines l join t on l.parent_id = t.id),
-  leaf as (select t.* from t where not exists (select 1 from public.mfg_bom_lines c where c.parent_id = t.id)),
-  -- in an alternate group the first line is the primary; the others are alternates (not required on their own)
-  prim as (select lf.*, (lf.alt_group is null or lf.line_no = min(lf.line_no) over (partition by lf.parent_id, lf.alt_group)) is_primary from leaf lf),
-  need as (select p.item_id, sum(p.ext) filter (where p.is_primary and p.required) bq, bool_and(not (p.is_primary and p.required)) opt from prim p group by p.item_id),
-  al as (select a.item_id, sum(a.qty - a.qty_consumed) q from public.mfg_allocs a where a.unit_id = p_unit and a.status = 'active' group by a.item_id),
-  co as (select x.item_id, sum(case when x.kind in ('consume', 'install') then x.qty when x.kind = 'remove' then -x.qty else 0 end) q from public.mfg_txns x where x.unit_id = p_unit and x.kind in ('consume', 'install', 'remove') group by x.item_id),
-  fr as (select s.item_id, sum(s.qty) q from public.mfg_stock s where s.state = 'Available' and s.item_id in (select n.item_id from need n) group by s.item_id),
-  po as (select (rq.data->>'item_ref')::uuid item_id,
+  with un as (select u.id uid, public.as_uuid(u.data->>'bom_ref') bid, u.data->>'config_ref' cref from public.records u where u.id = any (p_units) and u.section = 'operations.builds'),
+  bids as (select distinct un.bid from un where un.bid is not null),
+  need as (select x.bom_id, x.item_id, x.req bq, x.opt from public.mfg_bom_need x where x.bom_id in (select bid from bids)
+           union all select b2.bid, e.item_id, e.req, e.opt from bids b2 cross join lateral public._mfg_bom_explode(b2.bid) e where not exists (select 1 from public.mfg_bom_need x where x.bom_id = b2.bid)),
+  un_need as (select un.uid, un.bid, un.cref, n.item_id, n.bq, n.opt from un join need n on n.bom_id = un.bid),
+  al as (select a.unit_id uid, a.item_id, sum(a.qty - a.qty_consumed) q from public.mfg_allocs a where a.unit_id = any (p_units) and a.status = 'active' group by 1, 2),
+  co as (select x.unit_id uid, x.item_id, sum(case when x.kind in ('consume', 'install') then x.qty when x.kind = 'remove' then -x.qty else 0 end) q from public.mfg_txns x
+         where x.unit_id = any (p_units) and x.kind in ('consume', 'install', 'remove') group by 1, 2),
+  fr as (select s.item_id, sum(s.qty) q from public.mfg_stock s where s.state = 'Available' and s.item_id in (select n.item_id from need n) group by 1),
+  po as (select public.as_uuid(rq.data->>'build_ref') uid, public.as_uuid(rq.data->>'item_ref') item_id,
                 sum(case when po.id is not null and coalesce(po.status, '') not in ('Cancelled', 'Closed') then greatest(coalesce(public._num(po.data->'qty'), 0) - coalesce(public._num(po.data->'qty_received'), 0), 0) else 0 end) open_q,
                 sum(coalesce(public._num(po.data->'qty_received'), 0)) rec_q,
                 sum(case when po.id is null and coalesce(rq.status, '') not in ('Rejected', 'Cancelled', 'Closed') then coalesce(public._num(rq.data->'qty'), 0) else 0 end) req_q,
                 min(public._mfg_date(coalesce(po.data->>'eta', rq.data->>'needed_by'))) filter (where coalesce(po.status, rq.status, '') not in ('Cancelled', 'Closed', 'Received', 'Rejected')) eta
          from public.records rq left join public.records po on po.section = 'operations.procurement' and po.data->>'request_ref' = rq.id::text
-         where rq.section = 'operations.requests' and rq.data->>'build_ref' = p_unit::text and public.as_uuid(rq.data->>'item_ref') is not null group by 1),
-  alt as (select n.item_id, sum(s.qty) q from need n join public.mfg_alternates a on a.item_id = n.item_id and a.status = 'Approved' and (a.expires is null or a.expires >= current_date)
-            and (a.scope = 'all' or (a.scope = 'configuration' and a.config_id::text = u.data->>'config_ref') or (a.scope = 'bom' and a.bom_id = bid) or (a.scope = 'units' and p_unit = any (a.unit_ids)))
-          join public.mfg_stock s on s.item_id = a.substitute_id and s.state = 'Available' group by n.item_id)
-  select n.item_id, coalesce(n.bq, 0), coalesce(n.bq, 0), coalesce(al.q, 0), coalesce(co.q, 0), coalesce(fr.q, 0), coalesce(po.open_q, 0), coalesce(po.rec_q, 0), coalesce(po.req_q, 0), po.eta,
+         where rq.section = 'operations.requests' and rq.data->>'build_ref' = any (ids_t) and public.as_uuid(rq.data->>'item_ref') is not null group by 1, 2),
+  alt as (select n.uid, n.item_id, sum(s.qty) q from un_need n join public.mfg_alternates a on a.item_id = n.item_id and a.status = 'Approved' and (a.expires is null or a.expires >= current_date)
+            and (a.scope = 'all' or (a.scope = 'configuration' and a.config_id::text = n.cref) or (a.scope = 'bom' and a.bom_id = n.bid) or (a.scope = 'units' and n.uid = any (a.unit_ids)))
+          join public.mfg_stock s on s.item_id = a.substitute_id and s.state = 'Available' group by 1, 2)
+  select n.uid, n.item_id, coalesce(n.bq, 0), coalesce(n.bq, 0), coalesce(al.q, 0), coalesce(co.q, 0), coalesce(fr.q, 0), coalesce(po.open_q, 0), coalesce(po.rec_q, 0), coalesce(po.req_q, 0), po.eta,
          coalesce(po.eta < current_date - grace and po.open_q > 0, false), coalesce(alt.q, 0), coalesce(n.opt, false)
-  from need n left join al on al.item_id = n.item_id left join co on co.item_id = n.item_id left join fr on fr.item_id = n.item_id left join po on po.item_id = n.item_id left join alt on alt.item_id = n.item_id;
+  from un_need n left join al on al.uid = n.uid and al.item_id = n.item_id left join co on co.uid = n.uid and co.item_id = n.item_id left join fr on fr.item_id = n.item_id
+    left join po on po.uid = n.uid and po.item_id = n.item_id left join alt on alt.uid = n.uid and alt.item_id = n.item_id;
 end $$;
+revoke execute on function public._mfg_req_set(uuid[]) from public, anon, authenticated;
+
+create or replace function public._mfg_req(p_unit uuid, p_viewer uuid) returns table (item_id uuid, bom_qty numeric, required numeric, allocated numeric, consumed numeric,
+  free_available numeric, ordered numeric, received numeric, requested numeric, expected date, late boolean, alt_available numeric, optional boolean)
+language sql stable security definer set search_path = public as $$
+  select r.item_id, r.bom_qty, r.required, r.allocated, r.consumed, r.free_available, r.ordered, r.received, r.requested, r.expected, r.late, r.alt_available, r.optional from public._mfg_req_set(array[p_unit]) r
+$$;
 revoke execute on function public._mfg_req(uuid, uuid) from public, anon, authenticated;
 
 -- the material plan of one or more units (a unit, a product, a project, or a list; at most 100 units in one call —
 -- larger plans are narrowed, never computed unbounded). Free stock is shared between the units in order of their
 -- target date: each unit is offered only what the earlier ones did not take.
-create or replace function public.mfg_material_plan(p_scope jsonb) returns jsonb language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
-declare me uuid := public.mfg_viewer(); ids uuid[]; uid uuid; u public.records; rows jsonb := '[]'::jsonb; x record; taken jsonb := '{}'::jsonb; free numeric; offer numeric; short numeric; t numeric;
-  tot jsonb := '{}'::jsonb; cnt int; units jsonb := '[]'::jsonb; it public.records; cost boolean;
+create or replace function public.mfg_material_plan(p_scope jsonb) returns jsonb language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
+declare me uuid := public.mfg_viewer(); ids uuid[]; cnt int; cost boolean; res jsonb;
 begin
   if me is null then raise exception 'Not signed in' using errcode = '42501'; end if;
   cost := public._mfg_cost_ok(me);
@@ -1493,34 +1564,46 @@ begin
     and public.record_visible_for(me, r);
   cnt := coalesce(cardinality(ids), 0);
   if cnt > 100 then raise exception 'The plan covers % units: narrow it to at most 100 (a product, a project or a list)', cnt using errcode = '54000'; end if;
-  foreach uid in array coalesce(ids, '{}') loop
-    select * into u from public.records where id = uid;
-    units := units || jsonb_build_array(jsonb_build_object('id', u.id, 'number', u.data->>'number', 'title', u.title, 'status', u.status, 'target', u.data->>'target'));
-    for x in select * from public._mfg_req(u.id, me) loop
-      it := public._mfg_item(me, x.item_id);
-      if it.id is null then continue; end if; -- an item this person may not open takes no part (no count, no shortage)
-      free := greatest(x.free_available - coalesce((taken->>(x.item_id::text))::numeric, 0), 0);
-      short := greatest(x.required - x.consumed - x.allocated, 0);
-      offer := least(free, short);
-      taken := taken || jsonb_build_object(x.item_id::text, coalesce((taken->>(x.item_id::text))::numeric, 0) + offer);
-      t := greatest(short - offer, 0);
-      rows := rows || jsonb_build_array(jsonb_strip_nulls(jsonb_build_object('unit', u.id, 'unit_number', u.data->>'number', 'item', x.item_id, 'item_number', it.data->>'number', 'item_title', it.title,
-        'item_type', it.data->>'item_type', 'uom', it.data->>'uom', 'serialized', coalesce((it.data->>'serialized')::boolean, false), 'preferred_supplier', it.data->>'vendor_ref_title', 'vendor_ref', it.data->>'vendor_ref',
-        'lead_time_days', public._num(it.data->'lead_time_days'),
-        'bom_qty', x.bom_qty, 'required', x.required, 'allocated', x.allocated, 'consumed', x.consumed, 'available', free, 'allocate', offer,
-        'shortage', t, 'ordered', x.ordered, 'received', x.received, 'requested', x.requested, 'purchase_required', greatest(t - x.ordered - x.requested, 0),
-        'expected', x.expected, 'late', x.late, 'alternate_available', nullif(x.alt_available, 0), 'optional', case when x.optional then true end,
-        'blocked', t > 0 and (x.ordered + x.requested < t or x.late),
-        'ref_cost', case when cost then public._num(it.data->'ref_cost') end, 'currency', case when cost then it.data->>'currency' end)));
-    end loop;
-  end loop;
-  return jsonb_build_object('units', units, 'rows', rows,
-    'summary', jsonb_build_object('units', cnt, 'lines', jsonb_array_length(rows),
-      'short_lines', (select count(*) from jsonb_array_elements(rows) r where (r->>'shortage')::numeric > 0),
-      'purchase_lines', (select count(*) from jsonb_array_elements(rows) r where (r->>'purchase_required')::numeric > 0),
-      'late_lines', (select count(*) from jsonb_array_elements(rows) r where coalesce((r->>'late')::boolean, false)),
-      'blocked_lines', (select count(*) from jsonb_array_elements(rows) r where coalesce((r->>'blocked')::boolean, false))),
-    'rule', 'Free stock = Available (allocated stock is not free); shared between the units in order of their target date. Shortage = required − consumed − allocated − offered free stock.');
+  -- free stock is shared between the units in order of their target date: what unit i is offered is
+  -- min(free, the shortages of units 1..i) − min(free, the shortages of units 1..i−1)
+  with u as (select r.id, r.data->>'number' num, r.title, r.status, r.data->>'target' target, o.ord from unnest(ids) with ordinality o(id, ord) join public.records r on r.id = o.id),
+  q as (select x.* from public._mfg_req_set(ids) x),
+  it as (select i.id, i.data->>'number' inum from public.records i where i.id in (select distinct q.item_id from q) and public._mfg_ivis(me, i)), -- an item this person may not open takes no part
+  j as (select q.*, u.ord, u.num unum, greatest(q.required - q.consumed - q.allocated, 0) short, it.inum from q join u on u.id = q.unit_id join it on it.id = q.item_id),
+  -- only lines with a shortage of an item that has free stock take part in the sharing; the others are offered nothing
+  w as (select j.*, sum(j.short) over (partition by j.item_id order by j.ord rows unbounded preceding) cs from j where j.free_available > 0 and j.short > 0),
+  x as (select w.*, least(w.free_available, w.cs - w.short) prev_taken, least(w.free_available, w.cs) - least(w.free_available, w.cs - w.short) offer from w
+        union all select j.*, 0::numeric, 0::numeric, 0::numeric from j where not (j.free_available > 0 and j.short > 0)),
+  y as (select x.*, greatest(x.short - x.offer, 0) t from x),
+  att as (select y.*, greatest(y.t - y.ordered - y.requested, 0) preq, y.t > 0 and (y.ordered + y.requested < y.t or y.late) blk from y),
+  -- one unit: every line; several units: the lines that need attention (short, ordered, requested, allocated or late),
+  -- at most p_scope.limit of them (default 2000; the totals count all of them), the totals per unit and per item
+  shown as (select a.* from att a where cnt <= 1 or a.t > 0 or a.ordered > 0 or a.requested > 0 or a.allocated > 0 or a.late
+            order by a.ord, a.inum limit case when cnt <= 1 then null else greatest(coalesce((p_scope->>'limit')::int, 2000), 1) end),
+  shown_i as (select sh.*, i.data idata, i.title ititle from shown sh join public.records i on i.id = sh.item_id)
+  select jsonb_build_object('units', coalesce((select jsonb_agg(jsonb_build_object('id', u.id, 'number', u.num, 'title', u.title, 'status', u.status, 'target', u.target) order by u.ord) from u), '[]'::jsonb),
+    'rows', coalesce((select jsonb_agg(jsonb_strip_nulls(jsonb_build_object('unit', y.unit_id, 'unit_number', y.unum, 'item', y.item_id, 'item_number', y.inum, 'item_title', y.ititle,
+        'item_type', y.idata->>'item_type', 'uom', y.idata->>'uom', 'serialized', coalesce((y.idata->>'serialized')::boolean, false), 'preferred_supplier', y.idata->>'vendor_ref_title', 'vendor_ref', y.idata->>'vendor_ref',
+        'lead_time_days', public._num(y.idata->'lead_time_days'),
+        'bom_qty', y.bom_qty, 'required', y.required, 'allocated', y.allocated, 'consumed', y.consumed, 'available', greatest(y.free_available - y.prev_taken, 0), 'allocate', y.offer,
+        'shortage', y.t, 'ordered', y.ordered, 'received', y.received, 'requested', y.requested, 'purchase_required', y.preq,
+        'expected', y.expected, 'late', y.late, 'alternate_available', nullif(y.alt_available, 0), 'optional', case when y.optional then true end, 'blocked', y.blk,
+        'ref_cost', case when cost then public._num(y.idata->'ref_cost') end, 'currency', case when cost then y.idata->>'currency' end)) order by y.ord, y.inum) from shown_i y), '[]'::jsonb),
+    'rows_total', (select count(*) from att a where cnt <= 1 or a.t > 0 or a.ordered > 0 or a.requested > 0 or a.allocated > 0 or a.late),
+    'per_unit', case when cnt > 1 then (select coalesce(jsonb_agg(z.o order by z.ord), '[]'::jsonb) from (select a.ord, jsonb_build_object('unit', a.unit_id, 'unit_number', min(a.unum), 'lines', count(*), 'short_lines', count(*) filter (where a.t > 0),
+        'purchase_lines', count(*) filter (where a.preq > 0), 'blocked_lines', count(*) filter (where a.blk), 'late_lines', count(*) filter (where a.late)) o from att a group by a.ord, a.unit_id) z) end,
+    'items', case when cnt > 1 then (select coalesce(jsonb_agg(jsonb_strip_nulls(z.o || jsonb_build_object('item_title', i.title)) order by z.short desc, z.num), '[]'::jsonb) from (
+        select a.item_id, max(a.inum) num, sum(a.t) short, jsonb_build_object('item', a.item_id, 'item_number', max(a.inum),
+          'required', sum(a.required), 'allocated', sum(a.allocated), 'consumed', sum(a.consumed), 'free', max(a.free_available), 'allocate', sum(a.offer), 'shortage', sum(a.t), 'ordered', sum(a.ordered),
+          'requested', sum(a.requested), 'purchase_required', sum(a.preq), 'units_short', count(*) filter (where a.t > 0), 'expected', min(a.expected), 'late', case when bool_or(a.late) then true end, 'blocked', case when bool_or(a.blk) then true end) o
+        from att a where a.t > 0 or a.ordered > 0 or a.requested > 0 or a.allocated > 0 or a.late group by a.item_id having sum(a.t) > 0 or sum(a.ordered + a.requested) > 0
+        order by sum(a.t) desc, max(a.inum) limit 500) z join public.records i on i.id = z.item_id) end,
+    'items_total', case when cnt > 1 then (select count(distinct a.item_id) from att a where a.t > 0 or a.ordered > 0 or a.requested > 0) end,
+    'summary', (select jsonb_build_object('units', cnt, 'lines', count(*), 'short_lines', count(*) filter (where a.t > 0),
+        'purchase_lines', count(*) filter (where a.preq > 0), 'late_lines', count(*) filter (where a.late), 'blocked_lines', count(*) filter (where a.blk)) from att a),
+    'rule', 'Free stock = Available (allocated stock is not free); shared between the units in order of their target date. Shortage = required − consumed − allocated − offered free stock.')
+  into res;
+  return res;
 end $$;
 revoke execute on function public.mfg_material_plan(jsonb) from public, anon;
 grant execute on function public.mfg_material_plan(jsonb) to authenticated;
@@ -2096,7 +2179,7 @@ begin
     from public.mfg_stock s join public.records i on i.id = s.item_id join public.mfg_locations l on l.id = s.location_id left join public.mfg_lots lt on lt.id = s.lot_id
     where s.qty > 0 and (p_item is null or s.item_id = p_item) and (p_location is null or s.location_id = p_location) and (p_state is null or s.state = p_state)
       and (q is null or public.mfg_search_text(i.title, i.data) like '%' || q || '%' or lower(l.code) like '%' || q || '%' or lower(coalesce(lt.lot_no, '')) like '%' || q || '%')
-      and public.record_visible_for(me, i)
+      and public._mfg_ivis(me, i)
     order by i.data->>'number', l.code limit greatest(1, least(coalesce(p_limit, 200), 1000))) z), '[]'::jsonb);
 end $$;
 revoke execute on function public.mfg_inventory(text, uuid, uuid, text, int) from public, anon;
@@ -2144,7 +2227,7 @@ begin
     select jsonb_strip_nulls(jsonb_build_object('id', s.id, 'serial', s.serial, 'agron_serial', s.agron_serial, 'state', s.state, 'item', i.id, 'item_number', i.data->>'number', 'item_title', i.title,
       'location', l.code, 'unit', u.id, 'unit_number', u.data->>'number')) x
     from public.mfg_serials s join public.records i on i.id = s.item_id left join public.mfg_locations l on l.id = s.location_id left join public.records u on u.id = s.unit_id
-    where lower(s.serial || ' ' || coalesce(s.agron_serial, '')) like '%' || q || '%' and public.record_visible_for(me, i) and (s.unit_id is null or public.record_visible_for(me, u))
+    where lower(s.serial || ' ' || coalesce(s.agron_serial, '')) like '%' || q || '%' and public._mfg_ivis(me, i) and (s.unit_id is null or public.record_visible_for(me, u))
     order by s.serial limit greatest(1, least(coalesce(p_limit, 50), 200))) z), '[]'::jsonb);
 end $$;
 revoke execute on function public.mfg_serial_search(text, int) from public, anon;
@@ -2477,11 +2560,12 @@ revoke execute on function public.mfg_doc_impact(uuid) from public, anon;
 grant execute on function public.mfg_doc_impact(uuid) to authenticated;
 
 -- the shop floor: only what the person can act on (no values, no customer)
-create or replace function public.mfg_queue() returns jsonb language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
-declare me uuid := public.mfg_viewer(); insp boolean;
+create or replace function public.mfg_queue() returns jsonb language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
+declare me uuid := public.mfg_viewer(); insp boolean; vu text[];
 begin
   if me is null or not public._mfg_can_read(me, 'operations.work_orders') then raise exception 'Not allowed' using errcode = '42501'; end if;
   insp := public.has_cap(me, 'quality_inspector');
+  vu := public._mfg_hidden_units(me); -- (the restricted units this person may not open)
   create temp table if not exists mfg_q (id uuid, number text, title text, status text, unit text, unit_id uuid, operation text, planned text, mine boolean, done_today boolean, doc text, blocked_reason text, stale boolean) on commit drop;
   truncate mfg_q;
   insert into mfg_q
@@ -2489,18 +2573,20 @@ begin
     coalesce(w.data->>'assignee_id', '') = me::text or coalesce(w.data->'team_ids', '[]'::jsonb) ? me::text,
     w.status = 'Completed' and left(coalesce(w.data->>'completed_at', ''), 10) = to_char(now() at time zone 'utc', 'YYYY-MM-DD'),
     (select string_agg(coalesce(x->>'doc_number', x->>'title') || coalesce(' v' || (x->>'version'), ''), ', ') from jsonb_array_elements(coalesce(w.data->'documents', '[]'::jsonb)) x),
-    w.data->>'blocked_reason', jsonb_array_length(public._mfg_doc_stale(w)) > 0
+    w.data->>'blocked_reason', jsonb_typeof(w.data->'documents') = 'array' and jsonb_array_length(w.data->'documents') > 0 and jsonb_array_length(public._mfg_doc_stale(w)) > 0
   from public.records w
   where w.section = 'operations.work_orders' and (w.status in ('Ready', 'In Progress', 'Blocked', 'Planned') or (w.status = 'Completed' and left(coalesce(w.data->>'completed_at', ''), 10) = to_char(now() at time zone 'utc', 'YYYY-MM-DD')))
-    and public.record_visible_for(me, w);
+    and public._mfg_cvis(me, w, vu);
   return jsonb_build_object(
-    'my_work', coalesce((select jsonb_agg(to_jsonb(q) order by q.planned nulls last, q.number) from mfg_q q where q.mine and q.status in ('Ready', 'In Progress', 'Blocked', 'Planned')), '[]'::jsonb),
-    'ready', coalesce((select jsonb_agg(to_jsonb(q) order by q.planned nulls last, q.number) from mfg_q q where q.status = 'Ready'), '[]'::jsonb),
-    'in_progress', coalesce((select jsonb_agg(to_jsonb(q) order by q.number) from mfg_q q where q.status = 'In Progress'), '[]'::jsonb),
-    'blocked', coalesce((select jsonb_agg(to_jsonb(q) order by q.number) from mfg_q q where q.status = 'Blocked'), '[]'::jsonb),
+    'my_work', coalesce((select jsonb_agg(to_jsonb(z) order by z.planned nulls last, z.number) from (select * from mfg_q q where q.mine and q.status in ('Ready', 'In Progress', 'Blocked', 'Planned') order by q.planned nulls last, q.number limit 200) z), '[]'::jsonb),
+    'ready', coalesce((select jsonb_agg(to_jsonb(z) order by z.planned nulls last, z.number) from (select * from mfg_q q where q.status = 'Ready' order by q.planned nulls last, q.number limit 200) z), '[]'::jsonb),
+    'in_progress', coalesce((select jsonb_agg(to_jsonb(z) order by z.number) from (select * from mfg_q q where q.status = 'In Progress' order by q.number limit 200) z), '[]'::jsonb),
+    'blocked', coalesce((select jsonb_agg(to_jsonb(z) order by z.number) from (select * from mfg_q q where q.status = 'Blocked' order by q.number limit 200) z), '[]'::jsonb),
+    'counts', (select jsonb_build_object('my_work', count(*) filter (where q.mine and q.status in ('Ready', 'In Progress', 'Blocked', 'Planned')), 'ready', count(*) filter (where q.status = 'Ready'),
+       'in_progress', count(*) filter (where q.status = 'In Progress'), 'blocked', count(*) filter (where q.status = 'Blocked'), 'completed_today', count(*) filter (where q.done_today)) from mfg_q q),
     'inspection_required', coalesce((select jsonb_agg(jsonb_build_object('id', r.id, 'number', r.data->>'number', 'title', r.title, 'unit', r.data->>'build_ref_title', 'kind', r.data->>'inspection_kind', 'status', r.status) order by r.created_at)
        from public.records r where r.section = 'operations.quality' and r.data ? 'inspection_kind' and r.status in ('Planned', 'Inspection') and coalesce(r.data->>'recorded_at', '') = ''
-         and (insp or coalesce(r.data->>'inspector_id', '') = me::text) and public.record_visible_for(me, r)), '[]'::jsonb),
+         and (insp or coalesce(r.data->>'inspector_id', '') = me::text) and public._mfg_cvis(me, r, vu) limit 200), '[]'::jsonb),
     'completed_today', coalesce((select jsonb_agg(to_jsonb(q) order by q.number) from mfg_q q where q.done_today), '[]'::jsonb),
     'can_inspect', insp);
 end $$;
@@ -2524,7 +2610,7 @@ begin
     -- what is allocated to this unit for the step's materials, and the serials allocated to it (to choose from)
     'allocated', coalesce((select jsonb_agg(jsonb_strip_nulls(jsonb_build_object('alloc', a.id, 'item', i.id, 'number', i.data->>'number', 'title', i.title, 'qty', a.qty - a.qty_consumed, 'serial_id', a.serial_id,
         'serial', (select serial from public.mfg_serials where id = a.serial_id), 'serialized', coalesce((i.data->>'serialized')::boolean, false))) order by i.data->>'number')
-      from public.mfg_allocs a join public.records i on i.id = a.item_id where a.unit_id = u.id and a.status = 'active' and public.record_visible_for(me, i)), '[]'::jsonb));
+      from public.mfg_allocs a join public.records i on i.id = a.item_id where a.unit_id = u.id and a.status = 'active' and public._mfg_ivis(me, i)), '[]'::jsonb));
 end $$;
 revoke execute on function public.mfg_wo(uuid) from public, anon;
 grant execute on function public.mfg_wo(uuid) to authenticated;
@@ -2930,7 +3016,7 @@ revoke execute on function public.mfg_asbuilt(uuid, int) from public, anon;
 grant execute on function public.mfg_asbuilt(uuid, int) to authenticated;
 
 -- planned (the pinned BOM revision) vs built (what is installed and consumed): deterministic, line by item
-create or replace function public.mfg_planned_vs_built(p_unit uuid) returns jsonb language plpgsql stable security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+create or replace function public.mfg_planned_vs_built(p_unit uuid) returns jsonb language plpgsql stable security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 declare me uuid := public.mfg_viewer(); u public.records; b public.records; latest uuid;
 begin
   u := public._mfg_unit(me, p_unit);
@@ -2946,23 +3032,24 @@ begin
     rows as (
       select e.item_id expected, e.required eq, coalesce(g.q, 0) got_q,
              (select jsonb_agg(jsonb_build_object('item', s.sub, 'qty', g2.q)) from sub s join got g2 on g2.item_id = s.sub where s.orig = e.item_id) subs,
-             (select jsonb_agg(sr.serial order by sr.serial) from public.mfg_installs x join public.mfg_serials sr on sr.id = x.serial_id where x.unit_id = u.id and x.removed_at is null and x.item_id = e.item_id) serials
-      from exp e left join got g on g.item_id = e.item_id),
+             ser.serials
+      from exp e left join got g on g.item_id = e.item_id
+        left join (select x.item_id, jsonb_agg(sr.serial order by sr.serial) serials from public.mfg_installs x join public.mfg_serials sr on sr.id = x.serial_id where x.unit_id = u.id and x.removed_at is null group by x.item_id) ser on ser.item_id = e.item_id),
     extra as (select g.item_id, g.q from got g where g.item_id not in (select item_id from exp) and g.item_id not in (select s.sub from sub s where s.orig in (select item_id from exp))),
-    lab as (select i.id, case when public.record_visible_for(me, i) then jsonb_build_object('id', i.id, 'number', i.data->>'number', 'title', i.title) else jsonb_build_object('hidden', true, 'title', 'An item you may not open') end j
+    lab as (select i.id, case when public._mfg_ivis(me, i) then jsonb_build_object('id', i.id, 'number', i.data->>'number', 'title', i.title) else jsonb_build_object('hidden', true, 'title', 'An item you may not open') end j
             from public.records i where i.id in (select expected from rows union select item_id from extra union select (x->>'item')::uuid from rows, jsonb_array_elements(coalesce(rows.subs, '[]'::jsonb)) x))
     select jsonb_build_object(
       'bom', jsonb_build_object('id', b.id, 'number', b.data->>'number', 'revision', b.data->>'revision', 'status', b.status),
       'configuration_difference', case when latest is not null and latest <> b.id then jsonb_build_object('note', 'A later approved BOM revision applies to new units of this configuration', 'latest', (select jsonb_build_object('id', l.id, 'revision', l.data->>'revision') from public.records l where l.id = latest)) end,
-      'rows', coalesce((select jsonb_agg(jsonb_strip_nulls(jsonb_build_object('expected', (select j from lab where lab.id = r.expected), 'expected_qty', r.eq, 'installed_qty', r.got_q,
+      'rows', coalesce((select jsonb_agg(jsonb_strip_nulls(jsonb_build_object('expected', le.j, 'expected_qty', r.eq, 'installed_qty', r.got_q,
           'substitutes', (select jsonb_agg(jsonb_build_object('item', (select j from lab where lab.id = (x->>'item')::uuid), 'qty', x->'qty')) from jsonb_array_elements(coalesce(r.subs, '[]'::jsonb)) x),
           'serials', r.serials,
           'status', case when r.got_q >= r.eq and r.got_q = r.eq then 'match'
                          when r.got_q > r.eq then 'more than expected'
                          when r.got_q + coalesce((select sum((x->>'qty')::numeric) from jsonb_array_elements(coalesce(r.subs, '[]'::jsonb)) x), 0) >= r.eq and r.subs is not null then 'substitute'
                          when r.got_q = 0 then 'missing' else 'quantity difference' end,
-          'difference', r.got_q - r.eq)) order by (select j->>'number' from lab where lab.id = r.expected)) from rows r), '[]'::jsonb),
-      'extra', coalesce((select jsonb_agg(jsonb_build_object('item', (select j from lab where lab.id = x.item_id), 'qty', x.q)) from extra x), '[]'::jsonb),
+          'difference', r.got_q - r.eq)) order by le.j->>'number') from rows r left join lab le on le.id = r.expected), '[]'::jsonb),
+      'extra', coalesce((select jsonb_agg(jsonb_build_object('item', lx.j, 'qty', x.q)) from extra x left join lab lx on lx.id = x.item_id), '[]'::jsonb),
       'method', 'Deterministic: the required lines of the pinned revision against the installation and consumption records; approved alternates count as substitutes; anything else installed is extra'));
 end $$;
 revoke execute on function public.mfg_planned_vs_built(uuid) from public, anon;
@@ -2986,13 +3073,13 @@ begin
     'work_order', coalesce((select jsonb_agg(jsonb_build_object('id', w.id, 'title', coalesce(w.data->>'number', '') || ' ' || w.title, 'status', w.status)) from public.records w
       where w.section = 'operations.work_orders' and w.status not in ('Completed', 'Cancelled') and w.data->>'build_ref' in (select u.id::text from public.records u where u.section = 'operations.builds' and u.data->>'bom_ref' in (select x::text from unnest(olds) x))
         and public.record_visible_for(me, w)), '[]'::jsonb),
-    'item', coalesce((select jsonb_agg(jsonb_build_object('id', i.id, 'title', coalesce(i.data->>'number', '') || ' ' || i.title)) from public.records i where i.id = any (items) and public.record_visible_for(me, i)), '[]'::jsonb),
+    'item', coalesce((select jsonb_agg(jsonb_build_object('id', i.id, 'title', coalesce(i.data->>'number', '') || ' ' || i.title)) from public.records i where i.id = any (items) and public._mfg_ivis(me, i)), '[]'::jsonb),
     'document', coalesce((select jsonb_agg(distinct jsonb_build_object('id', d.id, 'title', d.title)) from public.records c, jsonb_array_elements(coalesce(c.data->'documents', '[]'::jsonb)) x join public.records d on d.id = public.as_uuid(x->>'doc_ref')
       where c.id = any (cfgs) and public.record_visible_for(me, d)), '[]'::jsonb),
     'test_procedure', coalesce((select jsonb_agg(distinct jsonb_build_object('id', t.id, 'title', coalesce(t.data->>'code', '') || ' v' || coalesce(t.data->>'version', '') || ' ' || t.title)) from public.records c, jsonb_array_elements_text(coalesce(c.data->'required_tests', '[]'::jsonb)) code
       join public.records t on t.section = 'technical.test_procedures' and t.data->>'code' = code and t.status = 'Approved' where c.id = any (cfgs) and public.record_visible_for(me, t)), '[]'::jsonb),
     'inventory', coalesce((select jsonb_agg(jsonb_build_object('id', i.id, 'title', coalesce(i.data->>'number', '') || ' ' || i.title, 'qty', (select sum(s.qty) from public.mfg_stock s where s.item_id = i.id)))
-      from public.records i where i.id = any (items) and exists (select 1 from public.mfg_stock s where s.item_id = i.id and s.qty > 0) and public.record_visible_for(me, i)), '[]'::jsonb),
+      from public.records i where i.id = any (items) and exists (select 1 from public.mfg_stock s where s.item_id = i.id and s.qty > 0) and public._mfg_ivis(me, i)), '[]'::jsonb),
     'purchase', coalesce((select jsonb_agg(jsonb_build_object('id', r.id, 'title', coalesce(r.data->>'number', '') || ' ' || r.title, 'status', r.status)) from public.records r
       where r.section = 'operations.requests' and public.as_uuid(r.data->>'item_ref') = any (items) and r.status not in ('Closed', 'Rejected', 'Cancelled') and public.record_visible_for(me, r)), '[]'::jsonb),
     'confirmed', coalesce((select jsonb_agg(jsonb_build_object('kind', o.kind, 'id', o.object_id, 'by', public._wf_name(o.confirmed_by), 'at', o.confirmed_at, 'note', o.note)) from public.mfg_ecr_objects o where o.ecr_id = e.id and o.confirmed_at is not null), '[]'::jsonb));
@@ -3061,7 +3148,7 @@ begin
     'purchased_material', coalesce((select jsonb_agg(jsonb_build_object('id', r.id, 'number', r.data->>'number', 'title', r.title, 'status', r.status)) from public.records r
       where r.section in ('operations.requests') and public.as_uuid(r.data->>'item_ref') = any (removed) and r.status not in ('Closed', 'Rejected', 'Cancelled') and public.record_visible_for(me, r)), '[]'::jsonb),
     'inventory', coalesce((select jsonb_agg(jsonb_build_object('item', i.id, 'number', i.data->>'number', 'title', i.title, 'qty', (select sum(s.qty) from public.mfg_stock s where s.item_id = i.id)))
-      from public.records i where i.id = any (removed) and exists (select 1 from public.mfg_stock s where s.item_id = i.id and s.qty > 0) and public.record_visible_for(me, i)), '[]'::jsonb),
+      from public.records i where i.id = any (removed) and exists (select 1 from public.mfg_stock s where s.item_id = i.id and s.qty > 0) and public._mfg_ivis(me, i)), '[]'::jsonb),
     'documents', coalesce((select jsonb_agg(jsonb_build_object('id', o.object_id, 'title', d.title)) from public.mfg_ecr_objects o join public.records d on d.id = o.object_id where o.ecr_id = e.id and o.kind = 'document' and public.record_visible_for(me, d)), '[]'::jsonb),
     'tests', coalesce((select jsonb_agg(jsonb_build_object('id', o.object_id, 'title', d.title)) from public.mfg_ecr_objects o join public.records d on d.id = o.object_id where o.ecr_id = e.id and o.kind = 'test_procedure' and public.record_visible_for(me, d)), '[]'::jsonb),
     'asbuilt_impact', 'Completed units keep their As-Built; a unit that incorporates the change shows the new revision in its next As-Built. Nothing changes without a recorded decision.',
@@ -3096,66 +3183,132 @@ revoke execute on function public.mfg_unit_disposition(uuid, uuid, text, text) f
 grant execute on function public.mfg_unit_disposition(uuid, uuid, text, text) to authenticated;
 
 /* ----- blockers and readiness: deterministic rules; each reason says what and where (for the viewer's records) ----- */
-create or replace function public._mfg_blockers(u public.records, p_viewer uuid) returns jsonb language plpgsql stable security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
-declare out jsonb := '[]'::jsonb; x record; c public.records; b public.records; rt jsonb := public._mfg_routing(u); k text; lastr text; t record;
-  add_ jsonb;
+-- Build blockers of a set of units in one pass (the dashboard, the lists and the unit view use the same rule, so a
+-- number and the list it opens can never disagree). Set-based: the BOMs pinned by the units are exploded once, stock,
+-- allocations, consumption and purchases are read once for all units, and visibility is checked once per viewer
+-- (a record linked to a unit the viewer may open follows the unit: role access, US persons only, company — exactly
+-- what record_visible_for answers for it). A unit is a record value, so a row being changed (NEW) is checked as it
+-- will be. A NULL viewer means no visibility filter (the status prerequisites of the record itself).
+create or replace function public._mfg_blockers_set(p_viewer uuid, p_units public.records[], p_cap int default null) returns table (unit_id uuid, blockers jsonb, blocks int, missing int, late_po int, total int)
+-- (no JIT: compiling this large query costs seconds and buys nothing at this size)
+language plpgsql stable security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
+declare grace int := coalesce((public.mfg_cfg()->>'late_purchase_grace_days')::int, 0);
+  v_ok boolean := true; v_all boolean := true; v_secs text[] := '{}'; v_us boolean := true; v_ext boolean := false; v_company text; p record;
+  ids uuid[] := array(select (x).id from unnest(p_units) x); ids_t text[] := array(select (x).id::text from unnest(p_units) x);
 begin
-  select * into c from public.records where id = public.as_uuid(u.data->>'config_ref');
-  select * into b from public.records where id = public.as_uuid(u.data->>'bom_ref');
-  if c.id is null then out := out || jsonb_build_array(jsonb_build_object('kind', 'missing_approval', 'level', 'block', 'text', 'No configuration chosen'));
-  elsif c.status not in ('Approved', 'Superseded') then out := out || jsonb_build_array(jsonb_build_object('kind', 'missing_approval', 'level', 'block', 'text', 'Configuration ' || coalesce(c.data->>'code', '') || ' v' || coalesce(c.data->>'version', '') || ' is ' || c.status)); end if;
-  if coalesce(u.data->>'released_at', '') = '' then out := out || jsonb_build_array(jsonb_build_object('kind', 'missing_approval', 'level', 'block', 'text', 'Not released (configuration and BOM revision not pinned)'));
-  elsif b.status not in ('Approved', 'Superseded') then out := out || jsonb_build_array(jsonb_build_object('kind', 'missing_approval', 'level', 'block', 'text', 'BOM ' || coalesce(b.data->>'number', '') || ' rev ' || coalesce(b.data->>'revision', '') || ' is ' || b.status)); end if;
-  -- material: missing (no order covers it), late purchases, rejected or quarantined material received for this unit
-  if b.id is not null then
-    for x in select r.*, i.data->>'number' num, i.title ttl, coalesce((i.data->>'critical')::boolean, false) crit from public._mfg_req(u.id, p_viewer) r join public.records i on i.id = r.item_id
-             where (p_viewer is null or public.record_visible_for(p_viewer, i)) and r.required > 0 loop
-      if x.required - x.consumed - x.allocated - x.free_available > 0 and x.ordered + x.requested < x.required - x.consumed - x.allocated - x.free_available then
-        out := out || jsonb_build_array(jsonb_build_object('kind', 'missing_material', 'level', 'block', 'item', x.item_id, 'critical', x.crit,
-          'text', 'Missing ' || trim_scale(x.required - x.consumed - x.allocated - x.free_available - x.ordered - x.requested) || ' × ' || x.num || ' ' || x.ttl || ' (not in stock, not ordered)'));
-      end if;
-      if x.late then out := out || jsonb_build_array(jsonb_build_object('kind', 'late_purchase', 'level', 'block', 'item', x.item_id, 'text', 'Purchase late for ' || x.num || ' ' || x.ttl || ' (expected ' || x.expected || ')')); end if;
-    end loop;
-    for x in select t2.item_id, i.data->>'number' num, sum(t2.qty) q, t2.to_state from public.mfg_txns t2 join public.records i on i.id = t2.item_id
-             where t2.unit_id = u.id and t2.kind in ('inspect', 'state') and t2.to_state in ('Rejected', 'Quarantine') and (p_viewer is null or public.record_visible_for(p_viewer, i)) group by t2.item_id, i.data->>'number', t2.to_state loop
-      out := out || jsonb_build_array(jsonb_build_object('kind', 'rejected_material', 'level', 'attention', 'item', x.item_id, 'text', trim_scale(x.q) || ' × ' || x.num || ' ' || lower(x.to_state) || ' at inspection'));
-    end loop;
+  if p_viewer is not null then
+    select pp.role, pp.us_person, pp.company into p from public.profiles pp where pp.id = p_viewer and not pp.disabled;
+    if not found then v_ok := false;
+    else v_all := p.role in ('owner', 'admin'); v_secs := array(select a.section from public.section_access a where a.role = p.role);
+         v_us := coalesce(p.us_person, false); v_ext := coalesce(p.role in ('partner', 'vendor', 'investor', 'pending'), true); v_company := p.company; end if;
   end if;
+  return query
+  with un as (select x.*, (p_viewer is null or public.record_visible_for(p_viewer, x)) uvis, public.as_uuid(x.data->>'bom_ref') bom_ref, public.as_uuid(x.data->>'config_ref') config_ref
+                        from unnest(p_units) x),
+  cb as (select un.id uid, c.id cid, c.status cst, c.data cdata, b.id bid, b.status bst, b.data bdata, coalesce(un.data->>'released_at', '') <> '' released
+         from un left join public.records c on c.id = un.config_ref left join public.records b on b.id = un.bom_ref),
+  r_def as (
+    select cb.uid, 1 ord, '1' sk, 'missing_approval' kind, 'block' lvl, 'No configuration chosen' txt, null::uuid item, null::uuid ref, null::boolean crit, null::numeric mq, null::text mnum, null::text mttl, null::date meta from cb where cb.cid is null
+    union all select cb.uid, 1, '2', 'missing_approval', 'block', 'Configuration ' || coalesce(cb.cdata->>'code', '') || ' v' || coalesce(cb.cdata->>'version', '') || ' is ' || cb.cst, null, null, null, null, null, null, null
+      from cb where cb.cid is not null and coalesce(cb.cst not in ('Approved', 'Superseded'), false)
+    union all select cb.uid, 1, '3', 'missing_approval', 'block', 'Not released (configuration and BOM revision not pinned)', null, null, null, null, null, null, null from cb where not cb.released
+    union all select cb.uid, 1, '4', 'missing_approval', 'block', 'BOM ' || coalesce(cb.bdata->>'number', '') || ' rev ' || coalesce(cb.bdata->>'revision', '') || ' is ' || cb.bst, null, null, null, null, null, null, null
+      from cb where cb.released and coalesce(cb.bst not in ('Approved', 'Superseded'), false)),
+  -- material: the requirement of each pinned BOM (exploded once per BOM), then per unit
+  bids as (select distinct cb.bid from cb where cb.bid is not null),
+  need as (select x.bom_id, x.item_id, x.req from public.mfg_bom_need x where x.bom_id in (select bid from bids)
+            union all select b2.bid, e.item_id, e.req from bids b2 cross join lateral public._mfg_bom_explode(b2.bid) e where not exists (select 1 from public.mfg_bom_need x where x.bom_id = b2.bid)),
+  -- free stock does not depend on the unit: it is read once per item of the pinned BOMs, with the item's visibility
+  fr as (select s.item_id, sum(s.qty) q from public.mfg_stock s where s.state = 'Available' and s.item_id in (select n.item_id from need n) group by 1),
+  nf as (select n.bom_id, n.item_id, n.req, coalesce(fr.q, 0) free, i.data->>'number' num, i.title ttl, coalesce((i.data->>'critical')::boolean, false) crit
+         from need n join public.records i on i.id = n.item_id left join fr on fr.item_id = n.item_id where n.req > 0 and (p_viewer is null or (v_ok and (v_all or 'technical.items' = any (v_secs)) and (i.controlled is not distinct from false or v_us) and (not v_ext or coalesce(i.company = '*' or i.company = v_company, false))))),
+  al as (select a.unit_id uid, a.item_id, sum(a.qty - a.qty_consumed) q from public.mfg_allocs a where a.unit_id = any (ids) and a.status = 'active' group by 1, 2),
+  co as (select x.unit_id uid, x.item_id, sum(case when x.kind in ('consume', 'install') then x.qty when x.kind = 'remove' then -x.qty else 0 end) q from public.mfg_txns x
+         where x.unit_id = any (ids) and x.kind in ('consume', 'install', 'remove') group by 1, 2),
+  po as (select public.as_uuid(rq.data->>'build_ref') uid, public.as_uuid(rq.data->>'item_ref') item_id,
+                sum(case when po.id is not null and coalesce(po.status, '') not in ('Cancelled', 'Closed') then greatest(coalesce(public._num(po.data->'qty'), 0) - coalesce(public._num(po.data->'qty_received'), 0), 0) else 0 end) open_q,
+                sum(case when po.id is null and coalesce(rq.status, '') not in ('Rejected', 'Cancelled', 'Closed') then coalesce(public._num(rq.data->'qty'), 0) else 0 end) req_q,
+                min(public._mfg_date(coalesce(po.data->>'eta', rq.data->>'needed_by'))) filter (where coalesce(po.status, rq.status, '') not in ('Cancelled', 'Closed', 'Received', 'Rejected')) eta
+         from public.records rq left join public.records po on po.section = 'operations.procurement' and po.data->>'request_ref' = rq.id::text
+         where rq.section = 'operations.requests' and rq.data->>'build_ref' = any (ids_t) and public.as_uuid(rq.data->>'item_ref') is not null group by 1, 2),
+  -- a unit with no allocation, consumption or purchase of an item is short of it exactly when the BOM needs more than
+  -- the free stock: those rows come from the BOM once (ranked by item number) and only the units' own facts are joined
+  nfs as (select nf.*, row_number() over (partition by nf.bom_id order by coalesce(nf.num, ''), nf.item_id) rn, count(*) over (partition by nf.bom_id) nbom from nf where nf.req > nf.free),
+  sp as (select al.uid, al.item_id from al union select co.uid, co.item_id from co union select po.uid, po.item_id from po),
+  spn as (select sp.uid, count(*) n from sp group by sp.uid),
+  m as (select cb.uid, nf.item_id, nf.req, coalesce(co.q, 0) cons, coalesce(al.q, 0) alc, nf.free, coalesce(po.open_q, 0) ord_q, coalesce(po.req_q, 0) rq_q, po.eta,
+               coalesce(po.eta < current_date - grace and po.open_q > 0, false) late, nf.num, nf.ttl, nf.crit
+        from sp join cb on cb.uid = sp.uid join nf on nf.bom_id = cb.bid and nf.item_id = sp.item_id
+        left join al on al.uid = sp.uid and al.item_id = sp.item_id left join co on co.uid = sp.uid and co.item_id = sp.item_id left join po on po.uid = sp.uid and po.item_id = sp.item_id),
+  nb as (select nfs.bom_id, max(nfs.nbom) n from nfs group by 1),
+  spb as (select sp.uid, count(*) n from sp join cb on cb.uid = sp.uid join nfs on nfs.bom_id = cb.bid and nfs.item_id = sp.item_id group by 1),
+  mm as (select m.uid, count(*) filter (where m.req - m.cons - m.alc - m.free > 0 and m.ord_q + m.rq_q < m.req - m.cons - m.alc - m.free) nm, count(*) filter (where m.late) nl from m group by 1),
+  mcount as (select cb.uid, coalesce(nb.n, 0) - coalesce(spb.n, 0) + coalesce(mm.nm, 0) nm, coalesce(mm.nl, 0) nl
+             from cb left join nb on nb.bom_id = cb.bid left join spb on spb.uid = cb.uid left join mm on mm.uid = cb.uid where cb.bid is not null),
+  r_mat as (
+    select cb.uid, 2 ord, coalesce(nfs.num, '') || ':1' sk, 'missing_material' kind, 'block' lvl, null::text txt, nfs.item_id item, null::uuid ref, nfs.crit, nfs.req - nfs.free mq, nfs.num mnum, nfs.ttl mttl, null::date meta
+      from cb left join spn on spn.uid = cb.uid join nfs on nfs.bom_id = cb.bid and (p_cap is null or nfs.rn <= p_cap + coalesce(spn.n, 0))
+      left join sp sx on sx.uid = cb.uid and sx.item_id = nfs.item_id where sx.uid is null
+    union all
+    select m.uid, 2, coalesce(m.num, '') || ':1', 'missing_material', 'block', null, m.item_id, null, m.crit, m.req - m.cons - m.alc - m.free - m.ord_q - m.rq_q, m.num, m.ttl, null
+      from m where m.req - m.cons - m.alc - m.free > 0 and m.ord_q + m.rq_q < m.req - m.cons - m.alc - m.free
+    union all select m.uid, 2, coalesce(m.num, '') || ':2', 'late_purchase', 'block', null, m.item_id, null, null, null, m.num, m.ttl, m.eta from m where m.late),
+  r_rej as (select t2.unit_id uid, 3 ord, coalesce(i.data->>'number', '') || t2.to_state sk, 'rejected_material' kind, 'attention' lvl,
+                   trim_scale(sum(t2.qty)) || ' × ' || (i.data->>'number') || ' ' || lower(t2.to_state) || ' at inspection' txt, t2.item_id item, null::uuid ref, null::boolean crit, null::numeric mq, null::text mnum, null::text mttl, null::date meta
+            from public.mfg_txns t2 join public.records i on i.id = t2.item_id
+            where t2.unit_id in (select cb.uid from cb where cb.bid is not null) and t2.kind in ('inspect', 'state') and t2.to_state in ('Rejected', 'Quarantine') and (p_viewer is null or (v_ok and (v_all or 'technical.items' = any (v_secs)) and (i.controlled is not distinct from false or v_us) and (not v_ext or coalesce(i.company = '*' or i.company = v_company, false))))
+            group by t2.unit_id, t2.item_id, i.data->>'number', t2.to_state),
   -- quality: unresolved nonconformance, the latest result of each inspection kind, failed required tests
-  for x in select s.id, s.data->>'number' num, s.title, s.status from public.records s where s.section = 'company.issues' and s.data->>'build_ref' = u.id::text and s.status not in ('Closed', 'Cancelled') and (p_viewer is null or public.record_visible_for(p_viewer, s)) loop
-    out := out || jsonb_build_array(jsonb_build_object('kind', 'nonconformance', 'level', 'block', 'ref', x.id, 'text', 'Open issue ' || coalesce(x.num, '') || ': ' || x.title || ' (' || x.status || ')'));
-  end loop;
-  for x in select distinct on (q.data->>'inspection_kind') q.id, q.data->>'inspection_kind' kind, q.data->>'result' res, q.data->>'number' num from public.records q
-           where q.section = 'operations.quality' and q.data->>'build_ref' = u.id::text and coalesce(q.data->>'recorded_at', '') <> '' and (p_viewer is null or public.record_visible_for(p_viewer, q))
-           order by q.data->>'inspection_kind', q.data->>'recorded_at' desc loop
-    if x.res = 'Fail' then out := out || jsonb_build_array(jsonb_build_object('kind', 'failed_inspection', 'level', 'block', 'ref', x.id, 'text', x.kind || ' failed (' || coalesce(x.num, '') || ') — no passed reinspection yet')); end if;
-  end loop;
-  for k in select jsonb_array_elements_text(coalesce(c.data->'required_tests', '[]'::jsonb)) loop
-    select t3.id, t3.data->>'outcome' o, t3.data->>'number' num into t from public.records t3 where t3.section = 'technical.testing' and t3.data->>'build_ref' = u.id::text and t3.data->>'procedure_code' = k
-      and coalesce(t3.data->>'recorded_at', '') <> '' and (p_viewer is null or public.record_visible_for(p_viewer, t3)) order by t3.data->>'recorded_at' desc limit 1;
-    if t.o = 'Fail' then out := out || jsonb_build_array(jsonb_build_object('kind', 'failed_test', 'level', 'block', 'ref', t.id, 'text', 'Required test ' || k || ' failed (' || coalesce(t.num, '') || ')')); end if;
-    t := null;
-  end loop;
+  r_iss as (select un.id uid, 4 ord, coalesce(s.data->>'number', '') || s.id::text sk, 'nonconformance' kind, 'block' lvl, 'Open issue ' || coalesce(s.data->>'number', '') || ': ' || s.title || ' (' || s.status || ')' txt, null::uuid item, s.id ref, null::boolean crit, null::numeric mq, null::text mnum, null::text mttl, null::date meta
+            from un join public.records s on s.data->>'build_ref' = un.id::text and s.section = 'company.issues'
+            where s.status not in ('Closed', 'Cancelled') and (p_viewer is null or (v_ok and (v_all or s.section = any (v_secs)) and (s.controlled is not distinct from false or v_us) and (not v_ext or coalesce(s.company = '*' or s.company = v_company, false)) and (un.uvis or public.record_visible_for(p_viewer, s))))),
+  insp as (select distinct on (un.id, q.data->>'inspection_kind') un.id uid, q.id, q.data->>'inspection_kind' kind, q.data->>'result' res, q.data->>'number' num
+           from un join public.records q on q.data->>'build_ref' = un.id::text and q.section = 'operations.quality'
+           where coalesce(q.data->>'recorded_at', '') <> '' and (p_viewer is null or (v_ok and (v_all or q.section = any (v_secs)) and (q.controlled is not distinct from false or v_us) and (not v_ext or coalesce(q.company = '*' or q.company = v_company, false)) and (un.uvis or public.record_visible_for(p_viewer, q))))
+           order by un.id, q.data->>'inspection_kind', q.data->>'recorded_at' desc),
+  r_insp as (select insp.uid, 5 ord, insp.kind sk, 'failed_inspection' kind, 'block' lvl, insp.kind || ' failed (' || coalesce(insp.num, '') || ') — no passed reinspection yet' txt, null::uuid item, insp.id ref, null::boolean crit, null::numeric mq, null::text mnum, null::text mttl, null::date meta from insp where insp.res = 'Fail'),
+  req_t as (select cb.uid, k.code, k.n from cb cross join lateral jsonb_array_elements_text(case when jsonb_typeof(cb.cdata->'required_tests') = 'array' then cb.cdata->'required_tests' else '[]'::jsonb end) with ordinality k(code, n)),
+  lt as (select distinct on (req_t.uid, req_t.code) req_t.uid, req_t.code, req_t.n, t3.id, t3.data->>'outcome' o, t3.data->>'number' num
+         from req_t join un on un.id = req_t.uid join public.records t3 on t3.data->>'build_ref' = req_t.uid::text and t3.section = 'technical.testing' and t3.data->>'procedure_code' = req_t.code
+         where coalesce(t3.data->>'recorded_at', '') <> '' and (p_viewer is null or (v_ok and (v_all or t3.section = any (v_secs)) and (t3.controlled is not distinct from false or v_us) and (not v_ext or coalesce(t3.company = '*' or t3.company = v_company, false)) and (un.uvis or public.record_visible_for(p_viewer, t3))))
+         order by req_t.uid, req_t.code, t3.data->>'recorded_at' desc),
+  r_test as (select lt.uid, 6 ord, lpad(lt.n::text, 6, '0') sk, 'failed_test' kind, 'block' lvl, 'Required test ' || lt.code || ' failed (' || coalesce(lt.num, '') || ')' txt, null::uuid item, lt.id ref, null::boolean crit, null::numeric mq, null::text mnum, null::text mttl, null::date meta from lt where lt.o = 'Fail'),
   -- work: blocked work orders, missing or changed instructions
-  for x in select w.id, w.data->>'number' num, w.title, w.data->>'blocked_reason' br, w.status, w.data->'documents' docs from public.records w
-           where w.section = 'operations.work_orders' and w.data->>'build_ref' = u.id::text and w.status not in ('Completed', 'Cancelled') and (p_viewer is null or public.record_visible_for(p_viewer, w)) loop
-    if x.status = 'Blocked' then out := out || jsonb_build_array(jsonb_build_object('kind', 'blocked_work', 'level', 'block', 'ref', x.id, 'text', 'Work blocked: ' || coalesce(x.num, '') || ' — ' || coalesce(x.br, ''))); end if;
-    if exists (select 1 from jsonb_array_elements(coalesce(x.docs, '[]'::jsonb)) d where coalesce(d->>'version_id', '') = '') then
-      out := out || jsonb_build_array(jsonb_build_object('kind', 'missing_document', 'level', 'block', 'ref', x.id, 'text', 'No approved version of an instruction for ' || coalesce(x.num, x.title)));
-    end if;
-  end loop;
-  for x in select w.id, w.data->>'number' num from public.records w where w.section = 'operations.work_orders' and w.data->>'build_ref' = u.id::text and w.status not in ('Completed', 'Cancelled')
-           and (p_viewer is null or public.record_visible_for(p_viewer, w)) and jsonb_array_length(public._mfg_doc_stale(w)) > 0 loop
-    out := out || jsonb_build_array(jsonb_build_object('kind', 'instruction_changed', 'level', 'attention', 'ref', x.id, 'text', 'A newer approved instruction exists for ' || coalesce(x.num, '') || ' (it keeps its version until moved)'));
-  end loop;
-  -- engineering change: a newer revision reaches this unit and no decision is recorded
-  for x in select n.id, n.data->>'number' num, n.data->>'revision' rev from public.records n where n.section = 'technical.boms' and n.status = 'Approved' and n.data->>'config_code' = u.data->>'config_code'
-           and n.id::text is distinct from u.data->>'bom_ref' and coalesce(n.data->>'ecr_ref', '') <> '' and exists (select 1 from public._mfg_affected(n.id) a where a.unit_id = u.id and a.state = 'needs a decision') loop
-    out := out || jsonb_build_array(jsonb_build_object('kind', 'ecr_impact', 'level', 'block', 'ref', x.id, 'text', 'Engineering change: BOM ' || coalesce(x.num, '') || ' rev ' || coalesce(x.rev, '') || ' applies to this unit — decide Incorporate or Keep current'));
-  end loop;
-  return out;
+  wo as (select un.id uid, w.* from un join public.records w on w.data->>'build_ref' = un.id::text and w.section = 'operations.work_orders'
+         where w.status not in ('Completed', 'Cancelled') and (p_viewer is null or (v_ok and (v_all or w.section = any (v_secs)) and (w.controlled is not distinct from false or v_us) and (not v_ext or coalesce(w.company = '*' or w.company = v_company, false)) and (un.uvis or public.record_visible_for(p_viewer, w))))),
+  r_wo as (select wo.uid, 7 ord, coalesce(wo.data->>'number', '') || ':1' sk, 'blocked_work' kind, 'block' lvl, 'Work blocked: ' || coalesce(wo.data->>'number', '') || ' — ' || coalesce(wo.data->>'blocked_reason', '') txt, null::uuid item, wo.id ref, null::boolean crit, null::numeric mq, null::text mnum, null::text mttl, null::date meta
+           from wo where wo.status = 'Blocked'
+           union all select wo.uid, 7, coalesce(wo.data->>'number', '') || ':2', 'missing_document', 'block', 'No approved version of an instruction for ' || coalesce(wo.data->>'number', wo.title), null, wo.id, null, null, null, null, null
+           from wo where jsonb_typeof(wo.data->'documents') = 'array' and exists (select 1 from jsonb_array_elements(wo.data->'documents') d where coalesce(d->>'version_id', '') = '')
+           union all select wo.uid, 8, coalesce(wo.data->>'number', ''), 'instruction_changed', 'attention', 'A newer approved instruction exists for ' || coalesce(wo.data->>'number', '') || ' (it keeps its version until moved)', null, wo.id, null, null, null, null, null
+           from wo where jsonb_typeof(wo.data->'documents') = 'array' and jsonb_array_length(wo.data->'documents') > 0 and jsonb_array_length(public._mfg_doc_stale((select w2 from public.records w2 where w2.id = wo.id))) > 0),
+  -- engineering change: a newer revision reaches the unit and no decision is recorded (each candidate revision once)
+  cand as (select n.id, n.data->>'number' num, n.data->>'revision' rev, n.data->>'config_code' cc from public.records n
+           where n.section = 'technical.boms' and n.status = 'Approved' and coalesce(n.data->>'ecr_ref', '') <> '' and n.data->>'config_code' in (select un.data->>'config_code' from un)),
+  aff as (select cand.*, a.unit_id uid from cand cross join lateral public._mfg_affected(cand.id) a where a.state = 'needs a decision' and a.unit_id = any (ids)),
+  r_ecr as (select aff.uid, 9 ord, coalesce(aff.num, '') || coalesce(aff.rev, '') sk, 'ecr_impact' kind, 'block' lvl, 'Engineering change: BOM ' || coalesce(aff.num, '') || ' rev ' || coalesce(aff.rev, '') || ' applies to this unit — decide Incorporate or Keep current' txt, null::uuid item, aff.id ref, null::boolean crit, null::numeric mq, null::text mnum, null::text mttl, null::date meta
+            from aff join un on un.id = aff.uid where un.data->>'config_code' = aff.cc and aff.id::text is distinct from un.data->>'bom_ref'),
+  allr as (select * from r_def union all select * from r_mat union all select * from r_rej union all select * from r_iss union all select * from r_insp union all select * from r_test union all select * from r_wo union all select * from r_ecr),
+  -- p_cap: at most this many blockers per unit in the list (the counts always cover all of them)
+  rk as (select a.*, row_number() over (partition by a.uid order by a.ord, a.sk) n from allr a),
+  g as (select rk.uid, count(*) filter (where rk.lvl = 'block' and rk.ord <> 2)::int nb, count(*) filter (where rk.ord <> 2)::int nt,
+               -- the object (and the material text) is built only for the blockers listed
+               jsonb_agg(jsonb_strip_nulls(jsonb_build_object('kind', rk.kind, 'level', rk.lvl, 'item', rk.item, 'ref', rk.ref, 'critical', rk.crit,
+                 'text', coalesce(rk.txt, case rk.kind when 'missing_material' then 'Missing ' || trim_scale(rk.mq) || ' × ' || rk.mnum || ' ' || rk.mttl || ' (not in stock, not ordered)'
+                                                       when 'late_purchase' then 'Purchase late for ' || rk.mnum || ' ' || rk.mttl || ' (expected ' || rk.meta || ')' end))) order by rk.n)
+                 filter (where p_cap is null or rk.n <= p_cap) b
+        from rk group by rk.uid)
+  select un.id, coalesce(g.b, '[]'::jsonb), (coalesce(g.nb, 0) + coalesce(mc.nm, 0) + coalesce(mc.nl, 0))::int, coalesce(mc.nm, 0)::int, coalesce(mc.nl, 0)::int, (coalesce(g.nt, 0) + coalesce(mc.nm, 0) + coalesce(mc.nl, 0))::int
+  from un left join g on g.uid = un.id left join mcount mc on mc.uid = un.id;
 end $$;
+revoke execute on function public._mfg_blockers_set(uuid, public.records[], int) from public, anon, authenticated;
+
+-- one unit's blockers: the same set-based rule
+create or replace function public._mfg_blockers(u public.records, p_viewer uuid) returns jsonb language sql stable security definer set search_path = public as $$
+  select coalesce((select b.blockers from public._mfg_blockers_set(p_viewer, array[u]) b), '[]'::jsonb)
+$$;
 revoke execute on function public._mfg_blockers(public.records, uuid) from public, anon, authenticated;
+
 
 -- build readiness before assembly: approved configuration and BOM, documents, critical material, routing, work orders, team
 create or replace function public._mfg_build_readiness(u public.records, p_viewer uuid default null) returns jsonb language plpgsql stable security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
@@ -3336,15 +3489,18 @@ begin
   if not public._mfg_cost_ok(me) then raise exception 'Costs are shown to those the cost policy names (Manufacturing → Settings)' using errcode = '42501'; end if;
   return (
     with req as (select r.item_id, r.required from public._mfg_req(u.id, me) r),
-    items as (select i.id, public._num(i.data->'ref_cost') c, coalesce(i.data->>'currency', 'USD') cur, coalesce(i.data->>'item_type', '') typ from public.records i where i.section = 'technical.items' and public.record_visible_for(me, i)),
-    planned as (select it.cur, sum(r.required * it.c) v, count(*) filter (where it.c is null) unknown from req r join items it on it.id = r.item_id group by it.cur),
-    pos as (select po.*, rq.data->>'item_ref' item_ref, (select typ from items where items.id = public.as_uuid(rq.data->>'item_ref')) typ from public.records rq join public.records po on po.section = 'operations.procurement' and po.data->>'request_ref' = rq.id::text
+    used as (select t.item_id, t.wo_id, sum(case when t.kind in ('consume', 'install') then t.qty when t.kind = 'remove' then -t.qty else 0 end) q from public.mfg_txns t where t.unit_id = u.id and t.kind in ('consume', 'install', 'remove') group by 1, 2),
+    pos_raw as (select po.*, rq.data->>'item_ref' item_ref from public.records rq join public.records po on po.section = 'operations.procurement' and po.data->>'request_ref' = rq.id::text
             where rq.section = 'operations.requests' and rq.data->>'build_ref' = u.id::text and coalesce(po.status, '') <> 'Cancelled' and public.record_visible_for(me, po)),
+    items as (select i.id, public._num(i.data->'ref_cost') c, coalesce(i.data->>'currency', 'USD') cur, coalesce(i.data->>'item_type', '') typ from public.records i
+              where i.section = 'technical.items' and i.id in (select r.item_id from req r union select x.item_id from used x union select public.as_uuid(p.item_ref) from pos_raw p) and public._mfg_ivis(me, i)),
+    pos as (select p.*, (select typ from items where items.id = public.as_uuid(p.item_ref)) typ from pos_raw p),
+
+    planned as (select it.cur, sum(r.required * it.c) v, count(*) filter (where it.c is null) unknown from req r join items it on it.id = r.item_id group by it.cur),
     committed as (select coalesce(p.data->>'currency', 'USD') cur, sum(public._num(p.data->'amount')) v from pos p where p.typ is distinct from 'Service' group by 1),
     services as (select coalesce(p.data->>'currency', 'USD') cur, sum(public._num(p.data->'amount')) v from pos p where p.typ = 'Service' group by 1),
     received as (select coalesce(p.data->>'currency', 'USD') cur, sum(case when public._num(p.data->'qty') > 0 then public._num(p.data->'amount') * least(coalesce(public._num(p.data->'qty_received'), 0), public._num(p.data->'qty')) / public._num(p.data->'qty') end) v
                  from pos p group by 1),
-    used as (select t.item_id, t.wo_id, sum(case when t.kind in ('consume', 'install') then t.qty when t.kind = 'remove' then -t.qty else 0 end) q from public.mfg_txns t where t.unit_id = u.id and t.kind in ('consume', 'install', 'remove') group by 1, 2),
     consumed as (select it.cur, sum(x.q * it.c) v, count(*) filter (where it.c is null) unknown from used x join items it on it.id = x.item_id group by it.cur),
     rework as (select it.cur, sum(x.q * it.c) v from used x join items it on it.id = x.item_id join public.records w on w.id = x.wo_id where coalesce(w.data->>'rework_of', '') <> '' group by it.cur),
     other as (select coalesce(e.data->>'currency', 'USD') cur, sum(public._num(e.data->'amount')) v from public.records e where e.section = 'finance.expenses' and e.data->>'build_ref' = u.id::text and e.status in ('Approved', 'Paid') and public.record_visible_for(me, e) group by 1),
@@ -3372,8 +3528,8 @@ begin
         sum(s.qty * (select avg(public._num(p.data->'amount') / nullif(public._num(p.data->'qty'), 0)) from public.records rq join public.records p on p.section = 'operations.procurement' and p.data->>'request_ref' = rq.id::text
                       where rq.section = 'operations.requests' and rq.data->>'item_ref' = i.id::text and coalesce(p.data->>'currency', 'USD') = coalesce(i.data->>'currency', 'USD'))) purv,
         sum(s.qty) q, count(distinct i.id) n, count(distinct i.id) filter (where public._num(i.data->'ref_cost') is null) unknown
-      from public.mfg_stock s join public.records i on i.id = s.item_id where s.qty > 0 and public.record_visible_for(me, i) group by 1) z), '[]'::jsonb),
-    'by_state', coalesce((select jsonb_object_agg(z.state, z.q) from (select s.state, sum(s.qty) q from public.mfg_stock s join public.records i on i.id = s.item_id where s.qty > 0 and public.record_visible_for(me, i) group by 1) z), '{}'::jsonb));
+      from public.mfg_stock s join public.records i on i.id = s.item_id where s.qty > 0 and public._mfg_ivis(me, i) group by 1) z), '[]'::jsonb),
+    'by_state', coalesce((select jsonb_object_agg(z.state, z.q) from (select s.state, sum(s.qty) q from public.mfg_stock s join public.records i on i.id = s.item_id where s.qty > 0 and public._mfg_ivis(me, i) group by 1) z), '{}'::jsonb));
 end $$;
 revoke execute on function public.mfg_inventory_value() from public, anon;
 grant execute on function public.mfg_inventory_value() to authenticated;
@@ -3551,7 +3707,7 @@ grant execute on function public.corp_search(text, text[], uuid, text, uuid, tex
    --------------------------------------------------------------------------------------------- */
 create or replace function public._mfg_base(p_viewer uuid, p_only uuid default null, p_with_acceptance boolean default true) returns void
 language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
-declare x public.records; bl jsonb; ac jsonb;
+declare x public.records; bl jsonb; ac jsonb; us public.records[]; bs jsonb;
 begin
   if to_regclass('pg_temp.mfg_uv') is null then
     create temp table mfg_uv (id uuid primary key, number text, title text, status text, kind text, product text, product_ref uuid, config text, project_ref uuid, owner_id text, owner text,
@@ -3560,16 +3716,19 @@ begin
   end if;
   if exists (select 1 from pg_temp.mfg_meta m where m.viewer is not distinct from p_viewer and m.only_unit is not distinct from p_only and m.at = statement_timestamp()) then return; end if;
   truncate pg_temp.mfg_uv; delete from pg_temp.mfg_meta;
-  for x in select r.* from public.records r where r.section = 'operations.builds' and (p_only is null or r.id = p_only) and public.record_visible_for(p_viewer, r) loop
-    bl := case when public.mfg_status_kind(x.status) in ('done', 'cancelled') then '[]'::jsonb else public._mfg_blockers(x, p_viewer) end;
+  us := array(select r from public.records r where r.section = 'operations.builds' and (p_only is null or r.id = p_only) and public.record_visible_for(p_viewer, r));
+  -- the blockers of all open units in one set-based pass (the same rule the unit view uses)
+  -- (the lists keep the first 25 blockers of a unit; the counts cover all of them; the unit view shows every one)
+  bs := coalesce((select jsonb_object_agg(b.unit_id::text, jsonb_build_object('b', b.blockers, 'nb', b.blocks, 'nm', b.missing, 'nl', b.late_po))
+                  from public._mfg_blockers_set(p_viewer, array(select u2 from unnest(us) u2 where public.mfg_status_kind(u2.status) not in ('done', 'cancelled')), 25) b), '{}'::jsonb);
+  foreach x in array us loop
+    bl := coalesce(bs->(x.id::text)->'b', '[]'::jsonb);
     ac := case when p_with_acceptance and public.mfg_status_kind(x.status) in ('build') then public._mfg_acceptance_readiness(x, p_viewer) end;
     insert into pg_temp.mfg_uv values (x.id, x.data->>'number', x.title, x.status, public.mfg_status_kind(x.status), x.data->>'product_ref_title', public.as_uuid(x.data->>'product_ref'),
       x.data->>'config_ref_title', public.as_uuid(x.data->>'project_ref'), x.data->>'owner_id', x.data->>'owner', public._mfg_date(coalesce(x.data->>'target', x.data->>'due')),
       coalesce(x.data->>'released_at', '') <> '', exists (select 1 from public.mfg_acceptance a where a.unit_id = x.id and a.status <> 'Rejected'), exists (select 1 from public.mfg_releases s where s.unit_id = x.id),
       coalesce((x.data->>'restricted')::boolean, false), bl,
-      (select count(*) from jsonb_array_elements(bl) b where b->>'level' = 'block'),
-      (select count(*) from jsonb_array_elements(bl) b where b->>'kind' = 'missing_material'),
-      (select count(*) from jsonb_array_elements(bl) b where b->>'kind' = 'late_purchase'),
+      coalesce((bs->(x.id::text)->>'nb')::int, 0), coalesce((bs->(x.id::text)->>'nm')::int, 0), coalesce((bs->(x.id::text)->>'nl')::int, 0),
       ac->>'status', ac->'reasons', x.data->>'priority');
   end loop;
   insert into pg_temp.mfg_meta values (p_viewer, p_only, statement_timestamp());
@@ -3602,22 +3761,33 @@ begin
 end $$;
 revoke execute on function public._mfg_list_rows(text, uuid) from public, anon, authenticated;
 
-create or replace function public._mfg_record_rows(p_kind text, p_viewer uuid, p_limit int default 200) returns setof jsonb language plpgsql stable security definer set search_path = public as $$
+-- quality, test and nonconformance lists. Visibility is checked set-based: a record linked to a unit the person may
+-- open follows the unit (role access, US persons only, company — exactly what record_visible_for answers for it); any
+-- other linked record is checked one by one by record_visible_for.
+create or replace function public._mfg_record_rows(p_kind text, p_viewer uuid, p_limit int default 200) returns setof jsonb language plpgsql stable security definer set search_path = public set jit = off as $$
+declare v_ok boolean := true; v_all boolean := true; v_secs text[] := '{}'; v_us boolean := true; v_ext boolean := false; v_company text; p record; vu text[];
 begin
+  if p_viewer is not null then
+    select pp.role, pp.us_person, pp.company into p from public.profiles pp where pp.id = p_viewer and not pp.disabled;
+    if not found then v_ok := false;
+    else v_all := p.role in ('owner', 'admin'); v_secs := array(select a.section from public.section_access a where a.role = p.role);
+         v_us := coalesce(p.us_person, false); v_ext := coalesce(p.role in ('partner', 'vendor', 'investor', 'pending'), true); v_company := p.company; end if;
+  end if;
+  vu := case when p_viewer is null then '{}'::text[] else public._mfg_hidden_units(p_viewer) end;
   if p_kind = 'inspections_required' then
-    return query select jsonb_strip_nulls(jsonb_build_object('id', r.id, 'number', r.data->>'number', 'title', r.title, 'kind', r.data->>'inspection_kind', 'unit', r.data->>'build_ref_title', 'status', r.status, 'created_at', r.created_at::date))
-      from public.records r where r.section = 'operations.quality' and r.data ? 'inspection_kind' and r.status in ('Planned', 'Inspection') and coalesce(r.data->>'recorded_at', '') = '' and public.record_visible_for(p_viewer, r)
+    return query select jsonb_strip_nulls(jsonb_build_object('id', r.id, 'number', r.data->>'number', 'title', r.title, 'kind', r.data->>'inspection_kind', 'unit', r.data->>'build_ref_title', 'unit_id', r.data->>'build_ref', 'status', r.status, 'created_at', r.created_at::date))
+      from public.records r where r.section = 'operations.quality' and r.data ? 'inspection_kind' and r.status in ('Planned', 'Inspection') and coalesce(r.data->>'recorded_at', '') = '' and (p_viewer is null or (v_ok and (v_all or r.section = any (v_secs)) and (r.controlled is not distinct from false or v_us) and (not v_ext or coalesce(r.company = '*' or r.company = v_company, false)) and (p_viewer is null or public._mfg_cvis(p_viewer, r, vu))))
       order by r.created_at limit p_limit;
   elsif p_kind = 'failed_tests' then
     -- the latest run of each procedure on each unit, when it failed (a later pass clears it)
-    return query select jsonb_strip_nulls(jsonb_build_object('id', z.id, 'number', z.data->>'number', 'title', z.title, 'unit', z.data->>'build_ref_title', 'procedure', z.data->>'procedure_code', 'date', z.data->>'date'))
+    return query select jsonb_strip_nulls(jsonb_build_object('id', z.id, 'number', z.data->>'number', 'title', z.title, 'unit', z.data->>'build_ref_title', 'unit_id', z.data->>'build_ref', 'procedure', z.data->>'procedure_code', 'date', z.data->>'date'))
       from (select distinct on (r.data->>'build_ref', r.data->>'procedure_code') r.* from public.records r
-            where r.section = 'technical.testing' and r.data ? 'procedure_ref' and coalesce(r.data->>'recorded_at', '') <> '' and public.record_visible_for(p_viewer, r)
+            where r.section = 'technical.testing' and r.data ? 'procedure_ref' and coalesce(r.data->>'recorded_at', '') <> '' and (p_viewer is null or (v_ok and (v_all or r.section = any (v_secs)) and (r.controlled is not distinct from false or v_us) and (not v_ext or coalesce(r.company = '*' or r.company = v_company, false)) and (p_viewer is null or public._mfg_cvis(p_viewer, r, vu))))
             order by r.data->>'build_ref', r.data->>'procedure_code', r.data->>'recorded_at' desc) z
       where z.data->>'outcome' = 'Fail' limit p_limit;
   elsif p_kind = 'nonconformances' then
-    return query select jsonb_strip_nulls(jsonb_build_object('id', r.id, 'number', r.data->>'number', 'title', r.title, 'status', r.status, 'severity', r.data->>'severity', 'unit', r.data->>'build_ref_title', 'disposition', r.data->>'disposition'))
-      from public.records r where r.section = 'company.issues' and r.data->>'type' = 'Nonconformance' and r.status not in ('Closed', 'Cancelled') and public.record_visible_for(p_viewer, r)
+    return query select jsonb_strip_nulls(jsonb_build_object('id', r.id, 'number', r.data->>'number', 'title', r.title, 'status', r.status, 'severity', r.data->>'severity', 'unit', r.data->>'build_ref_title', 'unit_id', r.data->>'build_ref', 'disposition', r.data->>'disposition'))
+      from public.records r where r.section = 'company.issues' and r.data->>'type' = 'Nonconformance' and r.status not in ('Closed', 'Cancelled') and (p_viewer is null or (v_ok and (v_all or r.section = any (v_secs)) and (r.controlled is not distinct from false or v_us) and (not v_ext or coalesce(r.company = '*' or r.company = v_company, false)) and (p_viewer is null or public._mfg_cvis(p_viewer, r, vu))))
       order by r.created_at limit p_limit;
   end if;
 end $$;
@@ -3653,7 +3823,7 @@ create or replace function public.mfg_list(p_kind text, p_filter jsonb default '
 declare me uuid := public.mfg_viewer();
 begin
   if me is null or not public._mfg_can_read(me, 'operations.builds') then raise exception 'Not allowed' using errcode = '42501'; end if;
-  if p_kind in ('inspections_required', 'failed_tests', 'nonconformances') then return coalesce((select jsonb_agg(x) from public._mfg_record_rows(p_kind, me, 500) x), '[]'::jsonb); end if;
+  if p_kind in ('inspections_required', 'failed_tests', 'nonconformances') then return coalesce((select jsonb_agg(x) from public._mfg_record_rows(p_kind, me, 10000) x), '[]'::jsonb); end if;
   if p_kind not in ('units', 'ready_for_build', 'in_assembly', 'blocked', 'shortages', 'late_purchases', 'late', 'ready_acceptance', 'ready_shipment', 'hold', 'done', 'all') then raise exception 'Unknown list' using errcode = '22023'; end if;
   perform public._mfg_base(me);
   return coalesce((select jsonb_agg(x) from (select y from public._mfg_list_rows(case when p_kind = 'all' then 'units' else p_kind end, me) y
@@ -3758,7 +3928,7 @@ begin
   elsif p_tab = 'materials' then return public.mfg_material_plan(jsonb_build_object('unit', u.id)) || jsonb_build_object('allocations', coalesce((
       select jsonb_agg(jsonb_strip_nulls(jsonb_build_object('id', a.id, 'item', i.data->>'number', 'title', i.title, 'qty', a.qty, 'consumed', a.qty_consumed, 'location', l.code, 'serial', s.serial, 'at', a.created_at)) order by i.data->>'number')
       from public.mfg_allocs a join public.records i on i.id = a.item_id join public.mfg_locations l on l.id = a.location_id left join public.mfg_serials s on s.id = a.serial_id
-      where a.unit_id = u.id and a.status = 'active' and public.record_visible_for(me, i)), '[]'::jsonb),
+      where a.unit_id = u.id and a.status = 'active' and public._mfg_ivis(me, i)), '[]'::jsonb),
       'purchases', coalesce((select jsonb_agg(jsonb_strip_nulls(jsonb_build_object('id', rq.id, 'number', rq.data->>'number', 'title', rq.title, 'status', rq.status, 'qty', rq.data->'qty', 'needed_by', rq.data->>'needed_by',
           'po', po.data->>'number', 'po_status', po.status, 'eta', po.data->>'eta', 'received', po.data->'qty_received')) order by rq.created_at)
         from public.records rq left join public.records po on po.section = 'operations.procurement' and po.data->>'request_ref' = rq.id::text
@@ -3774,11 +3944,11 @@ begin
     return jsonb_build_object('installed', coalesce((select jsonb_agg(jsonb_strip_nulls(jsonb_build_object('id', x.id, 'item', i.data->>'number', 'item_id', i.id, 'title', i.title, 'serial', s.serial, 'serial_id', s.id, 'qty', x.qty, 'position', x.position,
         'work_order', w.data->>'number', 'installed_at', x.installed_at, 'installed_by', public._wf_name(x.installed_by), 'document_version', (select label from public.document_versions where id = x.doc_version_id))) order by i.data->>'number')
       from public.mfg_installs x join public.records i on i.id = x.item_id left join public.mfg_serials s on s.id = x.serial_id left join public.records w on w.id = x.wo_id
-      where x.unit_id = u.id and x.removed_at is null and public.record_visible_for(me, i)), '[]'::jsonb),
+      where x.unit_id = u.id and x.removed_at is null and public._mfg_ivis(me, i)), '[]'::jsonb),
       'removed', coalesce((select jsonb_agg(jsonb_strip_nulls(jsonb_build_object('item', i.data->>'number', 'serial', s.serial, 'installed_at', x.installed_at, 'removed_at', x.removed_at, 'reason', x.removal_reason)) order by x.removed_at)
-        from public.mfg_installs x join public.records i on i.id = x.item_id left join public.mfg_serials s on s.id = x.serial_id where x.unit_id = u.id and x.removed_at is not null and public.record_visible_for(me, i)), '[]'::jsonb),
+        from public.mfg_installs x join public.records i on i.id = x.item_id left join public.mfg_serials s on s.id = x.serial_id where x.unit_id = u.id and x.removed_at is not null and public._mfg_ivis(me, i)), '[]'::jsonb),
       'consumed', coalesce((select jsonb_agg(jsonb_build_object('item', i.data->>'number', 'title', i.title, 'qty', z.q) order by i.data->>'number')
-        from (select item_id, sum(qty) q from public.mfg_txns where unit_id = u.id and kind = 'consume' group by 1) z join public.records i on i.id = z.item_id where public.record_visible_for(me, i)), '[]'::jsonb));
+        from (select item_id, sum(qty) q from public.mfg_txns where unit_id = u.id and kind = 'consume' group by 1) z join public.records i on i.id = z.item_id where public._mfg_ivis(me, i)), '[]'::jsonb));
   elsif p_tab = 'inspections' then
     return coalesce((select jsonb_agg(jsonb_strip_nulls(jsonb_build_object('id', q.id, 'number', q.data->>'number', 'title', q.title, 'kind', q.data->>'inspection_kind', 'status', q.status, 'result', q.data->>'result',
         'inspector', q.data->>'inspector', 'date', q.data->>'date', 'issue', q.data->>'issue_ref', 'reinspection_of', q.data->>'reinspection_of', 'work_order', q.data->>'work_order_ref_title')) order by q.created_at)
@@ -3842,28 +4012,29 @@ end $$;
 revoke execute on function public.mfg_exec() from public, anon;
 grant execute on function public.mfg_exec() to authenticated;
 
-create or replace function public.mfg_weekly(p_from date default null, p_to date default null) returns jsonb language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
-declare me uuid := public.mfg_viewer(); f date := coalesce(p_from, current_date - 7); t date := coalesce(p_to, current_date); cost boolean;
+create or replace function public.mfg_weekly(p_from date default null, p_to date default null) returns jsonb language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
+declare me uuid := public.mfg_viewer(); f date := coalesce(p_from, current_date - 7); t date := coalesce(p_to, current_date); cost boolean; vu text[];
 begin
   if me is null or not public._mfg_can_read(me, 'operations.builds') then return null; end if;
   cost := public._mfg_cost_ok(me);
   perform public._mfg_base(me);
+  vu := public._mfg_hidden_units(me); -- (the restricted units this person may not open)
   return jsonb_build_object('from', f, 'to', t,
     'active', coalesce((select jsonb_agg(jsonb_build_object('id', u.id, 'number', u.number, 'status', u.status, 'product', u.product, 'target', u.target) order by u.number) from pg_temp.mfg_uv u where u.kind not in ('done', 'cancelled')), '[]'::jsonb),
     'progress', coalesce((select jsonb_agg(jsonb_build_object('unit', u.number, 'completed_this_week', z.wk, 'completed', z.done, 'total', z.tot) order by u.number) from pg_temp.mfg_uv u join lateral (
         select count(*) filter (where w.status = 'Completed' and public._mfg_date(w.data->>'completed_at') between f and t) wk, count(*) filter (where w.status = 'Completed') done, count(*) filter (where w.status <> 'Cancelled') tot
-        from public.records w where w.section = 'operations.work_orders' and w.data->>'build_ref' = u.id::text and public.record_visible_for(me, w)) z on true where u.kind not in ('done', 'cancelled')), '[]'::jsonb),
+        from public.records w where w.section = 'operations.work_orders' and w.data->>'build_ref' = u.id::text and public._mfg_cvis(me, w, vu)) z on true where u.kind not in ('done', 'cancelled')), '[]'::jsonb),
     'blockers', coalesce((select jsonb_agg(jsonb_build_object('unit', u.number, 'id', u.id, 'reasons', (select jsonb_agg(b->>'text') from jsonb_array_elements(u.blockers) b where b->>'level' = 'block'))) from pg_temp.mfg_uv u where u.blocks > 0 and u.kind not in ('done', 'cancelled')), '[]'::jsonb),
     'shortages', coalesce((select jsonb_agg(jsonb_build_object('unit', u.number, 'id', u.id, 'items', (select jsonb_agg(b->>'text') from jsonb_array_elements(u.blockers) b where b->>'kind' = 'missing_material'))) from pg_temp.mfg_uv u where u.missing > 0), '[]'::jsonb),
     'procurement_risk', coalesce((select jsonb_agg(jsonb_build_object('unit', u.number, 'id', u.id, 'late', (select jsonb_agg(b->>'text') from jsonb_array_elements(u.blockers) b where b->>'kind' = 'late_purchase'))) from pg_temp.mfg_uv u where u.late_po > 0), '[]'::jsonb),
     'engineering_changes', coalesce((select jsonb_agg(jsonb_build_object('id', e.id, 'number', e.data->>'number', 'title', e.title, 'status', e.status)) from public.records e
       where e.section = 'technical.changes' and (e.updated_at::date between f and t or e.status not in ('Closed', 'Rejected', 'Cancelled')) and public.record_visible_for(me, e)
         and exists (select 1 from public.records b where b.section in ('technical.boms', 'technical.configurations') and b.data->>'ecr_ref' = e.id::text)), '[]'::jsonb),
-    'nonconformance', jsonb_build_object('opened', (select count(*) from public.records s where s.section = 'company.issues' and s.data->>'type' = 'Nonconformance' and s.created_at::date between f and t and public.record_visible_for(me, s)),
-      'closed', (select count(*) from public.records s where s.section = 'company.issues' and s.data->>'type' = 'Nonconformance' and s.status = 'Closed' and s.updated_at::date between f and t and public.record_visible_for(me, s)),
+    'nonconformance', jsonb_build_object('opened', (select count(*) from public.records s where s.section = 'company.issues' and s.data->>'type' = 'Nonconformance' and s.created_at::date between f and t and public._mfg_cvis(me, s, vu)),
+      'closed', (select count(*) from public.records s where s.section = 'company.issues' and s.data->>'type' = 'Nonconformance' and s.status = 'Closed' and s.updated_at::date between f and t and public._mfg_cvis(me, s, vu)),
       'open', (select count(*) from public._mfg_record_rows('nonconformances', me, 100000))),
-    'testing', jsonb_build_object('runs', (select count(*) from public.records r where r.section = 'technical.testing' and r.data ? 'procedure_ref' and public._mfg_date(r.data->>'recorded_at') between f and t and public.record_visible_for(me, r)),
-      'failed', (select count(*) from public.records r where r.section = 'technical.testing' and r.data->>'outcome' = 'Fail' and public._mfg_date(r.data->>'recorded_at') between f and t and public.record_visible_for(me, r)),
+    'testing', jsonb_build_object('runs', (select count(*) from public.records r where r.section = 'technical.testing' and r.data ? 'procedure_ref' and public._mfg_date(r.data->>'recorded_at') between f and t and public._mfg_cvis(me, r, vu)),
+      'failed', (select count(*) from public.records r where r.section = 'technical.testing' and r.data->>'outcome' = 'Fail' and public._mfg_date(r.data->>'recorded_at') between f and t and public._mfg_cvis(me, r, vu)),
       'failed_open', (select count(*) from public._mfg_record_rows('failed_tests', me, 100000))),
     'acceptance', jsonb_build_object('accepted', (select count(*) from public.mfg_acceptance a join pg_temp.mfg_uv u on u.id = a.unit_id where a.accepted_at::date between f and t and a.status <> 'Rejected'),
       'ready', (select count(*) from pg_temp.mfg_uv u where u.acceptance = 'Ready' and not u.accepted)),
@@ -3875,7 +4046,7 @@ end $$;
 revoke execute on function public.mfg_weekly(date, date) from public, anon;
 grant execute on function public.mfg_weekly(date, date) to authenticated;
 
-create or replace function public.mfg_today() returns jsonb language plpgsql stable security definer set search_path = public as $$
+create or replace function public.mfg_today() returns jsonb language plpgsql stable security definer set search_path = public set jit = off as $$
 declare me uuid := public.mfg_viewer();
 begin
   if me is null or not public._mfg_can_read(me, 'operations.work_orders') then return null; end if;
@@ -3884,9 +4055,11 @@ begin
       from public.records w where w.section = 'operations.work_orders' and w.status in ('Ready', 'In Progress', 'Blocked') and (coalesce(w.data->>'assignee_id', '') = me::text or coalesce(w.data->'team_ids', '[]'::jsonb) ? me::text)
         and public.record_visible_for(me, w)), '[]'::jsonb),
     'inspections', case when public.has_cap(me, 'quality_inspector') then (select count(*) from public._mfg_record_rows('inspections_required', me, 100000)) end,
-    'my_units_blocked', coalesce((select jsonb_agg(jsonb_build_object('id', u.id, 'number', u.data->>'number', 'status', u.status)) from public.records u
-      where u.section = 'operations.builds' and u.data->>'owner_id' = me::text and public.mfg_status_kind(u.status) not in ('done', 'cancelled') and public.record_visible_for(me, u)
-        and exists (select 1 from jsonb_array_elements(public._mfg_blockers(u, me)) b where b->>'level' = 'block')), '[]'::jsonb));
+    -- my open units that are blocked (one set-based pass; the first two reasons of each)
+    'my_units_blocked', coalesce((select jsonb_agg(jsonb_build_object('id', u.id, 'number', u.data->>'number', 'status', u.status, 'blocks', b.blocks,
+          'reasons', (select jsonb_agg(e->>'text') from jsonb_array_elements(b.blockers) e where e->>'level' = 'block')) order by u.data->>'number')
+      from public._mfg_blockers_set(me, array(select u2 from public.records u2 where u2.section = 'operations.builds' and u2.data->>'owner_id' = me::text and public.mfg_status_kind(u2.status) not in ('done', 'cancelled')
+                                                and public.record_visible_for(me, u2)), 2) b join public.records u on u.id = b.unit_id where b.blocks > 0), '[]'::jsonb));
 end $$;
 revoke execute on function public.mfg_today() from public, anon;
 grant execute on function public.mfg_today() to authenticated;
@@ -4484,6 +4657,9 @@ end $$;
 
 -- the hourly job (service role) learns the manufacturing notices
 grant execute on function public.mfg_tick() to service_role;
+
+-- the stored requirement of the approved BOM revisions that exist already (re-runnable: only the missing ones)
+do $$ begin perform public._mfg_bom_need_fill(r.id) from public.records r where r.section = 'technical.boms' and r.status in ('Approved', 'Superseded') and not exists (select 1 from public.mfg_bom_need x where x.bom_id = r.id); end $$;
 
 -- the API re-reads the functions
 notify pgrst, 'reload schema';
