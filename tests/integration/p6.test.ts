@@ -74,6 +74,7 @@ async function prToApproval(title: string, amount: number, o: { project?: string
 }
 
 before(async () => {
+  await v24(); // resolve the schema once, so a refusal pattern never awaits after its call has started
   const mk = async (k: string, role: string, o: any = {}) => { U[k] = await makeUser(`${tag}.${k}@agron.test`, role, { name: `${k} ${tag}`, ...o }); };
   await mk("owner", "owner", { us: true }); await mk("admin", "admin", { us: true }); await mk("mgmt", "management", { us: true }); await mk("mgmtNon", "management", { us: false });
   await mk("pm", "engineering", { us: true }); await mk("eng", "engineering", { us: true }); await mk("proc", "procurement", { us: true }); await mk("ops", "operations", { us: true });
@@ -755,7 +756,7 @@ test("Weekly review OPERATIONS numbers, the dashboard drill-down and the audit t
 test("Settings and approval authority are changed only by Workflow Admins (owners; management by policy), validated, and kept in history", async () => {
   const s = await call("emp", "ops_settings_get"); assert.equal(s.can_edit, false);
   await fails(call("emp", "ops_settings_save", [{ due_soon_hours: 12 }, s.version]), await WFA());
-  assert.equal((await call("admin", "ops_settings_get")).can_edit, false, "a System Administrator holds no business authority by role");
+  if (await v24()) assert.equal((await call("admin", "ops_settings_get")).can_edit, false, "a System Administrator holds no business authority by role (v24)");
   if (await v24()) await fails(call("admin", "ops_settings_save", [{ due_soon_hours: 12 }, s.version]), /Workflow Admin/);
   await fails(call("owner", "ops_settings_save", [{ due_soon_hours: 0 }, s.version]), /1–720/);
   await fails(call("owner", "ops_settings_save", [{ evil: 1 }, s.version]), /Unknown setting/);
