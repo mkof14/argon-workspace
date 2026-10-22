@@ -34,7 +34,7 @@ export async function POST(req: Request) {
       if (!trConfigured()) return Response.json({ ok: false, reason: "AI is not configured" });
       return Response.json(await translateFaq(db, f.id, me.id));
     }
-    if (Array.isArray(b.texts) && ["owner", "admin", "management", "engineering", "operations", "finance", "sales", "marketing", "hr", "legal", "security"].includes(me.role)) {
+    if (Array.isArray(b.texts) && ["owner", "admin", "management", "engineering", "operations", "finance", "sales", "marketing", "hr", "legal", "security", "procurement"].includes(me.role)) {
       // Texts the person already sees on screen (agent proposals, log lines), shown in their language
       const texts = b.texts.slice(0, 80).map((x: any) => String(x ?? "").slice(0, 2000));
       return Response.json({ texts: await localizeTexts(db, String(b.lang || me.lang || "en"), texts) });

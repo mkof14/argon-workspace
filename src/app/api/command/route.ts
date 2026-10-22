@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const INTERNAL = ["owner", "admin", "management", "engineering", "operations", "finance", "sales", "marketing", "hr", "legal", "security"];
+const INTERNAL = ["owner", "admin", "management", "engineering", "operations", "finance", "sales", "marketing", "hr", "legal", "security", "procurement"];
 const SECS: any[] = (allSections() as any[]).filter((s) => !/^mail\.|\.metrics$|^legal\.matrix$/.test(s.id));
 const LANGS: Record<string, string> = { en: "English", ru: "Russian", uk: "Ukrainian", ar: "Arabic" };
 

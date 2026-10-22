@@ -4,7 +4,7 @@ import { PUSH, pushTo, vapid } from "@/lib/server/push";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const INTERNAL = ["owner", "admin", "management", "engineering", "operations", "finance", "sales", "marketing", "hr", "legal", "security"];
+const INTERNAL = ["owner", "admin", "management", "engineering", "operations", "finance", "sales", "marketing", "hr", "legal", "security", "procurement"];
 
 /**
  * Notifications on phones and computers.

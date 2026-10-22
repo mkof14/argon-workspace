@@ -13,6 +13,7 @@ export const JOBS: JobDef[] = [
   { id: "calendar", every: "15m", label: "Google Calendar sync" },
   { id: "notify", every: "15m", label: "Notifications by e-mail and phone" },
   { id: "announce", every: "15m", label: "Scheduled announcements" },
+  { id: "workflow", every: "15m", label: "Process deadlines, escalations and automatic-step retries" },
   { id: "digest", every: "hour", label: "Morning digest (8:00 local time)" },
   { id: "translate", every: "hour", label: "Translation of new texts" },
   { id: "executive", every: "hour", label: "Management alerts and daily snapshots" },

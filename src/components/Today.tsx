@@ -84,6 +84,7 @@ export default function Today() {
         {access.write.has("company.documents") && <Link href="/company/documents?new=1" className="btn sm"><Icon n="upload" />{T(L("Upload document", "Загрузить документ", "Завантажити документ", "رفع مستند"))}</Link>}
         {access.write.has("company.meetings") && <Link href="/company/meetings?new=1" className="btn sm"><Icon n="calendar" />{T(L("Create meeting", "Создать встречу", "Створити зустріч", "إنشاء اجتماع"))}</Link>}
         <Link href="/decide" className="btn ghost sm"><Icon n="check" />{T(L("Approvals", "Согласования", "Погодження", "الموافقات"))}</Link>
+        <Link href="/ops" className="btn ghost sm" data-today-ops><Icon n="git" />{T(L("Requests & processes", "Заявки и процессы", "Заявки та процеси", "الطلبات والعمليات"))}</Link>
         <Link href="/control" className="btn ghost sm"><Icon n="target" />{T(L("What needs attention", "Что требует внимания", "Що потребує уваги", "ما يحتاج انتباهًا"))}</Link>
         <Link href="/portfolio" className="btn ghost sm"><Icon n="grid" />{T(L("Portfolio", "Портфель", "Портфель", "المحفظة"))}</Link>
         <Link href="/assistant" className="btn ghost sm"><Icon n="spark" />{T(L("Ask Assistant", "Спросить ассистента", "Запитати асистента", "اسأل المساعد"))}</Link>

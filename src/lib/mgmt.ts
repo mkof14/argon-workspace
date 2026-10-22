@@ -1,6 +1,7 @@
 // Phase 5 — words for the management engines (v22). The database computes every number, level and reason from
 // the viewer's own records; this file only turns those codes into sentences in EN / RU / UK / AR, builds the CSV
 // exports and assembles the Weekly Management Review from the same rows. Nothing here scores or decides anything.
+import { opsWeeklyText } from "./opsText";
 import type { Lang } from "@/lib/i18n";
 
 export type T4 = { en: string; ru: string; uk: string; ar: string };
@@ -183,9 +184,10 @@ export const REVIEW_TITLES: Record<string, T4> = {
   waiting: L("5. Waiting for", "5. Чего ждём", "5. На що чекаємо", "5. بانتظار"), deadlines: L("6. Major deadlines", "6. Главные сроки", "6. Головні терміни", "6. المواعيد الرئيسية"),
   changes: L("7. Changes since the previous review", "7. Изменения с прошлого обзора", "7. Зміни з попереднього огляду", "7. التغييرات منذ المراجعة السابقة"),
   completed: L("8. Completed work", "8. Выполненная работа", "8. Виконана робота", "8. العمل المنجز"), next: L("9. Next week", "9. Следующая неделя", "9. Наступний тиждень", "9. الأسبوع القادم"),
+  operations: L("10. Operations", "10. Операции", "10. Операції", "10. العمليات"),
 };
 /** The Weekly Management Review, assembled only from rows the database returned for this viewer. */
-export function weeklyReview(o: { overview: any; health: any[]; attention: any[]; loops: any[]; waiting: any[]; deadlines: any[]; changes: any[]; sinceLabel: string }, lang: Lang | string): Review {
+export function weeklyReview(o: { overview: any; health: any[]; attention: any[]; loops: any[]; waiting: any[]; deadlines: any[]; changes: any[]; sinceLabel: string; operations?: any }, lang: Lang | string): Review {
   const ind = o.overview?.indicators || {}; const lv = (k: Level) => o.health.filter((h) => h.level === k).length;
   const S = (k: string, lines: { text: string; link?: string }[]) => ({ key: k, title: say(REVIEW_TITLES[k], lang), lines });
   const none = say(L("Nothing.", "Нет.", "Немає.", "لا شيء."), lang);
@@ -202,6 +204,8 @@ export function weeklyReview(o: { overview: any; health: any[]; attention: any[]
     S("changes", ln(o.changes.filter((c) => !completed.includes(c)).slice(0, 25).map((c) => ({ text: `${c.project_title || c.title}: ${changeText(c, lang)}${c.project_title && c.title !== c.project_title ? ` — ${c.title}` : ""}`, link: c.link })))),
     S("completed", ln(completed.slice(0, 25).map((c) => ({ text: `${c.project_title || c.title}: ${changeText(c, lang)}${c.kind !== "tasks_completed" && c.title !== c.project_title ? ` — ${c.title}` : ""}`, link: c.link })))),
     S("next", ln(o.deadlines.filter((d) => d.days >= 0 && d.days <= 7).slice(0, 20).map((d) => ({ text: `${d.due} · ${d.title}${d.project_title ? ` (${d.project_title})` : ""}`, link: d.link })))),
+    // Phase 6: OPERATIONS — the same numbers as the operations dashboard (ops_weekly, the viewer's records only)
+    ...(o.operations ? [S("operations", opsWeeklyText(o.operations, lang).split("\n").slice(1).map((t) => ({ text: t.replace(/^- /, ""), link: "/ops?tab=dashboard" })))] : []),
   ], } as Review & { since?: string };
 }
 export const reviewText = (r: Review, head: string) => [head, "", ...r.sections.flatMap((s) => [s.title, ...s.lines.map((l) => `- ${l.text}`), ""])].join("\n");

@@ -9,6 +9,7 @@ import { useApp } from "./App";
 import { tx, type Lang } from "@/lib/i18n";
 import { saveBlob } from "@/lib/format";
 import { mgmt } from "@/lib/mgmtApi";
+import { ops } from "@/lib/opsApi";
 import { ATTENTION_PART, DEADLINE_KIND, ESCALATION, LEVELS, LOOP_CATS, NEXT_ACTION, SEVERITY, WAIT_BUCKET, WAIT_KIND, actionHref, attentionLabel, attentionWhy, changeText, decisionsCsv, deadlinesCsv,
   healthReason, loopText, portfolioCsv, reviewText, say, weeklyReview, workloadCsv, type Level, type T4 } from "@/lib/mgmt";
 
@@ -114,6 +115,7 @@ export default function ExecControl() {
         <Card icon="calendar" title={L("Deadlines", "Сроки", "Терміни", "المواعيد")} n={(ov.deadlines || []).length} more={() => setView({ kind: "deadlines", days: 30, title: L("Deadlines — next 30 days", "Сроки — 30 дней", "Терміни — 30 днів", "المواعيد — 30 يومًا") })} empty={L("No milestones or deadlines in 30 days.", "Нет вех и сроков на 30 дней.", "Немає віх і термінів на 30 днів.", "لا مراحل ولا مواعيد خلال 30 يومًا.")}>
           {(ov.deadlines || []).map((d: any) => <Link key={d.kind + d.record_id} href={d.link} className="hub-row"><span style={{ minWidth: 0 }}><b>{d.title}</b><small>{T(DEADLINE_KIND[d.kind])}{d.project_title && d.kind !== "project" ? ` · ${d.project_title}` : ""} · {d.due}</small></span><span className={`chip ${d.days <= 3 ? "c-warn" : "c-info"}`}>{rel(d.days)}</span></Link>)}
         </Card>
+        <OpsCard />
       </div>
 
       <section className="card" id="exec-tabs">
@@ -211,8 +213,8 @@ function Reports({ overview, name }: { overview: any; name: (id?: string | null)
   const deadlines = () => run("d", async () => dl(deadlinesCsv(await mgmt.deadlines(30), lang), `deadlines-${today}.csv`));
   const decisions = () => run("x", async () => dl(decisionsCsv(await mgmt.decisions()), `decisions-${today}.csv`));
   const review = () => run("r", async () => {
-    const [health, attention, loops, waiting, deadlines, changes] = await Promise.all([mgmt.health(), mgmt.attention(50), mgmt.loops(), mgmt.waiting(), mgmt.deadlines(30), mgmt.changes("review")]);
-    const r = weeklyReview({ overview, health, attention, loops, waiting, deadlines, changes, sinceLabel: "" }, lang); setRev(r);
+    const [health, attention, loops, waiting, deadlines, changes, operations] = await Promise.all([mgmt.health(), mgmt.attention(50), mgmt.loops(), mgmt.waiting(), mgmt.deadlines(30), mgmt.changes("review"), ops.weekly().catch(() => null)]);
+    const r = weeklyReview({ overview, health, attention, loops, waiting, deadlines, changes, sinceLabel: "", operations }, lang); setRev(r);
     setPacket(reviewText(r, `${T(L("Weekly Management Review", "Еженедельный обзор руководства", "Щотижневий огляд керівництва", "المراجعة الإدارية الأسبوعية"))} — ${today} — ${me.full_name || me.email}`));
   });
   const close = () => run("s", async () => { await mgmt.snapshot("review", `Review ${today}`); toast(T(L("Review saved — the next “since last review” starts now", "Обзор сохранён — «с прошлого обзора» начнётся отсюда", "Огляд збережено — «з попереднього огляду» почнеться звідси", "حُفظت المراجعة"))); });
@@ -283,4 +285,18 @@ function Settings({ onSaved }: { onSaved: () => void }) {
     {hist.length > 0 && <details><summary>{T(L("Change history", "История изменений", "Історія змін", "سجل التغييرات"))} · {hist.length}</summary>
       {hist.map((h) => { const diff = Object.keys(h.after || {}).filter((k) => JSON.stringify(h.after[k]) !== JSON.stringify(h.before?.[k])); return <div key={h.id} className="hub-row"><span><b>{String(h.changed_at).slice(0, 16).replace("T", " ")} · {people.find((p) => p.id === h.changed_by)?.full_name || "—"}</b><small className="mono">{diff.map((k) => `${k}: ${JSON.stringify(h.before?.[k])} → ${JSON.stringify(h.after[k])}`).join("; ") || "—"}</small></span></div>; })}</details>}
   </div>;
+}
+
+/** Phase 6: the operations part of Executive Control — the same items as the operations dashboard, for this person */
+function OpsCard() {
+  const { lang } = useApp(); const T = (x: T4, v?: any) => say(x, lang, v);
+  const [ov, setOv] = useState<any>(null); const [att, setAtt] = useState<any[] | null>(null);
+  useEffect(() => { ops.overview().then(setOv).catch(() => setOv({ items: {} })); ops.attention().then(setAtt).catch(() => setAtt([])); }, []);
+  const n = (k: string) => ov?.items?.[k]?.count || 0;
+  const K: [string, T4][] = [["needs_action", L("Needs my action", "Нужно моё действие", "Потрібна моя дія", "يحتاج إجرائي")], ["sla_overdue", L("Overdue steps", "Просроченные шаги", "Прострочені кроки", "خطوات متأخرة")],
+    ["sla_escalated", L("Escalated", "Эскалированы", "Ескальовані", "مصعّدة")], ["blocked", L("Blocked processes", "Заблокированные процессы", "Заблоковані процеси", "عمليات معطلة")], ["po_overdue", L("Late deliveries", "Опоздавшие поставки", "Запізнілі поставки", "تسليمات متأخرة")],
+    ["pay_unpaid", L("Approved, not paid", "Согласовано, не оплачено", "Погоджено, не сплачено", "معتمد غير مدفوع")], ["obl_overdue", L("Obligations overdue", "Просроченные обязательства", "Прострочені зобов'язання", "التزامات متأخرة")], ["wait_open", L("Waiting outside", "Ждём извне", "Чекаємо ззовні", "بانتظار جهات خارجية")]];
+  return <div className="card hub-card" data-ops-card><div className="card-h"><h2><Icon n="git" />{T(L("Operations", "Операции", "Операції", "العمليات"))}</h2><Link className="btn ghost sm" style={{ marginInlineStart: "auto" }} href="/ops?tab=dashboard">{T(L("All", "Все", "Усі", "الكل"))}</Link></div>
+    <div className="feed">{!ov ? <div className="empty">…</div> : <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, padding: "0 8px 8px" }}>{K.map(([k, l]) => <Link key={k} className="stat" data-ops-kind={k} href={k === "needs_action" ? "/ops?tab=mine" : "/ops?tab=dashboard"}><b className={`mono ${k !== "needs_action" && k !== "wait_open" && n(k) ? "neg" : ""}`}>{n(k)}</b><small>{T(l)}</small></Link>)}</div>}
+      {(att || []).slice(0, 5).map((a: any) => <Link key={a.kind + a.record_id} className="hub-row" href={a.instance_id ? `/ops?i=${a.instance_id}` : `/${String(a.section).replace(".", "/")}?r=${a.record_id}`}><span style={{ minWidth: 0 }}><b>{a.number ? `${a.number} · ` : ""}{a.title}</b><small>{a.reason}</small></span></Link>)}</div></div>;
 }

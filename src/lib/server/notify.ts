@@ -19,6 +19,9 @@ const T: Record<string, Record<string, string>> = {
 const K: Record<string, Record<string, string>> = {
   mgmt_alert: { en: "Management alert", ru: "Оповещение руководства", uk: "Сповіщення керівництва", ar: "تنبيه إداري" }, waiting_remind: { en: "Someone is waiting for this", ru: "Этого ждут от вас", uk: "Цього чекають від вас", ar: "شخص ينتظر هذا" },
   waiting_escalated: { en: "Escalated", ru: "Эскалировано", uk: "Ескальовано", ar: "تم التصعيد" },
+  wf_action: { en: "A process step needs you", ru: "Шаг процесса ждёт вас", uk: "Крок процесу чекає на вас", ar: "خطوة في عملية تحتاجك" }, wf_due_soon: { en: "Process step due soon", ru: "Скоро срок шага процесса", uk: "Скоро термін кроку процесу", ar: "خطوة قريبة الاستحقاق" },
+  wf_overdue: { en: "Process step overdue", ru: "Шаг процесса просрочен", uk: "Крок процесу прострочено", ar: "خطوة متأخرة" }, wf_escalated: { en: "Process step escalated to you", ru: "Шаг процесса эскалирован вам", uk: "Крок процесу ескальовано вам", ar: "صُعّدت إليك خطوة" },
+  wf_done: { en: "Your request is finished", ru: "Ваша заявка завершена", uk: "Вашу заявку завершено", ar: "اكتمل طلبك" },
   assigned: { en: "Assigned to you", ru: "Назначено вам", uk: "Призначено вам", ar: "أُسند إليك" }, reassigned: { en: "Reassigned to you", ru: "Переназначено вам", uk: "Перепризначено вам", ar: "أُعيد إسناده إليك" },
   unassigned: { en: "No longer assigned to you", ru: "Снято с вас", uk: "Знято з вас", ar: "لم يعد مسنداً إليك" }, status: { en: "Status changed", ru: "Статус изменён", uk: "Статус змінено", ar: "تغيّرت الحالة" },
   mention: { en: "Mentioned you", ru: "Вас упомянули", uk: "Вас згадали", ar: "ذُكرت" }, comment: { en: "New comment", ru: "Новый комментарий", uk: "Новий коментар", ar: "تعليق جديد" },

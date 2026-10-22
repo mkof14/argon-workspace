@@ -23,6 +23,11 @@ export const KINDS: Record<string, { icon: string; label: T4 }> = {
   mention: { icon: "user", label: L("Mentioned you", "Упомянули вас", "Згадали вас", "ذُكرت") },
   comment: { icon: "send", label: L("New comment", "Новый комментарий", "Новий коментар", "تعليق جديد") },
   approval_requested: { icon: "check", label: L("Approval requested", "Нужно ваше согласование", "Потрібне ваше погодження", "مطلوب موافقتك") },
+  wf_action: { icon: "git", label: L("A process step needs you", "Шаг процесса ждёт вас", "Крок процесу чекає на вас", "خطوة في عملية تحتاجك") },
+  wf_due_soon: { icon: "clock", label: L("Process step due soon", "Скоро срок шага процесса", "Скоро термін кроку процесу", "خطوة قريبة الاستحقاق") },
+  wf_overdue: { icon: "alert", label: L("Process step overdue", "Шаг процесса просрочен", "Крок процесу прострочено", "خطوة متأخرة") },
+  wf_escalated: { icon: "alert", label: L("Process step escalated to you", "Шаг процесса эскалирован вам", "Крок процесу ескальовано вам", "صُعّدت إليك خطوة") },
+  wf_done: { icon: "check", label: L("Your request is finished", "Ваша заявка завершена", "Вашу заявку завершено", "اكتمل طلبك") },
   approval_done: { icon: "check", label: L("Approval decided", "Решение по согласованию", "Рішення щодо погодження", "قرار الموافقة") },
   due_soon: { icon: "clock", label: L("Deadline soon", "Скоро срок", "Скоро термін", "موعد قريب") },
   overdue: { icon: "alert", label: L("Overdue", "Просрочено", "Прострочено", "متأخر") },
@@ -48,6 +53,7 @@ export const CATS: { k: string; label: T4; kinds?: string[] }[] = [
   { k: "approvals", label: L("Approvals", "Согласования", "Погодження", "الموافقات"), kinds: ["approval_requested", "approval_done"] },
   { k: "company", label: L("Company", "Компания", "Компанія", "الشركة"), kinds: ["announcement", "announcement_critical", "security"] },
   { k: "management", label: L("Management", "Руководство", "Керівництво", "الإدارة"), kinds: ["mgmt_alert", "waiting_remind", "waiting_escalated"] },
+  { k: "processes", label: L("Requests & processes", "Заявки и процессы", "Заявки та процеси", "الطلبات والعمليات"), kinds: ["wf_action", "wf_due_soon", "wf_overdue", "wf_escalated", "wf_done"] },
 ];
 export const noticeHref = (n: Notice) => n.link || (n.record_id && n.section ? `/${n.section.replace(".", "/")}?r=${n.record_id}` : "/notifications");
 const ago = (iso: string, lang: Lang) => { const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return m < 60 ? tx(L(`${Math.max(1, m)} min`, `${Math.max(1, m)} мин`, `${Math.max(1, m)} хв`, `${Math.max(1, m)} د`), lang) : m < 1440 ? tx(L(`${Math.round(m / 60)} h`, `${Math.round(m / 60)} ч`, `${Math.round(m / 60)} год`, `${Math.round(m / 60)} س`), lang) : iso.slice(0, 10); };

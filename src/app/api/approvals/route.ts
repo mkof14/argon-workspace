@@ -122,7 +122,7 @@ export async function POST(req: Request) {
     const token = String(b.token || "");
     if (!/^[A-Za-z0-9_-]{32,}$/.test(token)) return new Response("Link is not valid", { status: 404 });
     const { data: a } = await db.from("approvals").select("*").eq("token_hash", hashToken(token)).maybeSingle();
-    if (!a) return new Response("Link is not valid", { status: 404 });
+    if (!a || a.wf_run) return new Response("Link is not valid", { status: 404 });
     if (a.status === "pending" && Date.parse(a.expires_at) < Date.now()) { await db.from("approvals").update({ status: "expired" }).eq("id", a.id); a.status = "expired"; }
     const [{ data: r }, { data: rq }, { data: ap }] = await Promise.all([
       db.from("records").select("*").eq("id", a.record_id).single(),
@@ -195,8 +195,10 @@ export async function POST(req: Request) {
   }
 
   if (b.action === "cancel") {
-    const { data: a } = await db.from("approvals").select("id,requested_by,status").eq("id", b.id).maybeSingle();
+    const { data: a } = await db.from("approvals").select("id,requested_by,status,wf_run").eq("id", b.id).maybeSingle();
     if (!a || (a.requested_by !== me.id && !["owner", "admin"].includes(me.role))) return new Response("Not allowed", { status: 403 });
+    // an approval inside a process is withdrawn by cancelling the process (it would otherwise leave a step without a decision)
+    if (a.wf_run) return new Response("This approval belongs to a process: cancel the process instead", { status: 409 });
     await db.from("approvals").update({ status: "cancelled" }).eq("id", a.id).eq("status", "pending");
     return Response.json({ ok: true });
   }
@@ -204,6 +206,13 @@ export async function POST(req: Request) {
   if (b.action === "decide" && b.id) {
     const { data: a } = await db.from("approvals").select("*").eq("id", b.id).maybeSingle();
     if (!a || a.approver_id !== me.id) return new Response("Not allowed", { status: 403 });
+    // Phase 6: an approval inside a process is decided by the database (exact values, separation of duties, next level)
+    if (a.wf_run) {
+      const { data, error } = await sb.rpc("wf_approval_decide", { p_id: a.id, p_decision: b.decision, p_comment: String(b.comment || "").slice(0, 2000) || null });
+      if (error) return new Response(error.message, { status: error.code === "42501" ? 403 : 409 });
+      if (data && data.ok === false) return new Response(data.error, { status: 409 });
+      return Response.json({ ok: true, status: data?.status || b.decision });
+    }
     if (a.status !== "pending") return new Response(`Already ${a.status}`, { status: 409 });
     const d: Decision = b.decision === "approved" ? "approved" : b.decision === "changes_requested" ? "changes_requested" : "rejected";
     if (d === "changes_requested" && !String(b.comment || "").trim()) return new Response("Say what needs to change", { status: 400 });

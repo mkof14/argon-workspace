@@ -4,7 +4,7 @@ import { purgeFiles } from "@/lib/server/trash";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const INTERNAL = ["owner", "admin", "management", "engineering", "operations", "finance", "sales", "marketing", "hr", "legal", "security"];
+const INTERNAL = ["owner", "admin", "management", "engineering", "operations", "finance", "sales", "marketing", "hr", "legal", "security", "procurement"];
 
 /**
  * Recycle bin: deleted records stay 30 days.

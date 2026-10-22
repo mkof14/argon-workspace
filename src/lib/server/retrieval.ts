@@ -4,6 +4,8 @@
 // passages are sent to the model, each numbered as a source the person can open. Company content is quoted
 // as untrusted data: instructions inside documents, e-mail, comments or notes never change the Assistant's rules.
 
+import { opsIntent } from "@/lib/opsText";
+
 export type Source = { n: number; kind: string; id: string; title: string; link: string; excerpt: string; suspicious?: boolean; meta?: Record<string, any> };
 export type Retrieval = { sources: Source[]; intents: string[]; facts: string[]; empty: boolean };
 
@@ -45,6 +47,29 @@ export async function retrieve(sb: any, me: { id: string; role: string }, ask: A
     for (const a of data || []) { const r = (recs || []).find((x: any) => x.id === a.record_id); if (r) add({ kind: "approval", id: r.id, title: r.title, link: "/decide", excerpt: `waiting since ${String(a.created_at).slice(0, 10)}${r.data?.version ? ` · version ${r.data.version}` : ""}${a.step > 1 ? ` · step ${a.step}` : ""}` }); }
     facts.push(`Approvals waiting for the person: ${(recs || []).length}`);
   }
+  // Phase 6: operations questions — one allow-listed intent answered by the database for this person only,
+  // each line marked as a fact or a calculation, with its record as the source; "unavailable" is said as such
+  { const oi = opsIntent(q);
+    if (oi) {
+      const { data: a } = await sb.rpc("ops_assistant", { p_intent: oi.intent, p_arg: oi.arg || null });
+      if (a) {
+        intents.push(`ops_${oi.intent}`);
+        if (a.kind === "unavailable") facts.push(`Operations (${oi.intent}): unavailable — ${a.note || "nothing among the records the person can open"}`);
+        else if (a.kind === "calculation") {
+          facts.push(`Operations budget of project «${a.project?.title}» (calculation; ${a.formula})`);
+          for (const r of a.items || []) facts.push(`${r.currency}: budget ${r.budget}, requested (estimates) ${r.requested}, approved not ordered ${r.approved}, committed ${r.committed}, paid (recorded) ${r.paid}, remaining ${r.remaining}`);
+          if (a.project?.id) add({ kind: "project", id: a.project.id, title: a.project.title, link: `/projects/${a.project.id}`, excerpt: "budget lines, requests, purchase records and payment requests of this project" });
+        } else {
+          facts.push(`Operations (${oi.intent}, fact): ${a.total ?? (a.items || []).length} item(s)`);
+          for (const it of (a.items || []).slice(0, 15)) {
+            const procs = it.processes?.[0];
+            add({ kind: "operations", id: it.record_id, title: `${it.number ? it.number + " · " : ""}${it.title}`, link: it.instance_id ? `/ops?i=${it.instance_id}` : linkOf(it.section, it.record_id),
+              excerpt: [it.step && `step: ${it.step}`, procs && `process: ${procs.name} — ${procs.status}${procs.step ? `, step ${procs.step}` : ""}`, it.status && `status: ${it.status}`, it.amount != null && `amount: ${it.currency || ""} ${it.amount}`,
+                it.estimate != null && `estimate: ${it.currency || ""} ${it.estimate}`, it.level && `approval level ${it.level}`, it.requester && `requested by ${it.requester}`, it.due && `due ${String(it.due).slice(0, 10)}`, it.reason].filter(Boolean).join(" · ") });
+          }
+        }
+      }
+    } }
   if (has(/meeting|встреч|зустріч/) && has(/today|сегодня|сьогодні/)) {
     intents.push("meetings_today");
     const { data } = await sb.rpc("calendar_items", { p_from: today(), p_to: today(), p_scope: "mine" });

@@ -25,32 +25,123 @@ end $$;
    1. Access for the new sections and the procurement role (same values as the generated access.sql;
       existing custom access is never overwritten)
    --------------------------------------------------------------------------------------------- */
-insert into public.section_access(section, role, can_write, external)
-select s, r, w, false from (values
-  -- purchase requests and payment requests: every internal role may raise one; who sees which is decided per record
-  ('operations.requests', array['management','engineering','operations','finance','sales','marketing','hr','legal','security','procurement'], array['management','engineering','operations','finance','sales','marketing','hr','legal','security','procurement']),
-  ('operations.quotations', array['management','engineering','operations','finance','procurement'], array['management','operations','procurement']),
-  ('operations.receipts', array['management','engineering','operations','finance','sales','marketing','hr','legal','security','procurement'], array['management','operations','procurement']),
-  ('finance.payments', array['management','engineering','operations','finance','sales','marketing','hr','legal','security','procurement'], array['management','engineering','operations','finance','sales','marketing','hr','legal','security','procurement']),
-  ('legal.contract_obligations', array['management','legal','finance','operations','sales','procurement'], array['management','legal']),
-  ('company.issues', array['management','engineering','operations','finance','sales','marketing','hr','legal','security','procurement'], array['management','engineering','operations','finance','sales','marketing','hr','legal','security','procurement']),
-  ('company.travel', array['management','engineering','operations','finance','sales','marketing','hr','legal','security','procurement'], array['management','engineering','operations','finance','sales','marketing','hr','legal','security','procurement']),
-  ('company.requests', array['management','engineering','operations','finance','sales','marketing','hr','legal','security','procurement'], array['management','engineering','operations','finance','sales','marketing','hr','legal','security','procurement']),
-  ('company.parties', array['management','engineering','operations','finance','sales','marketing','hr','legal','security','procurement'], array['management','operations','finance','sales','legal','procurement'])
-) v(s, rs, ws), unnest(rs) r, lateral (select r = any(ws) w) x
+-- exactly the rows scripts/gen-access.mjs generates for these sections and for the procurement role (access.sql);
+-- added only where missing, so access customised in Users & roles is never overwritten
+insert into public.section_access(section, role, can_write, external) values
+  ('operations.builds', 'procurement', false, false),
+  ('operations.requests', 'management', true, false),
+  ('operations.requests', 'engineering', true, false),
+  ('operations.requests', 'operations', true, false),
+  ('operations.requests', 'finance', true, false),
+  ('operations.requests', 'sales', true, false),
+  ('operations.requests', 'marketing', true, false),
+  ('operations.requests', 'hr', true, false),
+  ('operations.requests', 'legal', true, false),
+  ('operations.requests', 'security', true, false),
+  ('operations.requests', 'procurement', true, false),
+  ('operations.quotations', 'management', true, false),
+  ('operations.quotations', 'engineering', false, false),
+  ('operations.quotations', 'operations', true, false),
+  ('operations.quotations', 'finance', false, false),
+  ('operations.quotations', 'procurement', true, false),
+  ('operations.procurement', 'procurement', true, false),
+  ('operations.receipts', 'management', true, false),
+  ('operations.receipts', 'engineering', false, false),
+  ('operations.receipts', 'operations', true, false),
+  ('operations.receipts', 'finance', false, false),
+  ('operations.receipts', 'sales', false, false),
+  ('operations.receipts', 'marketing', false, false),
+  ('operations.receipts', 'hr', false, false),
+  ('operations.receipts', 'legal', false, false),
+  ('operations.receipts', 'security', false, false),
+  ('operations.receipts', 'procurement', true, false),
+  ('operations.vendors', 'procurement', true, false),
+  ('operations.inventory', 'procurement', false, false),
+  ('operations.logistics', 'procurement', false, false),
+  ('operations.installation', 'procurement', false, false),
+  ('operations.support', 'procurement', false, false),
+  ('operations.comms', 'procurement', false, false),
+  ('operations.quality', 'procurement', false, false),
+  ('operations.fleet', 'procurement', false, false),
+  ('operations.metrics', 'procurement', false, false),
+  ('finance.expenses', 'procurement', true, false),
+  ('finance.payments', 'management', true, false),
+  ('finance.payments', 'engineering', true, false),
+  ('finance.payments', 'operations', true, false),
+  ('finance.payments', 'finance', true, false),
+  ('finance.payments', 'sales', true, false),
+  ('finance.payments', 'marketing', true, false),
+  ('finance.payments', 'hr', true, false),
+  ('finance.payments', 'legal', true, false),
+  ('finance.payments', 'security', true, false),
+  ('finance.payments', 'procurement', true, false),
+  ('marketing.brand', 'procurement', false, false),
+  ('security.incidents', 'procurement', true, false),
+  ('legal.desks', 'procurement', true, false),
+  ('legal.requests', 'procurement', true, false),
+  ('legal.contract_obligations', 'management', true, false),
+  ('legal.contract_obligations', 'legal', true, false),
+  ('legal.contract_obligations', 'finance', false, false),
+  ('legal.contract_obligations', 'operations', false, false),
+  ('legal.contract_obligations', 'sales', false, false),
+  ('legal.contract_obligations', 'procurement', false, false),
+  ('hr.team', 'procurement', false, false),
+  ('hr.training', 'procurement', false, false),
+  ('hr.policies', 'procurement', false, false),
+  ('hr.leave', 'procurement', true, false),
+  ('company.tasks', 'procurement', true, false),
+  ('company.portfolios', 'procurement', false, false),
+  ('company.projects', 'procurement', true, false),
+  ('company.milestones', 'procurement', true, false),
+  ('company.documents', 'procurement', true, false),
+  ('company.wiki', 'procurement', true, false),
+  ('company.requests', 'management', true, false),
+  ('company.requests', 'engineering', true, false),
+  ('company.requests', 'operations', true, false),
+  ('company.requests', 'finance', true, false),
+  ('company.requests', 'sales', true, false),
+  ('company.requests', 'marketing', true, false),
+  ('company.requests', 'hr', true, false),
+  ('company.requests', 'legal', true, false),
+  ('company.requests', 'security', true, false),
+  ('company.requests', 'procurement', true, false),
+  ('company.issues', 'management', true, false),
+  ('company.issues', 'engineering', true, false),
+  ('company.issues', 'operations', true, false),
+  ('company.issues', 'finance', true, false),
+  ('company.issues', 'sales', true, false),
+  ('company.issues', 'marketing', true, false),
+  ('company.issues', 'hr', true, false),
+  ('company.issues', 'legal', true, false),
+  ('company.issues', 'security', true, false),
+  ('company.issues', 'procurement', true, false),
+  ('company.travel', 'management', true, false),
+  ('company.travel', 'engineering', true, false),
+  ('company.travel', 'operations', true, false),
+  ('company.travel', 'finance', true, false),
+  ('company.travel', 'sales', true, false),
+  ('company.travel', 'marketing', true, false),
+  ('company.travel', 'hr', true, false),
+  ('company.travel', 'legal', true, false),
+  ('company.travel', 'security', true, false),
+  ('company.travel', 'procurement', true, false),
+  ('company.parties', 'management', true, false),
+  ('company.parties', 'engineering', false, false),
+  ('company.parties', 'operations', true, false),
+  ('company.parties', 'finance', true, false),
+  ('company.parties', 'sales', true, false),
+  ('company.parties', 'marketing', false, false),
+  ('company.parties', 'hr', false, false),
+  ('company.parties', 'legal', true, false),
+  ('company.parties', 'security', false, false),
+  ('company.parties', 'procurement', true, false),
+  ('company.contacts', 'procurement', true, false),
+  ('company.meetings', 'procurement', true, false),
+  ('company.announcements', 'procurement', false, false),
+  ('company.decisions', 'procurement', false, false),
+  ('mail.templates', 'procurement', true, false),
+  ('mail.outbox', 'procurement', true, false)
 on conflict (section, role) do nothing;
-
--- the procurement role reads and writes what the operations desk handles, and reads what it needs around it
-insert into public.section_access(section, role, can_write, external)
-select a.section, 'procurement', a.section in ('operations.procurement', 'operations.vendors', 'operations.logistics', 'operations.inventory'), false
-from public.section_access a
-where a.role = 'operations' and a.section not like 'operations.metrics%'
-on conflict (section, role) do nothing;
-insert into public.section_access(section, role, can_write, external)
-select s, 'procurement', false, false from unnest(array['legal.contracts', 'finance.budget', 'company.projects', 'company.tasks', 'company.milestones', 'company.documents', 'company.meetings', 'company.decisions', 'company.wiki', 'company.contacts', 'company.portfolios']) s
-where exists (select 1 from public.section_access a where a.section = s)
-on conflict (section, role) do nothing;
-update public.section_access set can_write = true where role = 'procurement' and section = 'company.tasks';
 
 /* ---------------------------------------------------------------------------------------------
    2. Operations settings: one document, changed only by owners and administrators, every change kept
@@ -77,7 +168,7 @@ insert into public.ops_settings(id, value) values (true, jsonb_build_object(
   'material', jsonb_build_object(
     'operations.requests', jsonb_build_array('est_amount', 'currency', 'qty', 'item', 'selected_quote_ref', 'selected_amount', 'selected_currency', 'vendor_ref', 'project_ref'),
     'finance.payments', jsonb_build_array('amount', 'currency', 'payee_ref', 'purchase_ref', 'invoice_ref', 'due'),
-    'legal.contracts', jsonb_build_array('document_ref', 'counterparty', 'value', 'currency'),
+    'legal.contracts', jsonb_build_array('document_ref', 'counterparty', 'amount', 'currency'),
     'technical.changes', jsonb_build_array('config', 'reason', 'impact_cost', 'impact_schedule_days', 'impact_configs', 'impact_documents', 'impact_bom', 'impact_confirmed_at'),
     'company.travel', jsonb_build_array('est_cost', 'currency', 'destination', 'starts', 'ends', 'travellers'),
     'company.requests', jsonb_build_array('amount', 'currency')),
@@ -876,7 +967,7 @@ begin
   elsif r.section = 'legal.contracts' then
     select d.data->>'current_version_id' into v from public.records d where d.id = public.as_uuid(r.data->>'document_ref');
     select count(*) into q from public.records x where x.section = 'legal.contract_obligations' and x.data->>'contract_ref' = r.id::text;
-    f := f || jsonb_build_object('documents', case when v is not null then 1 else 0 end, 'document_version', v, 'obligations', q, 'amount', public._num(r.data->'value'), 'currency', r.data->>'currency');
+    f := f || jsonb_build_object('documents', case when v is not null then 1 else 0 end, 'document_version', v, 'obligations', q, 'amount', public._num(r.data->'amount'), 'currency', r.data->>'currency');
   elsif r.section = 'technical.changes' then
     f := f || jsonb_build_object('impact_complete', coalesce(r.data->>'impact_confirmed_at', '') <> '', 'amount', public._num(r.data->'impact_cost'));
   elsif r.section = 'company.travel' then
@@ -2271,7 +2362,7 @@ begin
     insert into pg_temp.ops_v
     select r.id, r.section, r.title, r.status, r.data, r.controlled, r.created_by, r.created_at, r.updated_at,
       public.as_uuid(r.data->>'project_ref'),
-      coalesce(public._num(r.data->'amount'), public._num(r.data->'selected_amount'), public._num(r.data->'est_amount'), public._num(r.data->'est_cost'), public._num(r.data->'value'), public._num(r.data->'planned')),
+      coalesce(public._num(r.data->'amount'), public._num(r.data->'selected_amount'), public._num(r.data->'est_amount'), public._num(r.data->'est_cost'), public._num(r.data->'planned')),
       coalesce(r.data->>'selected_currency', r.data->>'currency'),
       case when coalesce(r.data->>'due', r.data->>'eta', r.data->>'end_date', r.data->>'needed_by') ~ '^\d{4}-\d{2}-\d{2}' then left(coalesce(r.data->>'due', r.data->>'eta', r.data->>'end_date', r.data->>'needed_by'), 10)::date end,
       r.data->>'number'

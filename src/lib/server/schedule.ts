@@ -31,4 +31,9 @@ export const JOBS_FNS: Record<string, JobFn> = {
     const { data: snapshots, error: e2 } = await db.rpc("mgmt_daily_snapshots"); if (e2) throw new Error(e2.message);
     return { alerts, snapshots };
   },
+  // Phase 6: process SLA (due soon, overdue, one escalation per step — never repeated) and automatic-step retries
+  workflow: async (db) => {
+    const { data, error } = await db.rpc("wf_sla_tick"); if (error) throw new Error(error.message);
+    return data;
+  },
 };

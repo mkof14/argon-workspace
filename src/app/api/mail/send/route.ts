@@ -5,7 +5,7 @@ import { limit } from "@/lib/server/authz";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const INTERNAL = ["owner", "admin", "management", "engineering", "operations", "finance", "sales", "marketing", "hr", "legal", "security"];
+const INTERNAL = ["owner", "admin", "management", "engineering", "operations", "finance", "sales", "marketing", "hr", "legal", "security", "procurement"];
 const configured = () => !!(process.env.SMTP_USER && process.env.SMTP_PASS);
 const emails = (v: any) => String(v || "").split(/[,;\s]+/).map((x) => x.trim()).filter((x) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x));
 

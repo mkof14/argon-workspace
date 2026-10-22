@@ -1,6 +1,6 @@
 // Who is who, in one place: internal staff, external users, privileged accounts. Used by every server route
 // (lib/server/authz.ts) and by the interface, so a role check is never written differently twice.
-export const INTERNAL_ROLES = ["owner", "admin", "management", "engineering", "operations", "finance", "sales", "marketing", "hr", "legal", "security"] as const;
+export const INTERNAL_ROLES = ["owner", "admin", "management", "engineering", "operations", "finance", "sales", "marketing", "hr", "legal", "security", "procurement"] as const;
 export const EXTERNAL_ROLES = ["partner", "vendor", "investor"] as const;
 export const PRIVILEGED_ROLES = ["owner", "admin"] as const;
 export const LEAD_ROLES = ["owner", "admin", "management"] as const;

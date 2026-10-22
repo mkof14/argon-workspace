@@ -607,6 +607,14 @@ export async function runAgents(db: any, opts: { only?: AgentId; manual?: boolea
 /** Runs a claimed queue item and records the outcome; a passing failure is retried with back-off, then dead-lettered. */
 async function executeQueued(c: Ctx, row: Row): Promise<Row> {
   const db = c.db; const now = new Date().toISOString(); const a = row.action; const idem = `queue:${row.id}`;
+  // Phase 6: an automatic process step is retried by the database itself (same step run, allow-listed action,
+  // attempts and dead letter kept on this row) — hand the claim back and let wf_retry_due run it once
+  if ((row as any).agent === "workflow") {
+    await db.from("automation_queue").update({ status: "retrying", attempts: Math.max(0, (row.attempts || 1) - 1), next_attempt_at: now }).eq("id", row.id).eq("exec_id", row.exec_id);
+    const { error } = await db.rpc("wf_retry_due", { p_limit: 20 }); if (error) await reportError(db, "automation:workflow", error, { detail: row.id });
+    const { data } = await db.from("automation_queue").select("*").eq("id", row.id).single();
+    return (data || row) as Row;
+  }
   let ok = false, retry = false, result = "", error = "";
   try {
     if (a.type === "set" && a.field === "_quality_fix") result = `fixed ${await applyQualityFixes(db)}`;

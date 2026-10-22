@@ -12,7 +12,7 @@ import { isEmployee, loadDepartments, personName } from "./PeopleFields";
 
 type T4 = { en: string; ru: string; uk: string; ar: string };
 const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk, ar });
-const ROLES = ["owner", "admin", "management", "engineering", "operations", "finance", "sales", "marketing", "hr", "legal", "security"];
+const ROLES = ["owner", "admin", "management", "engineering", "operations", "finance", "sales", "marketing", "hr", "legal", "security", "procurement"];
 
 export default function InfoSettings() {
   const { lang, people, toast, reload } = useApp(); const T = (x: T4) => tx(x, lang as Lang);

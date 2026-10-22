@@ -79,7 +79,7 @@ export function AudienceField({ data, setData, ro }: { data: Record<string, any>
   const set = (v: string[]) => setData((d) => ({ ...d, audience: v.join(",") }));
   if (type === "company") return null;
   const opts: { v: string; l: string }[] = type === "department" ? depts.filter((d) => d.active).map((d) => ({ v: d.id, l: d.label?.[lang] || d.label?.en || d.name }))
-    : type === "roles" ? ["management", "engineering", "operations", "finance", "sales", "marketing", "hr", "legal", "security"].map((r) => ({ v: r, l: r })) : [];
+    : type === "roles" ? ["management", "engineering", "operations", "finance", "sales", "marketing", "hr", "legal", "security", "procurement"].map((r) => ({ v: r, l: r })) : [];
   if (type === "project") return <div className="field wide"><label>{T(L("Project (id or exact name)", "Проект (id или точное название)", "Проєкт (id або точна назва)", "المشروع (المعرّف أو الاسم الدقيق)"))}</label><input className="input" value={data.audience || ""} readOnly={ro} onChange={(e) => setData((d) => ({ ...d, audience: e.target.value }))} /></div>;
   const legacy = vals.filter((v) => !opts.some((o) => o.v === v));
   return <div className="field wide"><label>{type === "department" ? T(L("Departments", "Отделы", "Відділи", "الأقسام")) : T(L("Roles", "Роли", "Ролі", "الأدوار"))}</label>
