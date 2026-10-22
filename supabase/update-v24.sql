@@ -597,10 +597,10 @@ begin
       else true end;
 end $$;
 
--- same rule in the per-statement working set
+-- same rule in the per-statement working set (set-based for restricted opportunities)
 create or replace function public._mgmt_base(p_viewer uuid) returns void
 language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off set default_statistics_target = 25 as $$
-declare p record; secs text[]; restricted text[];
+declare p record; secs text[]; restricted text[]; hidden text[] := '{}';
 begin
   if to_regclass('pg_temp.mgmt_meta') is null then
     create temp table mgmt_meta (viewer uuid, at timestamptz, health boolean not null default false, loops boolean not null default false) on commit drop;
@@ -614,6 +614,11 @@ begin
   if found and p.role is not null and p.role not in ('partner', 'vendor', 'investor', 'pending') then
     select coalesce(array_agg(a.section), '{}') into secs from public.section_access a where a.role = p.role;
     select coalesce(array_agg(t.code), '{}') into restricted from public.taxonomy t where t.kind = 'classification' and coalesce((t.meta->>'restricted')::boolean, false);
+    -- v24: the restricted opportunities this person may not open (owners and management open them all); their meetings and
+    -- decisions stay out unless the person takes part in that record — the rule of _crm_follow_ok, set-based
+    if p.role not in ('owner', 'management') then
+      select coalesce(array_agg(o.id::text), '{}') into hidden from public.records o where o.section = 'sales.pipeline' and coalesce((o.data->>'restricted')::boolean, false) and not public._crm_opp_ok(p.id, o);
+    end if;
     -- exactly the rule of mgmt_visible (tested to equal row-level security), written inline so no row is copied twice
     insert into pg_temp.mgmt_v select r.*,
       case when r.data->>'project_ref' like '________-____-____-____-____________' and length(replace(r.data->>'project_ref', '-', '')) = 32 and r.data->>'project_ref' ~ '^[-0-9a-fA-F]+$' then (r.data->>'project_ref')::uuid end,
@@ -645,7 +650,9 @@ begin
           or not coalesce(r.data->>'classification' = any(restricted), false)
           or coalesce(r.data->'access_ids', '[]'::jsonb) ? p.id::text or coalesce(r.data->'contributors_ids', '[]'::jsonb) ? p.id::text
           or p.role in ('owner', 'management')
-        when r.section in ('company.meetings', 'company.decisions') and coalesce(r.data->>'deal_ref', '') <> '' and p.role not in ('owner', 'management') then coalesce(public.extra_visible(p.id, r), false)
+        when r.section in ('company.meetings', 'company.decisions') and coalesce(r.data->>'deal_ref', '') <> '' and r.data->>'deal_ref' = any(hidden)
+          and not (r.created_by = p.id or coalesce(r.data->>'owner_id', '') = p.id::text or coalesce(r.data->>'organizer_id', '') = p.id::text
+                   or coalesce(r.data->'participants_ids', '[]'::jsonb) ? p.id::text) then false
         when r.section = 'company.decisions' and coalesce(r.data->>'source_ref', '') ~ '^[0-9a-f-]{36}$' then coalesce(public.extra_visible(p.id, r), false)
         else true end
       -- a draft or archived document with no date and no open approval takes part in no engine: not copied
