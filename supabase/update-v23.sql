@@ -2341,13 +2341,13 @@ grant execute on function public.ops_party(uuid) to authenticated;
    16. Read models for one viewer. The working set is built once per statement (as in v22): every number, list,
        budget, attention item, weekly line and Assistant answer comes only from records this viewer may open.
    --------------------------------------------------------------------------------------------- */
-create or replace function public._ops_base(p_viewer uuid, p_secs text[] default null, p_closed boolean default false) returns void
+create or replace function public._ops_base(p_viewer uuid, p_secs text[] default null, p_closed boolean default false, p_open_only boolean default false) returns void
 language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 declare p record; secs text[]; desks jsonb := coalesce(public.ops_cfg()->'desks', '{}'::jsonb); pid text; want text[] := coalesce(p_secs, public.ops_sections());
   personal text[] := array['operations.requests', 'finance.payments', 'company.travel', 'company.requests'];
 begin
   if to_regclass('pg_temp.ops_meta') is null then
-    create temp table ops_meta (viewer uuid, at timestamptz, secs text[], closed boolean) on commit drop;
+    create temp table ops_meta (viewer uuid, at timestamptz, secs text[], closed boolean, open_only boolean) on commit drop;
     create temp table ops_v (id uuid, section text, title text, status text, data jsonb, controlled boolean, created_by uuid, created_at timestamptz, updated_at timestamptz,
       m_project uuid, m_amount numeric, m_currency text, m_due date, m_number text) on commit drop;
     create temp table ops_iv (id uuid, record_id uuid, section text, def_code text, def_name text, status text, priority text, requester uuid, owner uuid,
@@ -2355,7 +2355,7 @@ begin
       run_due timestamptz, run_paused boolean, run_started timestamptz, escalation_level int, r_title text, r_number text, r_status text, r_amount numeric, r_currency text, r_impact boolean) on commit drop;
   end if;
   -- built once per statement; a later call asking for no more than what is there reuses it
-  if exists (select 1 from pg_temp.ops_meta m where m.viewer is not distinct from p_viewer and m.at = statement_timestamp() and m.secs @> want and (m.closed or not p_closed)) then return; end if;
+  if exists (select 1 from pg_temp.ops_meta m where m.viewer is not distinct from p_viewer and m.at = statement_timestamp() and m.secs @> want and (m.closed or not p_closed) and (p_open_only or not m.open_only)) then return; end if;
   truncate pg_temp.ops_v; truncate pg_temp.ops_iv; delete from pg_temp.ops_meta;
   select pp.id, pp.role, coalesce(pp.us_person, false) us into p from public.profiles pp where pp.id = p_viewer and not pp.disabled;
   if found and p.role is not null and p.role not in ('partner', 'vendor', 'investor', 'pending') then
@@ -2372,6 +2372,15 @@ begin
       r.data->>'number'
     from public.records r
     where r.section = any(want)
+      -- the lists, attention, deadlines and the dashboard read only what is still open or recent
+      and (not p_open_only or case r.section
+        when 'operations.procurement' then r.status in ('Approved', 'Ordered', 'Partially delivered') or (r.status = 'Received' and coalesce(r.data->>'last_received', '') >= to_char(current_date - 30, 'YYYY-MM-DD'))
+        when 'finance.payments' then coalesce(r.status, '') not in ('Reconciled', 'Closed', 'Cancelled', 'Rejected', 'Paid') or coalesce(r.data->>'paid_on', '') >= to_char(current_date - 30, 'YYYY-MM-DD')
+        when 'legal.contracts' then r.status in ('Active', 'Signed', 'Renewal') and coalesce(r.data->>'end_date', '') between to_char(current_date, 'YYYY-MM-DD') and to_char(current_date + 366, 'YYYY-MM-DD')
+        when 'legal.contract_obligations' then coalesce(r.status, 'Open') = 'Open'
+        when 'company.issues' then coalesce(r.status, 'Open') not in ('Closed', 'Cancelled')
+        when 'operations.requests' then coalesce(r.status, '') not in ('Closed', 'Rejected', 'Cancelled')
+        else true end)
       and (p.role in ('owner', 'admin') or r.section = any(secs))
       and (coalesce(r.controlled, true) = false or p.us)
       and (not (r.section = any(personal))
@@ -2404,10 +2413,11 @@ begin
       and r.section not in ('company.documents', 'company.decisions', 'company.wiki', 'company.announcements');
   end if;
   analyze pg_temp.ops_v; analyze pg_temp.ops_iv;
-  insert into pg_temp.ops_meta(viewer, at, secs, closed) values (p_viewer, statement_timestamp(), want, p_closed);
+  insert into pg_temp.ops_meta(viewer, at, secs, closed, open_only) values (p_viewer, statement_timestamp(), want, p_closed, p_open_only);
 end $$;
-revoke execute on function public._ops_base(uuid, text[], boolean) from public, anon, authenticated;
+revoke execute on function public._ops_base(uuid, text[], boolean, boolean) from public, anon, authenticated;
 drop function if exists public._ops_base(uuid);
+drop function if exists public._ops_base(uuid, text[], boolean);
 
 -- the visible set itself (used by the tests to prove it equals row-level security)
 create or replace function public.ops_visible_ids() returns setof uuid language plpgsql volatile security definer set search_path = public as $$
@@ -2441,7 +2451,7 @@ declare today date := (now() at time zone 'utc')::date; soon interval := make_in
     'ctr_review', 'ctr_signature', 'ctr_expiring', 'obl_due_soon', 'obl_overdue', 'ecr_open', 'ecr_approval', 'ecr_impact_missing', 'iss_open', 'iss_overdue', 'wait_open', 'wait_overdue',
     'sla_due_soon', 'sla_overdue', 'sla_escalated', 'blocked']);
 begin
-  perform public._ops_base(p_viewer, public._ops_kind_secs(k), false);
+  perform public._ops_base(p_viewer, public._ops_kind_secs(k), false, true);
   if to_regclass('pg_temp.ops_items') is null then
     create temp table ops_items (kind text, record_id uuid, section text, title text, number text, status text, step text, due timestamptz, amount numeric, currency text,
       run_id uuid, instance_id uuid, reason text) on commit drop;
@@ -2672,7 +2682,7 @@ language plpgsql volatile security definer set search_path = public set plan_cac
 declare me uuid := public.ops_viewer(); today date := (now() at time zone 'utc')::date; q text := lower(nullif(trim(coalesce(p_q, '')), ''));
 begin
   if me is null then raise exception 'Not signed in' using errcode = '42501'; end if;
-  perform public._ops_base(me, array['legal.contract_obligations', 'operations.requests', 'operations.procurement', 'finance.payments', 'company.issues', 'legal.contracts'], false);
+  perform public._ops_base(me, array['legal.contract_obligations', 'operations.requests', 'operations.procurement', 'finance.payments', 'company.issues', 'legal.contracts'], false, true);
   return coalesce((select jsonb_agg(jsonb_build_object('kind', x.kind, 'record_id', x.id, 'section', x.section, 'title', x.title, 'number', x.m_number, 'due', x.d, 'days', x.d - today, 'status', x.status) order by x.d, x.title) from (
     select case v.section when 'legal.contract_obligations' then 'obligation' when 'operations.requests' then 'needed_by' when 'operations.procurement' then 'delivery'
       when 'finance.payments' then 'payment_due' when 'company.issues' then 'issue_due' else 'date' end kind, v.id, v.section, v.title, v.m_number, v.m_due d, v.status
@@ -2851,9 +2861,9 @@ begin
            join public.wf_definitions d on d.id = i.definition_id
            where s.status = 'open' and s.due_at is not null and not s.paused and s.due_at - soon <= now() and i.status in ('active', 'blocked')
              -- only runs with something still to do: a first notice, the overdue notice, an escalation or a timeout not yet taken
-             and (s.soon_at is null or (s.overdue_at is null and s.due_at <= now())
-               or exists (select 1 from jsonb_array_elements(d.steps) st2 where st2->>'id' = s.step_id and ((st2 ? 'escalation' and s.escalation_level = 0) or (st2->'on' ? 'timed_out' and s.due_at <= now()))))
-           order by s.due_at limit 5000 loop
+             and ((s.soon_at is null and s.due_at > now()) or (s.overdue_at is null and s.due_at <= now())
+               or (s.due_at <= now() and exists (select 1 from jsonb_array_elements(d.steps) st2 where st2->>'id' = s.step_id and ((st2 ? 'escalation' and s.escalation_level = 0) or st2->'on' ? 'timed_out'))))
+           order by s.due_at limit 1000 loop
     select * into r from public.records where id = x.record_id;
     st := public._wf_step(x.definition_id, x.step_id);
     if x.step_type = 'APPROVAL' and x.soon_at is null then

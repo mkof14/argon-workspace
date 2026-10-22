@@ -125,7 +125,7 @@ test("normal screens and actions under 1 s (p95), heavy ones under 3 s, at volum
     return rpc("emp", "wf_act", { p_run: i.current_run, p_outcome: "submit", p_note: null });
   });
   const ap = await sql(`select a.id, a.approver_id from approvals a join records r on r.id = a.record_id join wf_instances i on i.id = (select instance_id from wf_step_runs where id = a.wf_run)
-    where a.status = 'pending' and r.title like $1 and a.approver_id = $2 and i.requester <> $2 limit 12`, [`P6 PR % ${run}`, U.mgmt.id]);
+    where a.status = 'pending' and r.title like $1 and a.approver_id = $2 and i.requester <> $2 and not r.controlled limit 12`, [`P6 PR % ${run}`, U.mgmt.id]);
   if (ap.length >= 6) T.approval_decision = await time(Math.min(10, ap.length - 1), (i) => rpc("mgmt", "wf_approval_decide", { p_id: ap[i].id, p_decision: "rejected", p_comment: "perf test" }));
   T.sla_tick_service = await time(3, async () => { await sql("select public.wf_sla_tick()"); return null; });
   fs.writeFileSync(path.join(ENV.STACK_DIR || ".stack", "p6-perf.json"), JSON.stringify(R, null, 1));

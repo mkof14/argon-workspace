@@ -15,7 +15,7 @@ drop trigger if exists records_ops_after on public.records;
 drop function if exists public._luhn(s text) cascade;
 drop function if exists public._num(v jsonb) cascade;
 drop function if exists public._ops_admin(p_uid uuid) cascade;
-drop function if exists public._ops_base(p_viewer uuid, p_secs text[], p_closed boolean) cascade;
+drop function if exists public._ops_base(p_viewer uuid, p_secs text[], p_closed boolean, p_open_only boolean) cascade;
 drop function if exists public._ops_budget_calc(p_project uuid, p_viewer uuid) cascade;
 drop function if exists public._ops_clean(p jsonb) cascade;
 drop function if exists public._ops_items(p_viewer uuid, p_kinds text[]) cascade;
@@ -107,6 +107,7 @@ drop function if exists public.wf_start(p_code text, p_record uuid, p_priority t
 drop function if exists public.wf_todo(p_type text, p_name text) cascade;
 drop function if exists public.wf_validate(d jsonb) cascade;
 drop function if exists public._ops_base(uuid) cascade;
+drop function if exists public._ops_base(uuid, text[], boolean) cascade;
 drop function if exists public._ops_items(uuid) cascade;
 drop function if exists public.ops_list(text, integer) cascade;
 drop function if exists public.ops_deadlines(integer) cascade;
