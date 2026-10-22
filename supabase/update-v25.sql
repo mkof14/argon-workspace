@@ -34,7 +34,7 @@ select s, r, w, false from (values
   ('technical.items', 'management', false), ('technical.items', 'engineering', true), ('technical.items', 'operations', true), ('technical.items', 'procurement', true), ('technical.items', 'finance', false),
   ('technical.boms', 'management', false), ('technical.boms', 'engineering', true), ('technical.boms', 'operations', false),
   ('technical.test_procedures', 'management', false), ('technical.test_procedures', 'engineering', true), ('technical.test_procedures', 'operations', false),
-  ('operations.work_orders', 'management', false), ('operations.work_orders', 'engineering', true), ('operations.work_orders', 'operations', true)
+  ('operations.work_orders', 'management', true), ('operations.work_orders', 'engineering', true), ('operations.work_orders', 'operations', true)
 ) v(s, r, w)
 on conflict do nothing;
 

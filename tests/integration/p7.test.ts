@@ -512,8 +512,16 @@ test("Scenario 19 — seeded financial and commercial thresholds are marked UNAP
     if (p.config_status !== "Approved") assert.equal(p.label, "UNAPPROVED DEFAULT CONFIGURATION", code);
   }
   const prop = g.policies.find((x: any) => x.code === "PROPOSAL"); if (prop.version === 1) assert.equal(prop.seeded, true, "made by the migration");
-  await fails(call("sales", "ops_policy_approve", ["PROPOSAL", prop.version]), /Only an owner or management/);
-  await fails(call("admin", "ops_policy_approve", ["PROPOSAL", prop.version]), /Only an owner or management/);
+  // v25 (Phase 8 remediation): business authority policies are confirmed by the Owner or a Policy Approver — a
+  // Workflow / Commercial Admin builds and edits them but does not approve them. On v24 management approved them.
+  const v25 = (await svc("select to_regprocedure('public._policy_approver(uuid)') is not null ok"))[0].ok;
+  const refused = v25 ? /Policy Approver/ : /Only an owner or management/;
+  await fails(call("sales", "ops_policy_approve", ["PROPOSAL", prop.version]), refused);
+  await fails(call("admin", "ops_policy_approve", ["PROPOSAL", prop.version]), refused);
+  if (v25) {
+    await fails(call("mgmt", "ops_policy_approve", ["PROPOSAL", prop.version]), /Policy Approver/);
+    await call("owner", "crm_cap_set", [U.mgmt.id, "policy_approver", true]);
+  }
   const ok = await call("mgmt", "ops_policy_approve", ["PROPOSAL", prop.version]);
   assert.equal(ok.status, "Approved");
   const g2 = await call("mgmt", "ops_settings_get", []); const p2 = g2.policies.find((x: any) => x.code === "PROPOSAL");
@@ -522,6 +530,7 @@ test("Scenario 19 — seeded financial and commercial thresholds are marked UNAP
   const p3 = (await call("mgmt", "ops_settings_get", [])).policies.find((x: any) => x.code === "PROPOSAL");
   assert.equal(p3.config_status, "Draft", "an edited policy is unapproved again"); assert.equal(p3.version, p2.version + 1);
   await call("mgmt", "ops_policy_approve", ["PROPOSAL", p3.version]);
+  if (v25) await call("owner", "crm_cap_set", [U.mgmt.id, "policy_approver", false]);
   const hist = await svc("select config_status, version from approval_policies_history where policy_code = 'PROPOSAL' order by id");
   assert.ok(hist.some((h: any) => h.config_status === "Superseded"), "the earlier approved version is superseded in the history");
 });
