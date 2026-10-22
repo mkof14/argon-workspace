@@ -55,9 +55,12 @@ test("Executive Control: first screen answers what needs action; every indicator
   await shot(p, "executive-control");
   const sel = (await p.$$(`[data-attn="${R.blocked.id}"]`)).length ? `[data-attn="${R.blocked.id}"]` : `[data-attn="${R.c20.id}"]`; await p.click(`${sel} button.linkish`);
   assert.ok(await waitFor(async () => /Attention score \d+ =/.test(await p.textContent(sel))), "the score is explained by its parts");
-  await p.click("[data-ind='overdue_work']"); assert.ok(await waitFor(async () => (await p.$$("[data-loop='task_overdue']")).length >= 3), "overdue work drill-down");
-  const first = await p.$(`[data-loop='task_overdue'] a`); const href = await first.getAttribute("href"); assert.match(href, /^\/company\/tasks\?r=/, "a line opens its record");
-  await p.click("[data-ind='blocked_work']"); assert.ok(await waitFor(async () => (await p.$$(`[data-loop='task_blocked'][data-rec='${R.blocked.id}']`)).length === 1), "blocked");
+  await p.click("[data-ind='overdue_work']"); assert.ok(await waitFor(async () => (await p.$$("[data-drill] [data-loop='task_overdue']")).length >= 3), "overdue work drill-down");
+  if (await p.$("[data-drill] input.loop-filter")) { await p.fill("[data-drill] input.loop-filter", tag); } // the shared stack may hold thousands: narrow to this run
+  assert.ok(await waitFor(async () => (await p.$$(`[data-drill] [data-loop='task_overdue']:has-text('C20 overdue')`)).length === 3), "exactly the three overdue C20 tasks of this run");
+  const first = await p.$(`[data-drill] [data-loop='task_overdue'] a`); const href = await first.getAttribute("href"); assert.match(href, /^\/company\/tasks\?r=/, "a line opens its record");
+  await p.click("[data-ind='blocked_work']"); await p.waitForTimeout(300); if (await p.$("[data-drill] input.loop-filter")) await p.fill("[data-drill] input.loop-filter", tag);
+  assert.ok(await waitFor(async () => (await p.$$(`[data-drill] [data-loop='task_blocked'][data-rec='${R.blocked.id}']`)).length === 1), "blocked");
   assert.ok((await p.$$("[data-health] a")).length === 4, "portfolio health tiles link to the portfolio");
   // Settings: management sees the tab and the thresholds; admin does not
   await p.click("text=Settings"); assert.ok(await waitFor(async () => (await p.$$("text=Project is stale after")).length > 0));
@@ -105,7 +108,8 @@ test("Voice Inbox (typed): capture → proposal → confirm → one task + audit
   await e.click("#voice [data-proposal] button:has-text('Yes, do it')");
   assert.ok(await waitFor(async () => (await sql("select count(*)::int n from records where section = 'company.tasks' and title like $1", [`%Platinum documents ${tag}%`]))[0].n === 1), "one task");
   const t = (await sql("select * from records where title like $1", [`%Platinum documents ${tag}%`]))[0]; assert.equal(t.data.assignee_id, U.emp.id); assert.equal(t.data.due, D(1)); assert.equal(t.data.reminder, true);
-  const a = (await sql("select * from action_audit where user_id = $1 and command like $2", [U.emp.id, `%Platinum documents ${tag}%`]))[0]; assert.equal(a.status, "executed"); assert.equal(a.source, "voice_inbox"); assert.equal(a.result_record_id, t.id);
+  assert.ok(await waitFor(async () => (await sql("select status from action_audit where user_id = $1 and command like $2", [U.emp.id, `%Platinum documents ${tag}%`]))[0]?.status === "executed"), "the audit records the result");
+  const a = (await sql("select * from action_audit where user_id = $1 and command like $2", [U.emp.id, `%Platinum documents ${tag}%`]))[0]; assert.equal(a.source, "voice_inbox"); assert.equal(a.result_record_id, t.id);
   assert.ok(await waitFor(async () => (await e.$$("#voice [data-vox='Converted']")).length > 0 || true));
   await shot(e, "voice-inbox");
   // direct command: change a due date — material, Yes, then Undo puts it back

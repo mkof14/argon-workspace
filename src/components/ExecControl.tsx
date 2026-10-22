@@ -74,7 +74,7 @@ export default function ExecControl() {
         <button className="btn ghost sm" style={{ marginInlineStart: "auto" }} onClick={refresh} title={T(L("Recalculate now", "Пересчитать", "Перерахувати", "إعادة الحساب"))}><Icon n="refresh" /></button>
       </div>
 
-      {view && <section className="card"><div className="card-h"><h2><Icon n="funnel" />{T(view.title)}</h2><button className="btn ghost sm" style={{ marginInlineStart: "auto" }} onClick={() => setView(null)}><Icon n="x" />{T(L("Close", "Закрыть", "Закрити", "إغلاق"))}</button></div>
+      {view && <section className="card" data-drill><div className="card-h"><h2><Icon n="funnel" />{T(view.title)}</h2><button className="btn ghost sm" style={{ marginInlineStart: "auto" }} onClick={() => setView(null)}><Icon n="x" />{T(L("Close", "Закрыть", "Закрити", "إغلاق"))}</button></div>
         <div className="feed" style={{ padding: "0 8px 8px" }}>
           {view.kind === "loops" && (!loops ? <div className="empty">…</div> : <LoopList rows={loops.filter(view.filter || (() => true))} name={name} />)}
           {view.kind === "deadlines" && (!dl ? <div className="empty">…</div> : <DeadlineList rows={dl.filter((d) => d.days >= 0 && d.days <= view.days)} name={name} />)}
@@ -135,10 +135,12 @@ export default function ExecControl() {
   );
 }
 
-export function LoopList({ rows, name }: { rows: any[]; name: (id?: string | null) => string }) {
-  const { lang } = useApp(); const T = (x: T4, v?: any) => say(x, lang, v);
-  if (!rows.length) return <div className="empty" style={{ padding: 16 }}>{T(L("Nothing here.", "Здесь пусто.", "Тут порожньо.", "لا شيء هنا."))}</div>;
-  return <>{rows.slice(0, 200).map((l) => <div key={l.loop_key} className="hub-row" data-loop={l.kind} data-rec={l.record_id}>
+export function LoopList({ rows: all, name }: { rows: any[]; name: (id?: string | null) => string }) {
+  const { lang } = useApp(); const T = (x: T4, v?: any) => say(x, lang, v); const [q, setQ] = useState("");
+  if (!all.length) return <div className="empty" style={{ padding: 16 }}>{T(L("Nothing here.", "Здесь пусто.", "Тут порожньо.", "لا شيء هنا."))}</div>;
+  const rows = q ? all.filter((l) => `${l.title} ${l.project_title || ""} ${name(l.owner_id)}`.toLowerCase().includes(q.toLowerCase())) : all;
+  return <>{all.length > 20 && <input className="input loop-filter" style={{ margin: "4px 8px 8px", maxWidth: 360 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder={T(L("Filter by title, project or person", "Фильтр по названию, проекту или человеку", "Фільтр за назвою, проєктом чи людиною", "تصفية بالعنوان أو المشروع أو الشخص"))} aria-label={T(L("Filter", "Фильтр", "Фільтр", "تصفية"))} />}
+    {rows.slice(0, 200).map((l) => <div key={l.loop_key} className="hub-row" data-loop={l.kind} data-rec={l.record_id}>
     <span className={`chip ${l.severity === "critical" || l.severity === "high" ? "c-bad" : l.severity === "medium" ? "c-warn" : "c-info"}`}>{T(SEVERITY[l.severity])}</span>
     <Link href={l.link} style={{ minWidth: 0, flex: 1, color: "inherit", textDecoration: "none" }}><b>{l.title}</b>
       <small>{loopText(l, lang)}{l.project_title && l.project_title !== l.title ? ` · ${l.project_title}` : ""}{name(l.owner_id) ? ` · ${name(l.owner_id)}` : ""} · {T(L("{n} d", "{n} дн.", "{n} дн.", "{n} يوم"), { n: l.age_days })}</small></Link>
