@@ -27,7 +27,7 @@ async function as<T = any>(k: string, q: string, p: any[] = []): Promise<T[]> {
   } catch (e) { await c.query("rollback").catch(() => {}); throw e; } finally { c.release(); }
 }
 /** one function call as one person; returns its value */
-const call = async (k: string, fn: string, args: any[] = []) => (await as(k, `select public.${fn}(${args.map((_, i) => `$${i + 1}`).join(", ")}) r`, args))[0].r;
+const call = async (k: string, fn: string, args: any[] = []) => (await as(k, `select public.${fn}(${args.map((_, i) => `$${i + 1}`).join(", ")}) r`, args.map((a) => (Array.isArray(a) ? JSON.stringify(a) : a))))[0].r;
 const fails = async (p: Promise<any>, re: RegExp) => { await assert.rejects(p, (e: any) => { assert.match(String(e.message), re); return true; }); };
 const rec = async (section: string, title: string, status: string | null, data: Record<string, any> = {}, o: { by?: string; controlled?: boolean } = {}) =>
   (await sql(`insert into records(section, title, status, created_by, data, controlled) values ($1, $2, $3, $4, $5, $6) returning *`, [section, `${tag} ${title}`, status, U[o.by || "owner"].id, data, !!o.controlled]))[0];
@@ -553,4 +553,197 @@ test("Scenario 15 — automatic steps run at most once, failures are retried thr
   // an administrator retries it by hand (after fixing the cause) — the same step run, never a second one
   await fails(act("emp", i.run, "retry"), /Only the process owner/);
   EV.automation = { retried: { attempts: 2, status: "completed" }, dead: { attempts: q.attempts, status: q.status } };
+});
+
+/* ------------------------------------------- B33 security matrix: 14 roles ------------------------------------------- */
+test("Security matrix — the operations working set equals row-level security for every internal role; external, pending and disabled get nothing", async () => {
+  const internal = ["owner", "admin", "mgmt", "pm", "eng", "proc", "fin", "legal", "ops", "emp", "empNon", "hrEmp", "salesLead", "mgmtNon"];
+  const out: Record<string, any> = {};
+  for (const k of internal) {
+    const mine = new Set((await as(k, "select public.ops_visible_ids() id")).map((r: any) => r.id));
+    const rls = new Set((await as(k, "select id from records where section = any(public.ops_sections())")).map((r: any) => r.id));
+    const extra = [...mine].filter((x) => !rls.has(x)); const missing = [...rls].filter((x) => !mine.has(x));
+    assert.deepEqual([extra.length, missing.length], [0, 0], `${k}: working set ≠ row-level security (extra ${extra.slice(0, 3)}, missing ${missing.slice(0, 3)})`);
+    out[k] = mine.size;
+  }
+  for (const k of ["partner", "vendor", "disabled"]) {
+    await fails(call(k, "ops_overview"), /Not signed in/);
+    await fails(call(k, "ops_request_create", ["purchase", `${tag} ext`, { item: "x", qty: 1, est_amount: 1, currency: "USD" }, null]), /Not signed in/);
+    assert.equal((await as(k, "select public.ops_visible_ids() id")).length, 0);
+    assert.equal((await call(k, "ops_request_types")).length, 0);
+    assert.equal((await as(k, "select count(*)::int n from records where section in ('operations.requests', 'finance.payments', 'company.travel', 'company.requests', 'operations.quotations')"))[0].n, 0);
+  }
+  out.external = 0;
+  EV.security.matrix = out;
+});
+
+test("Per-record privacy: a request is seen by its requester, its approvers, the people on its steps, its project manager and the desks — not by colleagues", async () => {
+  const pr = await prToApproval("Private chair", 400, { project: PROJ.id });
+  const seen = async (k: string) => (await as(k, "select count(*)::int n from records where id = $1", [pr.record]))[0].n === 1;
+  assert.equal(await seen("emp"), true, "requester");
+  assert.equal(await seen("salesLead"), true, "approver");
+  assert.equal(await seen("eng"), true, "did the technical review");
+  assert.equal(await seen("pm"), true, "project manager");
+  assert.equal(await seen("proc"), true, "procurement desk");
+  assert.equal(await seen("fin"), true, "finance desk");
+  assert.equal(await seen("hrEmp"), false, "a colleague in HR");
+  assert.equal(await seen("legal"), false, "a colleague in Legal");
+  await fails(call("hrEmp", "ops_instance", [pr.record]), /not found/);
+  // separation of duties, everywhere: no process approval was ever offered to its own requester
+  const self = await sql("select count(*)::int n from approvals a join wf_step_runs s on s.id = a.wf_run join wf_instances i on i.id = s.instance_id where a.approver_id = i.requester");
+  assert.equal(self[0].n, 0);
+  // management raising a large request: management approval comes from someone else
+  const big = await prToApproval("Big lathe", 40000, { by: "mgmt" });
+  const lv = await sql("select distinct step from approvals where record_id = $1 and status = 'pending'", [big.record]);
+  assert.equal(lv.length, 1, "level 1 first (sequential)");
+  assert.equal((await sql("select count(distinct step)::int n from approvals where record_id = $1", [big.record]))[0].n, 3, "above 25,000: three levels");
+  const all = await sql("select approver_id from approvals where record_id = $1", [big.record]);
+  assert.ok(!all.some((a: any) => a.approver_id === U.mgmt.id));
+});
+
+test("Direct edits cannot bypass a process: statuses, numbers, selections, approvals, receipts and purchase records are set by the steps", async () => {
+  const pr = await prToApproval("Guarded", 600);
+  await fails(as("emp", "update records set status = 'Approved' where id = $1", [pr.record]), /follows the process/);
+  await fails(as("proc", "update records set data = data || $2 where id = $1", [pr.record, { selected_amount: 1 }]), /set by the process/);
+  await fails(as("proc", "update records set data = data || $2 where id = $1", [pr.record, { approved_amount: 600 }]), /set by the process/);
+  await fails(as("emp", "update records set data = data || $2 where id = $1", [pr.record, { requester_id: U.hrEmp.id }]), /set by the process/);
+  await fails(as("proc", "insert into records(section, title, status, data) values ('operations.procurement', 'po', 'Approved', $1)", [{ request_ref: pr.record, amount: 1 }]), /created by the purchase process/);
+  await fails(as("emp", "insert into records(section, title, status, data) values ('operations.requests', 'x', 'Draft', $1)", [{ requester_id: U.hrEmp.id }]), /own name/);
+  await fails(as("emp", "update wf_instances set status = 'completed'"), /permission denied/);
+  await fails(as("emp", "insert into wf_events(kind) values ('fake')"), /permission denied/);
+  await as("emp", "update approvals set status = 'approved' where record_id = $1", [pr.record]);
+  assert.equal((await sql("select count(*)::int n from approvals where record_id = $1 and status = 'approved'", [pr.record]))[0].n, 0, "approvals cannot be written directly (no policy allows it)");
+  await fails(sql("update wf_events set kind = 'x' where id = (select max(id) from wf_events)"), /cannot be changed or deleted/);
+  await fails(sql("delete from wf_events where id = (select max(id) from wf_events)"), /cannot be changed or deleted/);
+  // a step belongs to its responsible people only
+  const i = await inst(pr.record);
+  await fails(act("hrEmp", i.run, "approved"), /not found|someone else/);
+  const ap = (await pendingFor(pr.record))[0];
+  await fails(decide("emp", ap.id, "approved"), /not yours/);
+  await fails(decide("salesLead", ap.id, "rejected", null), /Say why/);
+  await decide("salesLead", ap.id, "rejected", "Not in the budget this quarter");
+  const done = await inst(pr.record); assert.equal(done.status, "completed"); assert.equal(done.outcome, "rejected"); assert.equal((await get(pr.record)).status, "Rejected");
+});
+
+/* ------------------------------------------- B20 Request Center, B4 My Processes ------------------------------------------- */
+test("Request Center shows only the request types a person may raise; My Processes splits what needs me, what I asked, what waits, is blocked, is done", async () => {
+  const keys = async (k: string) => (await call(k, "ops_request_types")).map((t: any) => t.key).sort();
+  assert.deepEqual(await keys("hrEmp"), ["general", "payment", "purchase", "travel"]);
+  assert.deepEqual(await keys("emp"), ["contract", "general", "payment", "purchase", "travel"]);
+  assert.deepEqual(await keys("eng"), ["change", "contract", "general", "payment", "purchase", "travel"]);
+  await fails(call("hrEmp", "ops_request_create", ["change", `${tag} no`, { reason: "x" }, null]), /cannot raise/);
+  const pr = await prToApproval("Headsets", 300);
+  const mine = await call("emp", "ops_my_processes");
+  assert.ok(mine.requested.some((x: any) => x.record_id === pr.record && x.step === "Approval"));
+  const lead = await call("salesLead", "ops_my_processes");
+  const na = lead.needs_action.find((x: any) => x.record_id === pr.record); assert.ok(na); assert.match(na.reason, /^Approve or reject/);
+  const t = await call("emp", "ops_request_create", ["travel", `${tag} Trip to Abu Dhabi`, { destination: "Abu Dhabi", starts: D(20), ends: D(24), purpose: "Client visit", est_cost: 3000, currency: "USD" }, null]);
+  const ti = await inst(t.record);
+  const emp2 = await call("emp", "ops_my_processes");
+  const n2 = emp2.needs_action.find((x: any) => x.record_id === t.record); assert.ok(n2); assert.match(n2.reason, /Fill in the details and submit/);
+  await act("emp", ti.run, "submit");
+  await decide("salesLead", (await pendingFor(t.record))[0].id, "approved");
+  for (const step of ["planning", "booked", "ready", "completed", "expense"]) {
+    const x = await inst(t.record); assert.equal(x.cur, step);
+    if (step === "booked") { await fails(act("emp", x.run, "submit"), /booking_refs/); await as("emp", "update records set data = data || '{\"booking_refs\": \"EK 123, Hotel conf. 98765\"}' where id = $1", [t.record]); }
+    await act("emp", x.run, step === "booked" || step === "completed" ? "submit" : "done");
+  }
+  assert.equal((await inst(t.record)).status, "completed"); assert.equal((await get(t.record)).status, "Closed");
+  const emp3 = await call("emp", "ops_my_processes"); assert.ok(emp3.completed.some((x: any) => x.record_id === t.record));
+  // general request routed to a handler
+  const g = await call("hrEmp", "ops_request_create", ["general", `${tag} New badge printer`, { description: "Reception printer is broken", handler_id: U.ops.id }, null]);
+  let gi = await inst(g.record); assert.equal(gi.cur, "triage"); assert.equal(gi.cassignee, U.ops.id);
+  await act("ops", gi.run, "approved"); gi = await inst(g.record); assert.equal(gi.cur, "work"); await act("ops", gi.run, "done");
+  assert.equal((await get(g.record)).status, "Closed");
+  EV.scenarios.request_center = { hr: await keys("hrEmp"), eng: await keys("eng") };
+});
+
+/* ------------------------------------------- B19 exhibitions, B24 parties ------------------------------------------- */
+test("Exhibition checklist template (IDEX) runs on an event record; nothing in the engine is specific to it", async () => {
+  const ev = await rec("marketing.events", "IDEX booth", "Considering", { type: "Exhibition (booth)", owner_id: U.mgmt.id }, { by: "mgmt" });
+  await call("mgmt", "wf_start", ["EXH-IDEX", ev.id, null]);
+  let n = 0;
+  for (;;) { const x = await inst(ev.id); if (x.status !== "active") break; assert.equal(x.cassignee, U.mgmt.id); await act("mgmt", x.run, "done"); n++; }
+  assert.equal(n, 6); assert.equal((await get(ev.id)).status, "Done");
+  const src = fs.readFileSync(path.join(process.cwd(), "supabase/update-v23.sql"), "utf8").split("20. Starting configuration")[0];
+  assert.ok(!/IDEX/i.test(src), "the engine part of the migration never mentions IDEX");
+});
+
+test("Party directory: one organisation, several relationships; restricted relationships are not shown to those who may not see them", async () => {
+  const p = (await as("proc", "insert into records(section, title, status, data) values ('company.parties', $1, 'Active', $2) returning id", [`${tag} Harbor Marine`, { country: "AE" }]))[0].id;
+  await rec("operations.vendors", "Harbor Marine (vendor)", "Approved", { party_ref: p }); await rec("sales.clients", "Harbor Marine (client)", "Active", { party_ref: p });
+  await rec("sales.partners", "Harbor Marine (partner, US only)", "Active", { party_ref: p }, { controlled: true });
+  const a = await call("mgmt", "ops_party", [p]); const b = await call("empNon", "ops_party", [p]);
+  assert.deepEqual(a.relationships.map((r: any) => r.type).sort(), ["Client", "Partner", "Vendor"]);
+  assert.deepEqual(b.relationships.map((r: any) => r.type).sort(), ["Vendor"], "a non-US engineer sees only what their role can open");
+  await fails(as("proc", "insert into records(section, title, status, data) values ('company.parties', 'x', 'Active', $1)", [{ bank_account_number: "1234" }]), /secrets/);
+  const back = (await sql("select count(*)::int n from records where section = 'company.parties' and data->>'backfilled' = 'true'"))[0].n;
+  EV.parties = { relationships_mgmt: a.relationships.length, relationships_non_us: b.relationships.length, backfilled: back };
+});
+
+/* ------------------------------------------- B26/B27 money without accounting ------------------------------------------- */
+test("Project budget: planned, requested (estimates), approved, committed, paid and remaining — each traceable and equal to an independent count", async () => {
+  const b = await call("mgmt", "ops_budget", [PROJ.id]);
+  const usd = b.rows.find((r: any) => r.currency === "USD"); assert.ok(usd);
+  const q = async (where: string) => Number((await sql(`select coalesce(sum(x), 0) s from (${where}) t`, [PROJ.id]))[0].s);
+  const budget = await q("select (data->>'planned')::numeric x from records where section = 'finance.budget' and data->>'project_ref' = $1 and coalesce(status, '') <> 'Closed'");
+  const committed = await q("select (data->>'amount')::numeric x from records where section = 'operations.procurement' and data->>'project_ref' = $1 and coalesce(status, '') not in ('Cancelled', 'Draft')");
+  const paid = await q("select (data->>'paid_amount')::numeric x from records where section = 'finance.payments' and data->>'project_ref' = $1 and coalesce(data->>'paid_on', '') <> ''");
+  const requested = await q("select (data->>'est_amount')::numeric x from records where section = 'operations.requests' and data->>'project_ref' = $1 and not data ? 'approved_amount' and not data ? 'purchase_ref' and coalesce(status, '') not in ('Closed', 'Rejected', 'Cancelled')");
+  assert.equal(Number(usd.budget), budget); assert.equal(Number(usd.committed), committed); assert.equal(Number(usd.paid), paid); assert.equal(Number(usd.requested), requested);
+  assert.equal(Number(usd.remaining), budget - committed - Number(usd.approved), "remaining = budget − committed − approved; estimates are not subtracted");
+  assert.ok(Array.isArray(usd.refs.committed) && usd.refs.committed.length > 0, "every figure names its records");
+  assert.match(b.formula, /not subtracted/);
+  await fails(call("empNon", "ops_budget", [PROJ_US.id]), /not found/);
+  const all = await call("fin", "ops_budget", [null]); assert.ok(all.rows.some((r: any) => r.project_id === PROJ.id));
+  EV.budget = usd;
+});
+
+/* ------------------------------------------- B31 weekly, B30 dashboard, B28 assistant, B32 audit ------------------------------------------- */
+test("Weekly review OPERATIONS numbers, the dashboard drill-down and the audit trail come from the same records", async () => {
+  const w = await call("mgmt", "ops_weekly", [null, null]);
+  assert.ok(w.started > 0 && w.approvals_decided > 0 && w.purchases_created > 0 && w.receipts > 0);
+  assert.ok(Number(w.payments_recorded.USD) >= 2500);
+  const ov = await call("mgmt", "ops_overview");
+  for (const kind of ["pr_open", "po_awaiting_delivery", "iss_open"]) {
+    const list = await call("mgmt", "ops_list", [kind, 500]);
+    assert.equal(list.length, Math.min(500, ov.items[kind].count), `${kind}: drill-down has the dashboard's count`);
+  }
+  const secrets = await sql("select count(*)::int n from wf_events where detail::text ~* '(password|cvv|iban|4111 ?1111)'");
+  assert.equal(secrets[0].n, 0, "no secret in the audit trail");
+  const kinds = (await sql("select distinct kind from wf_events")).map((r: any) => r.kind);
+  for (const k of ["started", "step_entered", "step_completed", "approval_requested", "approval_decided", "approval_invalidated", "purchase_created", "received", "payment_recorded", "vendor_selected", "definition_published", "proposal_accepted", "escalated"])
+    assert.ok(kinds.includes(k), `audit has ${k}`);
+  EV.weekly = w; EV.dashboard_counts = Object.fromEntries(Object.entries(ov.items).map(([k, v]: any) => [k, v.count]));
+});
+
+test("Settings and approval authority are changed only by owners and administrators, validated, and kept in history", async () => {
+  const s = await call("emp", "ops_settings_get"); assert.equal(s.can_edit, false);
+  await fails(call("emp", "ops_settings_save", [{ due_soon_hours: 12 }, s.version]), /Only owners/);
+  await fails(call("owner", "ops_settings_save", [{ due_soon_hours: 0 }, s.version]), /1–720/);
+  await fails(call("owner", "ops_settings_save", [{ evil: 1 }, s.version]), /Unknown setting/);
+  await fails(call("owner", "ops_settings_save", [{ due_soon_hours: 24 }, s.version - 1]), /changed by someone else/);
+  const ok = await call("owner", "ops_settings_save", [{ due_soon_hours: 24 }, s.version]); assert.equal(ok.version, s.version + 1);
+  await fails(call("mgmt", "ops_policy_save", ["PURCHASE", "x", [], true]), /Only owners/);
+  await fails(call("owner", "ops_policy_save", ["PTEST", "x", [{ steps: [{ kind: "requester" }] }], true]), /own request/);
+  await fails(call("owner", "ops_policy_save", ["PTEST", "x", [{ when: { field: "record.amount", op: "exec", value: 1 }, steps: [{ kind: "role", role: "finance" }] }], true]), /Unknown operator/);
+  await call("owner", "ops_policy_save", ["PTEST", "Test policy", [{ steps: [{ kind: "role", role: "finance" }] }], true]);
+  assert.ok((await sql("select count(*)::int n from approval_policies_history where policy_code = 'PTEST'"))[0].n >= 1);
+  assert.ok((await sql("select count(*)::int n from ops_settings_history"))[0].n >= 1);
+});
+
+test("Rule model: allow-listed fields and operators only; evaluation is deterministic", async () => {
+  const ev = async (rule: any, ctx: any) => (await sql("select public.wf_rule($1, $2) r", [rule, ctx]))[0].r;
+  const er = async (rule: any) => (await sql("select public.wf_rule_error($1) e", [rule]))[0].e;
+  const ctx = { record: { amount: "12000", kind: "Supply" }, facts: { quotations: 2, selected: true }, instance: { priority: "High" } };
+  assert.equal(await ev({ all: [{ field: "record.amount", op: "gt", value: 10000 }, { field: "facts.quotations", op: "gte", value: 2 }] }, ctx), true);
+  assert.equal(await ev({ any: [{ field: "record.kind", op: "in", value: ["Sale", "Lease"] }, { field: "instance.priority", op: "eq", value: "Low" }] }, ctx), false);
+  assert.equal(await ev({ not: { field: "record.missing", op: "present" } }, ctx), true);
+  assert.equal(await ev({ field: "facts.selected", op: "eq", value: true }, ctx), true);
+  assert.match(await er({ field: "record.amount", op: "regex", value: ".*" }), /Unknown operator/);
+  assert.match(await er({ field: "pg_catalog.pg_sleep", op: "eq", value: 1 }), /Unknown field/);
+  assert.match(await er({ field: "record.amount", op: "eq", value: { $where: "x" } }), /plain value/);
+  assert.match(await er({ field: "record.a", op: "eq", value: 1, code: "x" }), /Unknown key/);
+  assert.match(await er({ all: [] }), /1–20/);
+  assert.equal(await er({ field: "facts.amount", op: "lte", value: 5000 }), null);
 });
