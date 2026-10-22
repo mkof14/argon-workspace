@@ -53,8 +53,8 @@ test("Executive Control: first screen answers what needs action; every indicator
   assert.ok(await waitFor(async () => (await p.$$("[data-ind]")).length >= 10), "indicators");
   assert.ok(await waitFor(async () => (await p.$$(`[data-attn="${R.blocked.id}"]`)).length > 0 || (await p.$$(`[data-attn="${R.c20.id}"]`)).length > 0), "the C20 work is in Needs attention");
   await shot(p, "executive-control");
-  const row = (await p.$(`[data-attn="${R.blocked.id}"]`)) || (await p.$(`[data-attn="${R.c20.id}"]`)); await row.click("button.linkish");
-  assert.match(await row.textContent(), /Attention score \d+ =/, "the score is explained by its parts");
+  const sel = (await p.$$(`[data-attn="${R.blocked.id}"]`)).length ? `[data-attn="${R.blocked.id}"]` : `[data-attn="${R.c20.id}"]`; await p.click(`${sel} button.linkish`);
+  assert.ok(await waitFor(async () => /Attention score \d+ =/.test(await p.textContent(sel))), "the score is explained by its parts");
   await p.click("[data-ind='overdue_work']"); assert.ok(await waitFor(async () => (await p.$$("[data-loop='task_overdue']")).length >= 3), "overdue work drill-down");
   const first = await p.$(`[data-loop='task_overdue'] a`); const href = await first.getAttribute("href"); assert.match(href, /^\/company\/tasks\?r=/, "a line opens its record");
   await p.click("[data-ind='blocked_work']"); assert.ok(await waitFor(async () => (await p.$$(`[data-loop='task_blocked'][data-rec='${R.blocked.id}']`)).length === 1), "blocked");
@@ -131,7 +131,7 @@ test("Voice Inbox (typed): capture → proposal → confirm → one task + audit
 test("Team status and the phone layout", { skip }, async () => {
   const p = await login(U.mgmt.email); await p.goto(`${APP}/team`);
   assert.ok(await waitFor(async () => (await p.$$(`[data-person="${U.anton.id}"]`)).length === 1));
-  const card = await p.textContent(`[data-person="${U.anton.id}"]`); assert.match(card, /Asia\/Dubai/); assert.match(card, /Busy/); assert.match(card, /Abu Dhabi/); assert.match(card, /C20 electrical integration/);
+  const card = await p.textContent(`[data-person="${U.anton.id}"]`); assert.match(card, /Asia\/Dubai/); assert.match(card, /Busy/); assert.match(card, /Abu Dhabi/); assert.match(card, /Open tasks 6 · overdue 5 · blocked 1/, "responsibilities among what the viewer may open (management, US person)");
   await shot(p, "team-status"); await p.context().close();
   const m = await login(U.mgmt.email, { width: 390, height: 844 }); await m.goto(`${APP}/management`);
   assert.ok(await waitFor(async () => (await m.$$("[data-ind]")).length >= 10));

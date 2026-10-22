@@ -107,7 +107,7 @@ grant execute on function public.mgmt_config() to authenticated, service_role;
 
 -- only owners and management change company-wide logic; numbers only, within sane ranges; every change kept
 create or replace function public.mgmt_settings_save(p_config jsonb) returns jsonb
-language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 declare me uuid := auth.uid(); old jsonb; k text; v jsonb; g text; clean jsonb := '{}'::jsonb; sub jsonb; d jsonb := public.mgmt_defaults();
 begin
   if me is null or not public.session_ok() or not exists (select 1 from public.profiles where id = me and not disabled and role in ('owner', 'management')) then
@@ -151,7 +151,7 @@ grant execute on function public.mgmt_settings_save(jsonb) to authenticated;
       changes only; Change Intelligence needs who-was-responsible and when-it-was-due as well
    --------------------------------------------------------------------------------------------- */
 create or replace function public.records_mgmt_changes() returns trigger
-language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 declare f text; a text; o text; n text;
 begin
   if new.section not in ('company.projects', 'company.milestones', 'company.tasks', 'company.decisions', 'company.portfolios') then return null; end if;
@@ -176,7 +176,7 @@ create trigger records_mgmt_changes after update on public.records for each row
       security in the tests (identical sets for every role). Externals, pending and disabled accounts: nothing.
    --------------------------------------------------------------------------------------------- */
 create or replace function public.mgmt_visible(p_viewer uuid) returns setof public.records
-language plpgsql stable security definer set search_path = public set plan_cache_mode = force_custom_plan rows 20000 as $$
+language plpgsql stable security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off rows 20000 as $$
 declare p record; secs text[]; restricted text[];
 begin
   select pp.id, pp.role, coalesce(pp.us_person, false) us into p from public.profiles pp where pp.id = p_viewer and not pp.disabled;
@@ -211,7 +211,7 @@ revoke execute on function public.mgmt_viewer() from public, anon, authenticated
 -- loops, attention, overview…) reads it instead of recomputing it, and the planner sees real row counts. Owned by
 -- the definer, never granted to anyone, dropped at commit. Rebuilt when the viewer or the statement changes.
 create or replace function public._mgmt_base(p_viewer uuid) returns void
-language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off set default_statistics_target = 25 as $$
 declare p record; secs text[]; restricted text[];
 begin
   if to_regclass('pg_temp.mgmt_meta') is null then
@@ -258,7 +258,11 @@ begin
           or coalesce(r.data->'access_ids', '[]'::jsonb) ? p.id::text or coalesce(r.data->'contributors_ids', '[]'::jsonb) ? p.id::text
           or p.role in ('owner', 'management')
         when r.section = 'company.decisions' and coalesce(r.data->>'source_ref', '') ~ '^[0-9a-f-]{36}$' then coalesce(public.extra_visible(p.id, r), false)
-        else true end;
+        else true end
+      -- a draft or archived document with no date and no open approval takes part in no engine: not copied
+      and not (r.section = 'company.documents' and r.status in ('Draft', 'Archived')
+               and coalesce(r.data->>'expiration_date', r.data->>'review_date', r.data->>'review_due', '') = ''
+               and not exists (select 1 from public.approvals a where a.record_id = r.id and a.status in ('pending', 'queued')));
   end if;
   analyze pg_temp.mgmt_v (id, section, status, created_by, controlled, m_project, m_assignee, m_manager, m_owner, m_blocked_by, m_portfolio, m_due, m_target);
   insert into pg_temp.mgmt_meta(viewer, at) values (p_viewer, statement_timestamp());
@@ -278,7 +282,7 @@ returns table (project_id uuid, title text, status text, portfolio_id uuid, mana
   score integer, level text, reasons jsonb, progress integer, progress_basis text, tasks_total integer, tasks_open integer, tasks_done integer,
   overdue integer, blocked integer, unassigned integer, next_milestone jsonb, pending_approvals integer, pending_decisions integer,
   docs_in_review integer, last_activity timestamptz)
-language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 #variable_conflict use_column
 declare c jsonb := public.mgmt_config(); w jsonb; h jsonb; today date := (now() at time zone 'utc')::date;
 begin
@@ -380,7 +384,7 @@ returns table (project_id uuid, title text, status text, portfolio_id uuid, mana
   score integer, level text, reasons jsonb, progress integer, progress_basis text, tasks_total integer, tasks_open integer, tasks_done integer,
   overdue integer, blocked integer, unassigned integer, next_milestone jsonb, pending_approvals integer, pending_decisions integer,
   docs_in_review integer, last_activity timestamptz)
-language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 begin
   perform public._mgmt_base(p_viewer);
   if not exists (select 1 from pg_temp.mgmt_meta where health) then
@@ -410,7 +414,8 @@ grant execute on function public.project_health(uuid) to authenticated;
 /* ---------------------------------------------------------------------------------------------
    7. Links to the record behind every item
    --------------------------------------------------------------------------------------------- */
-create or replace function public.mgmt_link(p_section text, p_id uuid) returns text language sql immutable set search_path = '' as $$
+-- no SET clause on purpose: PostgreSQL then inlines this into each query (it only joins strings)
+create or replace function public.mgmt_link(p_section text, p_id uuid) returns text language sql immutable parallel safe as $$
   select case p_section when 'company.projects' then '/projects/' || p_id when 'company.documents' then '/documents?d=' || p_id
     when 'company.portfolios' then '/portfolio?p=' || p_id else '/' || replace(p_section, '.', '/') || '?r=' || p_id end
 $$;
@@ -423,7 +428,7 @@ $$;
 create or replace function public._open_loops_calc(p_viewer uuid, p_project uuid default null)
 returns table (loop_key text, kind text, category text, severity text, record_id uuid, section text, title text, project_id uuid, project_title text,
   owner_id uuid, since timestamptz, age_days integer, reason jsonb, next_action text, link text)
-language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 #variable_conflict use_column
 declare c jsonb := public.mgmt_config(); today date := (now() at time zone 'utc')::date;
 begin
@@ -541,7 +546,7 @@ revoke execute on function public._open_loops_calc(uuid, uuid) from public, anon
 create or replace function public._open_loops(p_viewer uuid, p_project uuid default null)
 returns table (loop_key text, kind text, category text, severity text, record_id uuid, section text, title text, project_id uuid, project_title text,
   owner_id uuid, since timestamptz, age_days integer, reason jsonb, next_action text, link text)
-language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 begin
   perform public._mgmt_base(p_viewer);
   if not exists (select 1 from pg_temp.mgmt_meta where loops) then
@@ -575,7 +580,7 @@ create or replace function public._waiting_for(p_viewer uuid)
 returns table (item_key text, bucket text, kind text, record_id uuid, section text, title text, project_id uuid, project_title text,
   party_type text, party_id uuid, party_name text, requested_at timestamptz, due date, age_days integer, state text, last_activity timestamptz,
   escalation text, link text, approval_id uuid)
-language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 #variable_conflict use_column
 declare c jsonb := public.mgmt_config(); today date := (now() at time zone 'utc')::date; me uuid := p_viewer;
 begin
@@ -650,7 +655,7 @@ grant execute on function public.waiting_for() to authenticated;
 create or replace function public._attention(p_viewer uuid, p_limit integer default 50)
 returns table (item_key text, kind text, record_id uuid, section text, title text, project_id uuid, project_title text, owner_id uuid,
   severity text, attention_score integer, why jsonb, next_action text, link text, since timestamptz)
-language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 #variable_conflict use_column
 declare c jsonb := public.mgmt_config(); sw jsonb; pw jsonb; today date := (now() at time zone 'utc')::date; lead boolean;
 begin
@@ -722,7 +727,7 @@ create or replace function public._portfolio(p_viewer uuid)
 returns table (portfolio_id uuid, name text, description text, owner_id uuid, status text, priority text, start date, target date,
   level text, progress integer, project_count integer, open_projects integer, levels jsonb, overdue integer, blocked integer,
   pending_decisions integer, pending_approvals integer, next_milestone jsonb, risks jsonb, projects jsonb, link text)
-language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 #variable_conflict use_column
 begin
   perform public._mgmt_base(p_viewer);
@@ -771,7 +776,7 @@ grant execute on function public.portfolio_overview() to authenticated;
    --------------------------------------------------------------------------------------------- */
 create or replace function public._deadlines(p_viewer uuid, p_days integer default 30)
 returns table (kind text, record_id uuid, section text, title text, project_id uuid, project_title text, owner_id uuid, due date, days integer, status text, priority text, link text)
-language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 #variable_conflict use_column
 declare today date := (now() at time zone 'utc')::date;
 begin
@@ -826,7 +831,7 @@ create policy p_session_mgmt_snapshots on public.management_snapshots as restric
 revoke insert, update, delete on public.management_snapshots from anon, authenticated;
 
 create or replace function public._mgmt_snapshot(p_viewer uuid, p_kind text, p_title text default null) returns uuid
-language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 declare sid uuid; d jsonb;
 begin
   if p_viewer is null or p_kind not in ('daily', 'review') then return null; end if;
@@ -852,7 +857,7 @@ grant execute on function public.mgmt_snapshot(text, text) to authenticated;
    --------------------------------------------------------------------------------------------- */
 create or replace function public._changes(p_viewer uuid, p_since timestamptz, p_snapshot uuid default null)
 returns table (change_key text, at timestamptz, kind text, project_id uuid, project_title text, record_id uuid, section text, title text, detail jsonb, link text, source text, source_id text)
-language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 #variable_conflict use_column
 declare today date := (now() at time zone 'utc')::date; snap jsonb;
 begin
@@ -919,7 +924,7 @@ revoke execute on function public._changes(uuid, timestamptz, uuid) from public,
 -- p_window: 'day' | 'week' | 'review'. Health changes compare with the person's snapshot from that time.
 create or replace function public.management_changes(p_window text default 'week')
 returns table (change_key text, at timestamptz, kind text, project_id uuid, project_title text, record_id uuid, section text, title text, detail jsonb, link text, source text, source_id text)
-language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 #variable_conflict use_column
 declare me uuid := public.mgmt_viewer(); since timestamptz; sid uuid;
 begin
@@ -945,7 +950,7 @@ drop function if exists public._team_status(uuid);
 create or replace function public._team_status(p_viewer uuid)
 returns table (person_id uuid, name text, title text, role text, department_id uuid, department text, location text, timezone text,
   availability text, availability_note text, availability_until timestamptz, projects jsonb, assignments jsonb, open_tasks integer, overdue_tasks integer, blocked_tasks integer, upcoming_14 integer)
-language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 #variable_conflict use_column
 declare today date := (now() at time zone 'utc')::date;
 begin
@@ -987,7 +992,7 @@ grant execute on function public.team_status() to authenticated;
        decisions, deadlines, and the indicators (each with the list it counts, so every number can be opened)
    --------------------------------------------------------------------------------------------- */
 create or replace function public.exec_overview() returns jsonb
-language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 declare me uuid := public.mgmt_viewer(); c jsonb := public.mgmt_config(); today date := (now() at time zone 'utc')::date; res jsonb; lead boolean;
 begin
   if me is null then return null; end if;
@@ -1063,7 +1068,7 @@ revoke insert, update, delete on public.management_alerts from anon, authenticat
 -- the conditions true now for one person (owners / management: everything they can open; a project manager: their projects)
 create or replace function public._alert_conditions(p_viewer uuid)
 returns table (key text, kind text, record_id uuid, project_id uuid, severity text, title text, detail jsonb)
-language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 #variable_conflict use_column
 declare c jsonb := public.mgmt_config(); today date := (now() at time zone 'utc')::date; lead boolean;
 begin
@@ -1101,7 +1106,7 @@ create or replace function public.mgmt_alert_text(p_kind text) returns text lang
 $$;
 -- evaluate for one person (p_user) or, from the scheduler, for every owner / manager / project manager
 create or replace function public.mgmt_alert_scan(p_user uuid default null) returns jsonb
-language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 declare c jsonb := public.mgmt_config(); u uuid; cond record; al public.management_alerts; opened int := 0; reopened int := 0; resolved int := 0; seen int := 0;
   cool interval; svc boolean := auth.uid() is null; keys text[]; n int;
 begin
@@ -1223,7 +1228,7 @@ create trigger action_audit_guard before update or delete on public.action_audit
    --------------------------------------------------------------------------------------------- */
 create or replace function public.mgmt_decisions_report()
 returns table (record_id uuid, number text, title text, status text, project_id uuid, project_title text, responsible_id uuid, date date, due date, reconsider date, age_days integer, link text)
-language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 begin
   if public.mgmt_viewer() is null then return; end if;
   perform public._mgmt_base(public.mgmt_viewer());
@@ -1254,7 +1259,7 @@ $$;
 revoke execute on function public._waiting_target(uuid, uuid, uuid) from public, anon, authenticated;
 
 create or replace function public.waiting_remind(p_record uuid, p_approval uuid default null) returns jsonb
-language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 declare me uuid := public.mgmt_viewer(); w record; who uuid; last timestamptz; sent boolean;
 begin
   if me is null then raise exception 'Not allowed' using errcode = '42501'; end if;
@@ -1274,7 +1279,7 @@ revoke execute on function public.waiting_remind(uuid, uuid) from public, anon;
 grant execute on function public.waiting_remind(uuid, uuid) to authenticated;
 
 create or replace function public.waiting_escalate(p_record uuid, p_approval uuid default null, p_note text default null) returns jsonb
-language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+language plpgsql volatile security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 declare me uuid := public.mgmt_viewer(); w record; r record; up uuid; party uuid; n int := 0; last timestamptz;
 begin
   if me is null then raise exception 'Not allowed' using errcode = '42501'; end if;
@@ -1306,7 +1311,7 @@ grant execute on function public.waiting_escalate(uuid, uuid, text) to authentic
        yesterday") — service role only. The alert scan is mgmt_alert_scan(null).
    --------------------------------------------------------------------------------------------- */
 create or replace function public.mgmt_daily_snapshots() returns integer
-language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan as $$
+language plpgsql security definer set search_path = public set plan_cache_mode = force_custom_plan set jit = off as $$
 declare u uuid; n int := 0;
 begin
   if auth.uid() is not null then raise exception 'Not allowed' using errcode = '42501'; end if;

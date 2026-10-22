@@ -120,15 +120,29 @@ async function executive(sb: any, me: { id: string; role: string }, q: string, l
   const reasonsOf = (h: any) => (h.reasons || []).map((r: any) => healthReason(r, "en")).join("; ");
   const healthLine = (h: any) => `${lvl(h.level)} ${h.score ?? ""}${h.reasons?.length ? " · " + reasonsOf(h) : " · no issues found"} · progress ${h.progress ?? "—"}% (${h.progress_basis}) · overdue ${h.overdue} · blocked ${h.blocked}${h.next_milestone ? ` · next milestone ${h.next_milestone.title} ${h.next_milestone.due}` : ""}${h.target ? ` · deadline ${h.target}` : ""}`;
   const review = has(/management review|weekly review|review packet|обзор руковод|управленческ\w* обзор|подготов\w* (мой )?обзор|огляд керівн|підготу\w* огляд/);
-  if (review || has(/attention|what should i|focus|приоритет|внимани|чем заняться|увага|на що звернути/)) {
+  // the engine calls this question needs start together (each is its own request on the server), then are read below
+  const memo = new Map<string, Promise<any[]>>();
+  const rpc = (fn: string, args?: Record<string, any>) => { const k = fn + JSON.stringify(args || {}); if (!memo.has(k)) memo.set(k, Promise.resolve(sb.rpc(fn, args)).then((r: any) => r.data || [])); return memo.get(k)!; };
+  const want = {
+    att: review || has(/attention|what should i|focus|приоритет|внимани|чем заняться|увага|на що звернути/),
+    crit: review || has(/critical|at risk|risky|risks|unhealthy|критич|под риск|риски|ризик/),
+    wait: review || has(/waiting|wait for|waiting on|ждём|ждем|ожида|чекаємо|чекаю/),
+    dec: review || (has(/decision|решени|рішен/) && has(/need|me|my|pending|wait|нужн|мне|мои|жд|потреб|мені|очіку/)),
+  };
+  if (want.att) rpc("attention_items", { p_limit: 10 });
+  if (want.crit) rpc("project_health", { p_project: null });
+  if (want.wait) rpc("waiting_for");
+  if (want.dec) rpc("open_loops", { p_project: project?.id || null });
+  if (review) { rpc("management_changes", { p_window: "review" }); rpc("mgmt_deadlines", { p_days: 14 }); }
+  if (want.att) {
     intents.push("attention");
-    const rows = await sb.rpc("attention_items", { p_limit: 10 }).then((r: any) => r.data || []);
+    const rows = await rpc("attention_items", { p_limit: 10 });
     for (const a of rows) add({ kind: "attention", id: a.record_id, title: a.title + (a.project_title && a.project_title !== a.title ? ` (${a.project_title})` : ""), link: a.link, excerpt: `attention score ${a.attention_score} · ${a.severity} · why: ${attentionWhy(a, "en").join("; ")} · next action: ${say(NEXT_ACTION[a.next_action], "en") || a.next_action}` });
     facts.push(`Attention items ranked by the deterministic attention engine (highest first): ${rows.length} shown`);
   }
-  if (review || has(/critical|at risk|risky|risks|unhealthy|критич|под риск|риски|ризик/)) {
+  if (want.crit) {
     intents.push("critical_projects");
-    const rows = (await sb.rpc("project_health", { p_project: null }).then((r: any) => r.data || [])).filter((h: any) => ["critical", "risk"].includes(h.level));
+    const rows = (await rpc("project_health", { p_project: null })).filter((h: any) => ["critical", "risk"].includes(h.level));
     for (const h of rows.slice(0, 10)) add({ kind: "project", id: h.project_id, title: h.title, link: `/projects/${h.project_id}`, excerpt: healthLine(h) });
     facts.push(`Projects at CRITICAL: ${rows.filter((h: any) => h.level === "critical").length}; at RISK: ${rows.filter((h: any) => h.level === "risk").length} (health engine, scores 0–100, reasons attached)`);
   }
@@ -141,28 +155,28 @@ async function executive(sb: any, me: { id: string; role: string }, q: string, l
     for (const l of blockFirst.slice(0, 8)) add({ kind: "open_loop", id: l.record_id, title: l.title, link: l.link, excerpt: `${loopText(l, "en")} · ${l.severity} · since ${String(l.since || "").slice(0, 10)}${l.reason?.blocker ? ` · blocker: ${l.reason.blocker}` : ""} · next action: ${say(NEXT_ACTION[l.next_action], "en")}` });
     if (h) facts.push(`${h.title}: health ${lvl(h.level)} ${h.score ?? ""}; open loops ${loops.length}; blocked tasks ${h.blocked}; overdue tasks ${h.overdue}`);
   }
-  if (review || has(/waiting|wait for|waiting on|ждём|ждем|ожида|чекаємо|чекаю/)) {
+  if (want.wait) {
     intents.push("waiting_for");
-    const rows = await sb.rpc("waiting_for").then((r: any) => r.data || []);
+    const rows = await rpc("waiting_for");
     for (const w of rows.filter((x: any) => x.bucket !== "me").slice(0, 8)) add({ kind: "waiting", id: w.record_id, title: w.title, link: w.link, excerpt: `${w.bucket} · from ${w.party_name || "—"} · ${w.kind} · ${w.project_title || ""} · waiting ${w.age_days} days · ${w.due ? `due ${w.due} · ` : ""}${w.escalation}` });
     facts.push(`Waiting for others: ${rows.filter((x: any) => x.bucket !== "me").length}; others waiting for the person: ${rows.filter((x: any) => x.bucket === "me").length}`);
   }
-  if (review || (has(/decision|решени|рішен/) && has(/need|me|my|pending|wait|нужн|мне|мои|жд|потреб|мені|очіку/))) {
+  if (want.dec) {
     intents.push("pending_decisions");
-    const rows = (await sb.rpc("open_loops", { p_project: project?.id || null }).then((r: any) => r.data || [])).filter((l: any) => l.category === "decision");
+    const rows = (await rpc("open_loops", { p_project: project?.id || null })).filter((l: any) => l.category === "decision");
     for (const l of rows.slice(0, 8)) add({ kind: "decision", id: l.record_id, title: l.title, link: l.link, excerpt: `${loopText(l, "en")} · ${l.project_title || ""} · since ${String(l.since || "").slice(0, 10)}` });
     facts.push(`Decisions pending / in review too long / due for reconsideration: ${rows.length}`);
   }
   if (review || (has(/changed|what'?s new|happened|изменил|что нового|змінил|що нового/) && has(/week|today|yesterday|review|недел|сегодня|вчера|тиж|сьогодні|вчора|обзор/))) {
     const w = has(/yesterday|today|вчера|сегодня|вчора|сьогодні/) ? "day" : review || has(/review|обзор|огляд/) ? "review" : "week";
     intents.push(`changes_${w}`);
-    const rows = await sb.rpc("management_changes", { p_window: w }).then((r: any) => r.data || []);
+    const rows = await rpc("management_changes", { p_window: w });
     for (const c of rows.slice(0, 12)) add({ kind: "change", id: c.record_id, title: `${c.project_title || c.title}`, link: c.link, excerpt: `${String(c.at).slice(0, 16)} · ${changeText(c, "en")}${c.title !== c.project_title ? ` · ${c.title}` : ""} · source: ${c.source}` });
     facts.push(`Meaningful changes (${w === "day" ? "since yesterday" : w === "week" ? "last 7 days" : "since the last management review"}): ${rows.length}`);
   }
   if (review || has(/deadline|due|срок|дедлайн|термін/) && has(/next|upcoming|coming|ближайш|следующ|наступн|weeks?|недел|тиж|month|месяц|місяц/)) {
     const days = review ? 14 : num(lq); intents.push(`deadlines_${days}`);
-    const rows = await sb.rpc("mgmt_deadlines", { p_days: days }).then((r: any) => r.data || []);
+    const rows = await rpc("mgmt_deadlines", { p_days: days });
     const up = rows.filter((d: any) => d.days >= 0);
     for (const d of up.slice(0, 12)) add({ kind: "deadline", id: d.record_id, title: d.title, link: d.link, excerpt: `${d.kind} · due ${d.due} (in ${d.days} days) · ${d.project_title || ""} · ${d.status || ""}${d.priority ? ` · ${d.priority}` : ""}` });
     facts.push(`Deadlines in the next ${days} days: ${up.length}; already overdue: ${rows.length - up.length}`);
