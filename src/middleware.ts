@@ -1,9 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { COOKIE_OPTIONS } from "@/lib/cookies";
+import { SUPABASE_URL, SUPABASE_ANON } from "@/lib/env";
 
 export async function middleware(req: NextRequest) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL, key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const url = SUPABASE_URL, key = SUPABASE_ANON;
   if (!url || !key) return NextResponse.next(); // demo mode
   let res = NextResponse.next({ request: req });
   const sb = createServerClient(url, key, {

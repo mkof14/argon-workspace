@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { APP_ENV, blockedRecipients } from "@/lib/env";
 import { currentProfile, userClient } from "@/lib/server/supabase";
 import { limit } from "@/lib/server/authz";
 
@@ -29,6 +30,9 @@ export async function POST(req: Request) {
   const html = String(b.html || "");
   if (!subject || !html || html.length > 500_000) return new Response("Subject and body are required", { status: 400 });
 
+  // Staging and preview builds send only to the domains in MAIL_ALLOWED_DOMAINS (no accidental customer e-mail)
+  if ((APP_ENV === "staging" || APP_ENV === "preview") && blockedRecipients([...to, ...cc]).length)
+    return new Response(`Not sent: the ${APP_ENV} environment sends only to allowed test domains`, { status: 403 });
   const transport = nodemailer.createTransport({
     host: process.env.SMTP_HOST || "smtp.gmail.com",
     port: Number(process.env.SMTP_PORT || 465),

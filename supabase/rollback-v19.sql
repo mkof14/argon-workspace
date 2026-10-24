@@ -7,6 +7,36 @@
 set client_min_messages = warning;
 begin;
 
+-- Policies of LATER versions' tables (kept by their rollbacks as inert leftovers) can depend on functions dropped below
+-- (e.g. management tables of v22 use session_ok / is_active_employee). Drop exactly those policies first: the leftover
+-- tables then deny all access (fail closed); running the later updates again recreates their policies.
+do $$
+declare f text; r record;
+begin
+  foreach f in array array[
+    'public.records_notify()',
+    'public.record_rules()',
+    'public.comments_notify()',
+    'public.comment_prepare()',
+    'public.approvals_notify()',
+    'public.notify_due(date)',
+    'public.notifications_claim(integer)',
+    'public.notify_user(uuid, text, uuid, text, text, text, uuid, text)',
+    'public.notify_channel(jsonb, text, text)',
+    'public.record_visible_for(uuid, public.records)',
+    'public.is_active_employee(uuid)'
+  ] loop
+    if to_regprocedure(f) is null then continue; end if;
+    for r in select distinct pol.polname, c.relname, n.nspname from pg_depend d
+               join pg_policy pol on d.classid = 'pg_policy'::regclass and d.objid = pol.oid
+               join pg_class c on c.oid = pol.polrelid join pg_namespace n on n.oid = c.relnamespace
+              where d.refclassid = 'pg_proc'::regclass and d.refobjid = to_regprocedure(f) loop
+      execute format('drop policy if exists %I on %I.%I', r.polname, r.nspname, r.relname);
+    end loop;
+  end loop;
+end $$;
+
+
 drop trigger if exists records_notify on public.records;
 drop trigger if exists records_rules on public.records;
 drop trigger if exists comments_notify on public.comments;
@@ -79,8 +109,7 @@ end $$;
 revoke execute on function public.protect_profile() from public, anon, authenticated;
 drop function if exists public.is_active_employee(uuid);
 alter table public.profiles drop column if exists department;
-alter table public.profiles drop column if exists title;
-alter table public.profiles drop column if exists phone;
+-- title and phone are NOT dropped: they existed before v19 (v17 production profiles have them; v19 only ensured them)
 alter table public.profiles drop column if exists manager_id;
 alter table public.profiles drop column if exists notify_prefs;
 

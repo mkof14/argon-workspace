@@ -8,4 +8,4 @@ export async function loadSources() {
     depts: C.DEPARTMENTS, secs: C.allSections(), roles: C.ROLES, approvals: A.APPROVALS, configs: C.PRODUCT_CONFIGS, icon: IC.svgIcon, colors: C.DEPT_COLORS };
 }
 export async function loadText(lang) { return (await import(W + `config/guide/${lang}.ts`)).default; }
-export async function appVersion() { const fs = await import("node:fs"); const s = fs.readFileSync(new URL("../../src/components/App.tsx", import.meta.url), "utf8"); return s.match(/VERSION = "([^"]+)"/)[1]; }
+export async function appVersion() { const fs = await import("node:fs"); const s = fs.readFileSync(new URL("../../src/lib/version.ts", import.meta.url), "utf8"); return s.match(/APP_VERSION = "([^"]+)"/)[1]; }

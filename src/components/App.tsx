@@ -1,4 +1,6 @@
 "use client";
+import { APP_VERSION } from "@/lib/version";
+import { APP_ENV, RELEASE_SHA, envBanner } from "@/lib/env";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -58,7 +60,7 @@ const ExecControl = dynamic(() => import("./ExecControl"), { ssr: false });
 const TeamStatus = dynamic(() => import("./TeamStatus"), { ssr: false });
 const Notices = dynamic(() => import("./Notices"), { ssr: false });
 const QuickCreate = dynamic(() => import("./QuickCreate"), { ssr: false });
-export const VERSION = "2.41";
+export const VERSION = APP_VERSION;
 /** Roles that see the management dashboard (also checked on the server for the export). */
 export const MANAGERS = ["owner", "admin", "management"];
 
@@ -388,11 +390,12 @@ export default function App({ slug }: { slug: string[] }) {
           </header>
           <div className="content">
             <main className="page">
+              {envBanner() && <div className={`banner env-${APP_ENV}`} role="status"><Icon n="info" /><span>{(envBanner() as any)[lang] || envBanner()!.en}</span></div>}
               {DEMO && <div className="banner"><Icon n="info" /><span>{t("demo_banner", lang)}</span>
                 <button className="btn ghost sm" style={{ marginInlineStart: "auto" }} onClick={() => { store.resetDemo(); reload(); }}>{({ en: "Reset", ru: "Сбросить", uk: "Скинути", ar: "إعادة تعيين" } as any)[lang] || "Reset"}</button></div>}
               {body}
             </main>
-            <Footer depts={depts} isAdmin={isAdmin} dark={dark} onTheme={toggleTheme} onLang={setLang} onSearch={(v) => setSearch({ voice: v })} hubs={HUBS} version={VERSION}
+            <Footer depts={depts} isAdmin={isAdmin} dark={dark} onTheme={toggleTheme} onLang={setLang} onSearch={(v) => setSearch({ voice: v })} hubs={HUBS} version={RELEASE_SHA ? `${VERSION} · ${RELEASE_SHA.slice(0, 7)}` : VERSION}
               onSignOut={DEMO ? undefined : async () => { await store.signOut(); router.replace("/login"); }} />
           </div>
         </div>

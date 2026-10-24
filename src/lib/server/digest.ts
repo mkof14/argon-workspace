@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { APP_ENV, blockedRecipients } from "@/lib/env";
 import { adminClient } from "@/lib/server/supabase";
 import { claimKeys, releaseKeys } from "@/lib/server/state";
 import { reportError } from "@/lib/server/errors";
@@ -83,6 +84,7 @@ export async function runDigest(only: string | null, localOnly = false): Promise
     const body = parts.join("\n\n");
     const subject = TXT.subj[l].replace("{k}", items(mine.length + company.length, l));
     const cta = { label: TXT.open[l], url: `${SITE}/reports` };
+    if ((APP_ENV === "staging" || APP_ENV === "preview") && blockedRecipients(p.email).length) { skipped.push(`${p.email}: ${APP_ENV} recipient control`); if (key) await releaseKeys(db, [key]); continue; }
     try {
       await transport.sendMail({ from: { name: "AGRON Workspace", address: from }, to: p.email, subject,
         html: renderEmail({ subject, heading: TXT.head[l], body, cta, lang: l, sender: COMPANY }), text: plainText({ body, cta, sender: COMPANY, lang: l }) });

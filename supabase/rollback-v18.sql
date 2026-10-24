@@ -7,6 +7,45 @@
 set client_min_messages = warning;
 begin;
 
+-- Policies of LATER versions' tables (kept by their rollbacks as inert leftovers) can depend on functions dropped below
+-- (e.g. management tables of v22 use session_ok / is_active_employee). Drop exactly those policies first: the leftover
+-- tables then deny all access (fail closed); running the later updates again recreates their policies.
+do $$
+declare f text; r record;
+begin
+  foreach f in array array[
+    'public.session_ok()',
+    'public.revoke_sessions(uuid)',
+    'public.automation_claim_keys(text[], integer[])',
+    'public.automation_enqueue(jsonb)',
+    'public.automation_save_rules(jsonb, text)',
+    'public.automation_decide(uuid, boolean, text, boolean, jsonb)',
+    'public.automation_claim_due(integer, integer)',
+    'public.automation_finish(uuid, uuid, boolean, text, text, boolean)',
+    'public.automation_requeue(uuid, text)',
+    'public.outbound_claim(text, text, text, uuid)',
+    'public.outbound_done(uuid, text, text, text)',
+    'public.outbound_mark_stuck(integer)',
+    'public.job_start(text, text, text, integer, integer)',
+    'public.job_heartbeat(uuid)',
+    'public.job_finish(uuid, text, text, jsonb)',
+    'public.job_revive(text, text)',
+    'public.rate_hit(text, integer, integer)',
+    'public.records_apply(jsonb)',
+    'public.can_read_as(uuid, text)',
+    'public.restore_load(text, jsonb)'
+  ] loop
+    if to_regprocedure(f) is null then continue; end if;
+    for r in select distinct pol.polname, c.relname, n.nspname from pg_depend d
+               join pg_policy pol on d.classid = 'pg_policy'::regclass and d.objid = pol.oid
+               join pg_class c on c.oid = pol.polrelid join pg_namespace n on n.oid = c.relnamespace
+              where d.refclassid = 'pg_proc'::regclass and d.refobjid = to_regprocedure(f) loop
+      execute format('drop policy if exists %I on %I.%I', r.polname, r.nspname, r.relname);
+    end loop;
+  end loop;
+end $$;
+
+
 -- sessions and MFA
 do $$ declare t text; begin
   foreach t in array array['records', 'comments', 'activity', 'approvals', 'doc_pages', 'faq', 'section_access', 'records_trash', 'ai_usage', 'push_subs', 'calendar_feeds', 'gcal_links', 'app_errors', 'profiles'] loop

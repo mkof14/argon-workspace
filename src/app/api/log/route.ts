@@ -1,4 +1,5 @@
 import { adminClient, currentProfile, userClient } from "@/lib/server/supabase";
+import { limit } from "@/lib/server/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,6 +12,7 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   const me = await currentProfile();
   if (!me || me.role === "pending") return new Response("Not signed in", { status: 401 });
+  const lim = await limit(`log:${me.id}`, 120, 60); if (lim) return lim;
   const b = await req.json().catch(() => ({}));
   const sb = await userClient();
   const { data: r } = await sb.from("records").select("id,section,title,controlled").eq("id", String(b.record_id || "")).maybeSingle();

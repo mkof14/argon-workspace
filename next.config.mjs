@@ -31,6 +31,12 @@ const security = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // Release identification and environment (src/lib/env.ts): fixed at build time from Vercel's system variables
+  env: {
+    NEXT_PUBLIC_DEPLOY_ENV: process.env.VERCEL_ENV || "",
+    NEXT_PUBLIC_RELEASE_SHA: process.env.VERCEL_GIT_COMMIT_SHA || "",
+    NEXT_PUBLIC_RELEASE_AT: process.env.VERCEL ? new Date().toISOString() : "",
+  },
   // the isolated test stack builds into its own folder, so the demo and production builds are untouched
   distDir: process.env.NEXT_DIST_DIR || ".next",
   // The user guide PDFs are read by /api/guide (signed-in staff only), so they ship with that function
@@ -41,6 +47,8 @@ const nextConfig = {
   async headers() {
     return [
       { source: "/:path*", headers: security },
+      // API answers carry personal and business data: never stored by a browser or a shared cache
+      { source: "/api/:path*", headers: [{ key: "Cache-Control", value: "no-store, max-age=0" }] },
       // Logos and email images never change between releases: cache for a week
       { source: "/:file(logo-full.webp|logo-mark.webp)", headers: [{ key: "Cache-Control", value: "public, max-age=604800, stale-while-revalidate=86400" }] },
       { source: "/email/:file*", headers: [{ key: "Cache-Control", value: "public, max-age=604800" }, { key: "Access-Control-Allow-Origin", value: "*" }] },

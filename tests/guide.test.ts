@@ -26,7 +26,7 @@ test("the guide texts are complete in every language", () => {
 });
 
 test("the PDFs match the app version (rebuild with scripts/guide/make.mjs after every release)", () => {
-  const version = fs.readFileSync("src/components/App.tsx", "utf8").match(/VERSION = "([^"]+)"/)![1];
+  const version = fs.readFileSync("src/lib/version.ts", "utf8").match(/APP_VERSION = "([^"]+)"/)![1];
   const man = JSON.parse(fs.readFileSync("guide/manifest.json", "utf8"));
   for (const l of ["en", "ru", "uk", "ar"]) {
     assert.equal(man.langs?.[l]?.version, version, `guide PDF (${l}) is for v${man.langs?.[l]?.version}, the app is v${version} — run node scripts/guide/make.mjs`);

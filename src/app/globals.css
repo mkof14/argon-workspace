@@ -125,6 +125,9 @@ textarea.input{resize:vertical;min-height:80px}
 .c-vio{color:var(--vio);background:var(--vio-bg);border-color:transparent}.c-accent{color:var(--accent);background:var(--accent-soft);border-color:transparent}
 .banner{display:flex;gap:10px;align-items:center;padding:11px 15px;border-radius:12px;border:1px dashed var(--accent);background:var(--accent-soft);font-size:14.5px}
 .banner svg{width:18px;height:18px;flex:none;color:var(--accent)}
+/* non-production environment (staging, preview, development): always visible, never decorative */
+.banner.env-staging,.banner.env-preview,.banner.env-development{border:1px solid var(--warn);background:var(--warn-bg);font-weight:600}
+.banner.env-staging svg,.banner.env-preview svg,.banner.env-development svg{color:var(--warn)}
 .empty{padding:36px 18px;text-align:center;color:var(--ink-2)}
 .empty b{display:block;font-size:17px;color:var(--ink);margin-bottom:4px}
 

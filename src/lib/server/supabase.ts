@@ -3,9 +3,11 @@ import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { COOKIE_OPTIONS } from "../cookies";
 import { isPrivileged } from "../roles";
+import { SUPABASE_URL, SUPABASE_ANON } from "../env";
 
-const URL_ = () => process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const ANON = () => process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+// a plain preview build has no database (src/lib/env.ts): these are empty there and every call fails closed
+const URL_ = () => SUPABASE_URL;
+const ANON = () => SUPABASE_ANON;
 
 /** Supabase client acting as the signed-in user (reads auth cookies). */
 export async function userClient() {

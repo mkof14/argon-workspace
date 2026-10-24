@@ -4,7 +4,7 @@ The guide is generated from the app's own sources — the Learning Center handbo
 the section/role/approval configuration — plus the guide texts in `src/config/guide/{en,ru,uk,ar}.ts`.
 The same model (`src/lib/guidemodel.ts`) renders the in-app page `/guide`, so the page is always current.
 
-After every user-visible change (version bump in `App.tsx`):
+After every user-visible change (version bump in `src/lib/version.ts`):
 
 1. Update the guide texts if the change needs more than the handbook/FAQ already say (all four languages).
 2. Demo build on :3124 — `NEXT_PUBLIC_SUPABASE_URL= NEXT_PUBLIC_SUPABASE_ANON_KEY= npx next build && npx next start -p 3124`

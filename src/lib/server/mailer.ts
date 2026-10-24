@@ -1,5 +1,6 @@
 import nodemailer from "nodemailer";
 import { classifySend, type Verdict } from "@/lib/mailerror";
+import { APP_ENV, blockedRecipients } from "@/lib/env";
 
 type Mail = { to: string; subject: string; html: string; text: string; replyTo?: string; attachments?: { filename: string; content: Buffer; contentType?: string }[]; messageId?: string };
 const transport = () => {
@@ -11,6 +12,11 @@ const transport = () => {
 
 /** Sends one email through the company Gmail account (info@agron1.com) and says exactly what happened. */
 export async function sendMailDetailed(o: Mail): Promise<{ ok: boolean; messageId?: string; error?: string; verdict?: Verdict }> {
+  // Staging and preview builds send only to the domains in MAIL_ALLOWED_DOMAINS (no accidental customer e-mail)
+  if (APP_ENV === "staging" || APP_ENV === "preview") {
+    const blocked = blockedRecipients(o.to);
+    if (blocked.length) return { ok: false, error: `Not sent: ${APP_ENV} sends only to allowed test domains (${blocked.length} recipient(s) outside them)`, verdict: { kind: "permanent", reason: `${APP_ENV} recipient control` } };
+  }
   const tr = transport(); if (!tr) return { ok: false, error: "Email sending is not configured", verdict: { kind: "retry", reason: "Email sending is not configured" } };
   try {
     const info = await tr.t.sendMail({ from: { name: "AGRON Inc.", address: process.env.SMTP_FROM || tr.user }, to: o.to, subject: o.subject, html: o.html, text: o.text, replyTo: o.replyTo, attachments: o.attachments, messageId: o.messageId, headers: { "X-AGRON-Workspace": "1" } });

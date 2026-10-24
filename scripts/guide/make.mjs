@@ -5,7 +5,7 @@ import fs from "node:fs"; import { execFileSync } from "node:child_process";
 const here = new URL(".", import.meta.url).pathname; const root = new URL("../../", import.meta.url).pathname;
 const args = process.argv.slice(2); const langs = args.filter((a) => !a.startsWith("--")); const L = langs.length ? langs : ["en", "ru", "uk", "ar"];
 const run = (f, a) => execFileSync(process.execPath, ["--experimental-strip-types", "--no-warnings", "--import", `${here}reg.mjs`, `${here}${f}`, ...a], { cwd: here, stdio: "inherit" });
-const ver = fs.readFileSync(`${root}src/components/App.tsx`, "utf8").match(/VERSION = "([^"]+)"/)[1];
+const ver = fs.readFileSync(`${root}src/lib/version.ts`, "utf8").match(/APP_VERSION = "([^"]+)"/)[1];
 const manPath = `${root}guide/manifest.json`; const man = fs.existsSync(manPath) ? JSON.parse(fs.readFileSync(manPath, "utf8")) : { langs: {} };
 for (const l of L) {
   if (!args.includes("--no-shots")) run("shots.mjs", [l]);
