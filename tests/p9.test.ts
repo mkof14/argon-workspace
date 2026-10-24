@@ -58,6 +58,9 @@ test("staging e-mail goes only to allowed test domains", () => {
   assert.deepEqual(blockedRecipients("a@agron1.com, c@customer.com", "staging", "agron1.com"), ["c@customer.com"]);
   assert.deepEqual(blockedRecipients("x@agron1.com.evil.io", "preview", "agron1.com"), ["x@agron1.com.evil.io"]);
   assert.deepEqual(blockedRecipients("not-an-address", "staging", "agron1.com"), ["not-an-address"]);
+  // an exact test mailbox (and its +tags) instead of a whole domain: staging never mails real colleagues
+  assert.deepEqual(blockedRecipients(["qa@agron1.com", "qa+p9-sales@agron1.com"], "staging", "qa@agron1.com"), []);
+  assert.deepEqual(blockedRecipients("ceo@agron1.com", "staging", "qa@agron1.com"), ["ceo@agron1.com"]);
 });
 
 test("release identification: app version, expected database version and the v26 migration agree", () => {

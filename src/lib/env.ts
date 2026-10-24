@@ -104,13 +104,16 @@ export const REFUSED_TEXT = {
 };
 
 /**
- * Outbound e-mail outside production goes only to addresses whose domain is listed in MAIL_ALLOWED_DOMAINS
- * (comma-separated, e.g. "agron1.com"); with no list nothing leaves a non-production environment.
+ * Outbound e-mail outside production goes only to the addresses or domains listed in MAIL_ALLOWED_DOMAINS
+ * (comma-separated: "qa@agron1.com" = that mailbox and its +tags, "agron1.com" = the whole domain); with no list nothing
+ * leaves a non-production environment.
  * Returns the recipients that may not be sent to (empty = all allowed).
  */
 export function blockedRecipients(to: string | string[], e: AppEnv = APP_ENV, allow = process.env.MAIL_ALLOWED_DOMAINS || ""): string[] {
   if (e === "production") return [];
   const ok = allow.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
   const list = (Array.isArray(to) ? to : String(to || "").split(",")).map((s) => s.trim()).filter(Boolean);
-  return list.filter((a) => { const m = a.toLowerCase().match(/<?([^<>\s]+@([^<>\s]+?))>?$/); return !m || !ok.includes(m[2]); });
+  // an entry with "@" allows exactly that address (a test mailbox, e.g. qa@agron1.com and its +tags); otherwise a domain
+  const base = (addr: string) => addr.replace(/\+[^@]*@/, "@");
+  return list.filter((a) => { const m = a.toLowerCase().match(/<?([^<>\s]+@([^<>\s]+?))>?$/); return !m || !(ok.includes(m[2]) || ok.includes(m[1]) || ok.includes(base(m[1]))); });
 }
