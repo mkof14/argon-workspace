@@ -1,5 +1,5 @@
 "use client";
-import { APP_ENV, envBanner } from "@/lib/env";
+import { APP_ENV, ENV_REFUSED, REFUSED_TEXT, envBanner } from "@/lib/env";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DEMO, sb } from "@/lib/sb";
@@ -83,6 +83,7 @@ export default function Login() {
       </div>
       <main className="auth-box">
         <div className="auth-top">
+          {ENV_REFUSED && APP_ENV !== "preview" && <div className="banner env-staging" role="alert" style={{ marginBottom: 12 }}><span>{(REFUSED_TEXT as any)[lang] || REFUSED_TEXT.en}</span></div>}
           {envBanner() && <div className={`banner env-${APP_ENV}`} role="status" style={{ marginBottom: 12 }}><span>{(envBanner() as any)[lang] || envBanner()!.en}</span></div>}
           <h1>{mode === "forgot" ? t("forgot_t", lang) : t("sign_in", lang)}</h1>
           <select className="input" style={{ width: "auto" }} value={lang} onChange={(e) => pickLang(e.target.value as Lang)} aria-label={t("language", lang)}>

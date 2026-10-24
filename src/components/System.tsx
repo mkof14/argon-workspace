@@ -42,7 +42,7 @@ export default function System() {
   </div>);
 }
 
-type Health = { ok: boolean; checks: Record<string, boolean>; ms: number; at: string };
+type Health = { ok: boolean; checks: Record<string, boolean>; ms: number; at: string; env?: string; release?: any; storage?: any; scheduler?: any; operations?: any; integrations?: Record<string, boolean> };
 type Err = { id: number; created_at: string; user_id: string | null; source: string; message: string; stack: string | null; url: string | null; agent: string | null; version: string | null; resolved: boolean };
 
 /** Live health of the services and the error log. */
@@ -99,6 +99,7 @@ function Health() {
         </div>
         <p className="faint" style={{ margin: "0 20px 16px", fontSize: 13.5 }}>{t("sys_uptime_note", lang)}</p>
       </section>
+      {h?.release && <Support h={h} />}
 
       <section className="card">
         <div className="card-h toolbar"><h2><Icon n="alert" />{t("sys_errors", lang)}</h2>
@@ -122,4 +123,35 @@ function Health() {
 
     </div>
   );
+}
+
+const Z = (en: string, ru: string, uk: string, ar: string) => ({ en, ru, uk, ar });
+/** Support view (owners and administrators; the health answer carries it only for them): release, database, storage, jobs, backup, queues, integrations. No secrets. */
+function Support({ h }: { h: Health }) {
+  const { lang } = useApp(); const T = (x: any) => tx(x, lang as Lang);
+  const r = h.release, o = h.operations || {}, jobs = Object.entries(h.scheduler || {}).filter(([k]) => k !== "error") as [string, any][];
+  const stale = jobs.filter(([, j]) => !j.fresh).map(([k]) => k);
+  const lastRun = jobs.map(([, j]) => j.last_started).filter(Boolean).sort().pop();
+  const yes = (v: boolean) => (v ? T(Z("yes", "да", "так", "نعم")) : T(Z("no", "нет", "ні", "لا")));
+  const rows: [any, string][] = [
+    [Z("Environment", "Среда", "Середовище", "البيئة"), String(r.env || h.env || "").toUpperCase()],
+    [Z("App version", "Версия приложения", "Версія застосунку", "إصدار التطبيق"), r.app],
+    [Z("Release", "Выпуск", "Випуск", "الإصدار"), r.sha || "—"],
+    [Z("Deployed", "Развёрнуто", "Розгорнуто", "تاريخ النشر"), r.deployed_at ? new Date(r.deployed_at).toLocaleString() : "—"],
+    [Z("Database version", "Версия базы данных", "Версія бази даних", "إصدار قاعدة البيانات"), `${r.db ?? "?"} / ${r.db_expected}${r.db_matches ? "" : " ⚠"}`],
+    [Z("Storage", "Хранилище файлов", "Сховище файлів", "التخزين"), h.storage?.ok ? `OK · ${h.storage.ms} ms` : "⚠"],
+    [Z("Last scheduler run", "Последний запуск планировщика", "Останній запуск планувальника", "آخر تشغيل للمجدول"), lastRun ? new Date(lastRun).toLocaleString() : "—"],
+    [Z("Jobs not fresh", "Задания без свежего запуска", "Завдання без свіжого запуску", "مهام غير محدّثة"), stale.length ? stale.join(", ") : "0"],
+    [Z("Failed jobs (24 h)", "Сбои заданий (24 ч)", "Збої завдань (24 год)", "مهام فاشلة (24 س)"), String(o.jobs_failed_24h ?? "—")],
+    [Z("Last backup", "Последняя копия", "Остання копія", "آخر نسخة احتياطية"), o.backup?.at ? `${new Date(o.backup.at).toLocaleString()}${o.backup.verified ? " · ✓" : ""}${o.backup.offsite ? " · off-site" : ""}` : T(Z("none", "нет", "немає", "لا يوجد"))],
+    [Z("Queues", "Очереди", "Черги", "قوائم الانتظار"), `automation ${JSON.stringify(o.automation_queue || {})} · outbound ${JSON.stringify(o.outbound || {})} · notices ${o.notifications_pending ?? 0}`],
+    [Z("Errors / refused sign-ins (24 h)", "Ошибки / отклонённые входы (24 ч)", "Помилки / відхилені входи (24 год)", "أخطاء / دخول مرفوض (24 س)"), `${o.errors_24h ?? 0} / ${o.auth_failures_24h ?? 0}`],
+    [Z("Database connections", "Подключения к базе", "Підключення до бази", "اتصالات قاعدة البيانات"), String(o.connections ?? "—")],
+    [Z("Integrations", "Интеграции", "Інтеграції", "التكاملات"), Object.entries(h.integrations || {}).map(([k, v]) => `${k}: ${yes(v)}`).join(" · ")],
+  ];
+  return (<section className="card" data-support>
+    <div className="card-h"><h2><Icon n="info" />{T(Z("Release and operations", "Выпуск и работа системы", "Випуск і робота системи", "الإصدار والتشغيل"))}</h2></div>
+    <div className="card-b"><table className="tbl"><tbody>{rows.map(([k, v], i) => <tr key={i}><th scope="row" style={{ textAlign: "start", fontWeight: 600 }}>{T(k)}</th><td>{v}</td></tr>)}</tbody></table>
+      <p className="faint" style={{ fontSize: 13.5 }}>{T(Z("Shown only to owners and administrators. No keys, passwords or addresses of the services.", "Видно только владельцам и администраторам. Без ключей, паролей и адресов сервисов.", "Видно лише власникам і адміністраторам. Без ключів, паролів і адрес сервісів.", "يظهر للمالكين والمسؤولين فقط. دون مفاتيح أو كلمات مرور أو عناوين الخدمات."))}</p></div>
+  </section>);
 }

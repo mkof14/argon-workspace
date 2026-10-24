@@ -1,6 +1,6 @@
 "use client";
 import { APP_VERSION } from "@/lib/version";
-import { APP_ENV, RELEASE_SHA, envBanner } from "@/lib/env";
+import { APP_ENV, ENV_REFUSED, REFUSED_TEXT, RELEASE_SHA, envBanner, envLabel } from "@/lib/env";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -154,6 +154,9 @@ export default function App({ slug }: { slug: string[] }) {
     // Session facts: second factor, ended sessions (owners/administrators need the code once it is required)
     if (p && !DEMO) { const s0 = await store.security().catch(() => null); setSec(s0);
       if (s0 && (p as any).sessions_revoked_at && s0.iat && s0.iat <= Math.floor(Date.parse((p as any).sessions_revoked_at) / 1000)) { await store.signOut(); router.replace("/login?ended=1"); return; } }
+    // invitation only: an account that registered itself (no invitation) is signed out, never left waiting
+    if (p && p.role === "pending" && !DEMO) { const r = await fetch("/api/registration", { method: "POST" }).then((x) => x.json()).catch(() => null);
+      if (r?.refused) { await store.signOut().catch(() => {}); router.replace(`/login?error_description=${encodeURIComponent("There is no Workspace account for this e-mail. Ask an administrator for an invitation.")}`); return; } }
     setMe(p); setLoaded(true); setTick((x) => x + 1);
     if (!p && !DEMO) router.replace("/login");
     if (p && !isExternal(p.role)) store.profiles().then((l) => { store.setPeople(l); setPeople(l); }).catch(() => {});
@@ -186,6 +189,8 @@ export default function App({ slug }: { slug: string[] }) {
   }, []);
   const access = useMemo(() => accessFor(me?.role || "pending", rules), [me?.role, rules]);
 
+  // fail closed: production or staging with unsafe or ambiguous database settings shows this, never demo data
+  if (ENV_REFUSED && APP_ENV !== "preview") return <div className="login"><div className="box" role="alert"><h2 style={{ margin: 0 }}>Workspace</h2><p style={{ margin: 0 }}>{(REFUSED_TEXT as any)[lang] || REFUSED_TEXT.en}</p></div></div>;
   if (!loaded || !me) return <div className="login"><div className="faint">…</div></div>;
 
   if ((me as any).disabled) return (
@@ -395,7 +400,7 @@ export default function App({ slug }: { slug: string[] }) {
                 <button className="btn ghost sm" style={{ marginInlineStart: "auto" }} onClick={() => { store.resetDemo(); reload(); }}>{({ en: "Reset", ru: "Сбросить", uk: "Скинути", ar: "إعادة تعيين" } as any)[lang] || "Reset"}</button></div>}
               {body}
             </main>
-            <Footer depts={depts} isAdmin={isAdmin} dark={dark} onTheme={toggleTheme} onLang={setLang} onSearch={(v) => setSearch({ voice: v })} hubs={HUBS} version={RELEASE_SHA ? `${VERSION} · ${RELEASE_SHA.slice(0, 7)}` : VERSION}
+            <Footer depts={depts} isAdmin={isAdmin} dark={dark} onTheme={toggleTheme} onLang={setLang} onSearch={(v) => setSearch({ voice: v })} hubs={HUBS} version={[VERSION, RELEASE_SHA.slice(0, 7), envLabel()].filter(Boolean).join(" · ")}
               onSignOut={DEMO ? undefined : async () => { await store.signOut(); router.replace("/login"); }} />
           </div>
         </div>

@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { COOKIE_OPTIONS } from "../cookies";
 import { isPrivileged } from "../roles";
-import { SUPABASE_URL, SUPABASE_ANON } from "../env";
+import { SUPABASE_URL, SUPABASE_ANON, serverKeyAllowed } from "../env";
 
 // a plain preview build has no database (src/lib/env.ts): these are empty there and every call fails closed
 const URL_ = () => SUPABASE_URL;
@@ -21,7 +21,12 @@ export async function userClient() {
   });
 }
 /** Service-role client for server-only tasks (AI usage log, invitations). Never expose to the browser. */
-export const adminClient = () => createClient(URL_(), process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false, autoRefreshToken: false } });
+export const adminClient = () => {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  // fail closed: no database for this build, or a server key of another project (e.g. production's key on staging)
+  if (!URL_() || !serverKeyAllowed(key, URL_())) throw new Error("Server database access is not configured for this environment");
+  return createClient(URL_(), key, { auth: { persistSession: false, autoRefreshToken: false } });
+};
 
 /** Claims of the access token that getUser() has just verified with the sign-in service. */
 const claimsOf = (token?: string | null): Record<string, any> => { try { return JSON.parse(Buffer.from(String(token || "").split(".")[1] || "", "base64url").toString()); } catch { return {}; } };

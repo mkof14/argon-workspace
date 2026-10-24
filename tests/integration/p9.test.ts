@@ -4,7 +4,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { createServerClient } from "@supabase/ssr";
-import { admin, anon, APP, ENV, makeUser, PASSWORD, signIn as signInFull, sql, uid } from "./_stack.ts";
+import { admin, anon, APP, ENV, makeUser, PASSWORD, pool, signIn as signInFull, sql, uid } from "./_stack.ts";
 const signIn = async (email: string) => (await signInFull(email)).c;
 
 const db = admin(); const run = uid();
@@ -70,6 +70,10 @@ test("health: the public answer has no versions or job details; the authorised a
   const auth = await (await fetch(APP + "/api/health", { headers: { authorization: `Bearer ${ENV.CRON_SECRET}` } })).json();
   assert.equal(auth.release.db, 26); assert.equal(auth.release.db_expected, 26); assert.equal(auth.release.db_matches, true); assert.match(auth.release.app, /^\d+\.\d+$/);
   assert.equal(typeof auth.scheduler, "object");
+  // support view (R23): storage, operations statistics, integrations as yes/no only
+  assert.equal(auth.storage.ok, true); assert.equal(auth.operations.db_version, 26); assert.equal(typeof auth.operations.connections, "number");
+  for (const k of ["email", "ai", "calendar", "backup_offsite", "backup_passphrase", "cron_secret"]) assert.equal(typeof auth.integrations[k], "boolean", k);
+  assert.equal(auth.release.env, "development");
   const wrong = await (await fetch(APP + "/api/health", { headers: { authorization: "Bearer wrong" } })).json(); assert.equal(wrong.release, undefined);
   const ownerCookie = await cookiesFor(owner.email);
   const asOwner = await (await fetch(APP + "/api/health", { headers: { cookie: ownerCookie } })).json(); assert.equal(asOwner.release?.db, 26, "owner sees release");
@@ -83,4 +87,89 @@ test("API answers are not cacheable; the access log has a request limit", { skip
   let limited = 0;
   for (let i = 0; i < 125; i++) { const r = await fetch(APP + "/api/log", { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ record_id: opp.id }) }); if (r.status === 429) limited++; }
   assert.ok(limited >= 1, "more than 120 access-log calls a minute are refused");
+});
+
+/* ------------------------------ P9-R1 R4: a self-registered account sees nothing and is signed out ------------------------------ */
+async function asUser<T = any>(id: string, q: string, p: any[] = []): Promise<T[]> {
+  const c = await pool.connect();
+  try {
+    await c.query("begin"); await c.query("set local role authenticated");
+    await c.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: id, role: "authenticated", aal: "aal1", iat: Math.floor(Date.now() / 1000) + 5 })]);
+    const r = await c.query(q, p); await c.query("commit"); return r.rows;
+  } catch (e) { await c.query("rollback").catch(() => {}); throw e; } finally { c.release(); }
+}
+const callAs = async (id: string, fn: string, args: any[] = []) => (await asUser(id, `select public.${fn}(${args.map((_, i) => `$${i + 1}`).join(", ")}) r`, args.map((a) => (Array.isArray(a) || (a && typeof a === "object") ? JSON.stringify(a) : a))))[0].r;
+const refusedP = async (p: Promise<any>, re: RegExp) => { await assert.rejects(p, (e: any) => { assert.match(String(e.message), re); return true; }); };
+
+test("registration safety: an uninvited (self-registered) account reads no company data and is signed out by the app", async () => {
+  // what a public sign-up produces: an account with role "pending" and no invitation
+  const { data: u, error } = await db.auth.admin.createUser({ email: `p9self-${run}@agron-stack.test`, password: PASSWORD, email_confirm: true }); assert.ifError(error);
+  const id = u.user!.id;
+  assert.equal((await sql("select role from profiles where id = $1", [id]))[0].role, "pending");
+  assert.equal(Number((await asUser(id, "select count(*) n from records"))[0].n), 0, "no records");
+  assert.deepEqual((await asUser(id, "select id from profiles")).map((r: any) => r.id), [id], "only its own profile — no employee directory");
+  assert.equal(Number((await asUser(id, "select count(*) n from departments"))[0].n), 0, "no departments");
+  assert.equal(Number((await asUser(id, "select count(*) n from comments"))[0].n), 0, "no comments");
+  assert.equal(Number((await asUser(id, "select count(*) n from notifications"))[0].n), 0, "no notifications");
+  for (const fn of ["mgmt_dashboard", "crm_dashboard", "mfg_dashboard", "ops_my_processes"]) {
+    const exists = (await sql("select exists (select 1 from pg_proc where proname = $1 and pronamespace = 'public'::regnamespace) ok", [fn]))[0].ok; if (!exists) continue;
+    const r = await callAs(id, fn, []).catch((e: any) => ({ refused: String(e.message) }));
+    assert.ok((r as any)?.refused || !JSON.stringify(r).includes(`P9 restricted ${run}`), `${fn}: nothing restricted`);
+  }
+  if (!skipApp) {
+    const cookie = await cookiesFor(`p9self-${run}@agron-stack.test`);
+    const r = await (await fetch(APP + "/api/registration", { method: "POST", headers: { cookie } })).json();
+    assert.equal(r.refused, true, "the app signs an uninvited account out");
+    const log = await sql("select count(*)::int n from activity where section = 'security.log' and action = 'uninvited_sign_in_refused' and actor = $1", [id]);
+    assert.ok(log[0].n >= 1, "the refused attempt is in the security log");
+  }
+  // an invited person waiting for a role is not refused
+  const inv = await db.auth.admin.inviteUserByEmail(`p9inv-${run}@agron-stack.test`); assert.ifError(inv.error);
+  assert.ok(inv.data.user?.invited_at, "invitation recorded");
+});
+
+/* ------------------------------ P9-R1 R6/R8: business authority and policy approval safety ------------------------------ */
+test("policy approval safety: System Admin and Workflow Admin alone cannot approve; Owner and Policy Approver can; an edit returns to Draft; history and running chains keep their version", async () => {
+  const sysadmin = await makeUser(`p9a-${run}@agron-stack.test`, "admin", { us: true });
+  const wfa = await makeUser(`p9w-${run}@agron-stack.test`, "management", { us: true });
+  const pa = await makeUser(`p9pa-${run}@agron-stack.test`, "management", { us: true });
+  const titled = await makeUser(`p9t-${run}@agron-stack.test`, "operations", { us: true });
+  await sql("update profiles set title = 'Policy Approver and Build Manager' where id = $1", [titled.id]);
+  await callAs(owner.id, "crm_cap_set", [wfa.id, "workflow_admin", true]);
+  await callAs(owner.id, "crm_cap_set", [pa.id, "policy_approver", true]);
+  // capabilities are never inferred from a job title
+  for (const cap of ["policy_approver", "build_manager", "workflow_admin"]) assert.equal((await sql("select public.has_cap($1, $2) ok", [titled.id, cap]))[0].ok, false, `title gives no ${cap}`);
+  assert.equal((await sql("select public.has_cap($1, 'policy_approver') ok", [sysadmin.id]))[0].ok, false, "System Administrator has no business authority");
+  const pol = async () => (await sql("select version, config_status, approved_version, tiers from approval_policies where code = 'TRAVEL'"))[0];
+  let p = await pol(); const wasApproved = p.config_status === "Approved";
+  await refusedP(callAs(sysadmin.id, "ops_policy_approve", ["TRAVEL", p.version]), /Policy Approver/);
+  await refusedP(callAs(wfa.id, "ops_policy_approve", ["TRAVEL", p.version]), /Policy Approver/);
+  await refusedP(callAs(titled.id, "ops_policy_approve", ["TRAVEL", p.version]), /Policy Approver/);
+  if (!wasApproved) assert.notEqual((await pol()).config_status, "Approved", "nothing approved by the refused calls");
+  // the Owner approves
+  assert.equal((await callAs(owner.id, "ops_policy_approve", ["TRAVEL", p.version])).status, "Approved");
+  const approvedV = (await pol()).version; assert.equal((await pol()).approved_version, approvedV);
+  // the Workflow Admin edits (allowed) → a new version in Draft; the approved version stays in the history
+  await callAs(wfa.id, "ops_policy_save", ["TRAVEL", "Travel approval", p.tiers, true]);
+  p = await pol(); assert.equal(p.config_status, "Draft"); assert.equal(p.version, approvedV + 1);
+  const hist = await sql("select config_status, version from approval_policies_history where policy_code = 'TRAVEL' order by id");
+  assert.ok(hist.some((h: any) => h.config_status === "Approved" && h.version === approvedV), "the approved version remains in the history");
+  // a Policy Approver approves the new version
+  assert.equal((await callAs(pa.id, "ops_policy_approve", ["TRAVEL", p.version])).status, "Approved");
+  assert.ok((await sql("select config_status from approval_policies_history where policy_code = 'TRAVEL' and config_status = 'Superseded'")).length >= 1, "the earlier approval is marked superseded");
+  // a running request keeps the policy version it started with
+  const emp = await makeUser(`p9e-${run}@agron-stack.test`, "operations", { us: true });
+  const t = await callAs(emp.id, "ops_request_create", ["travel", `P9 trip ${run}`, { destination: "Test City", starts: "2026-12-01", ends: "2026-12-03", purpose: "Synthetic", est_cost: 1000, currency: "USD" }, null]);
+  const inst = (await sql("select i.id, s.id run from wf_instances i join wf_step_runs s on s.id = i.current_run where i.record_id = $1", [t.record]))[0];
+  await callAs(emp.id, "wf_act", [inst.run, "submit", null]);
+  const vAtStart = (await pol()).version;
+  const ev = (await sql("select detail from wf_events where instance_id = $1 and kind = 'approval_requested' order by id desc limit 1", [inst.id]))[0];
+  assert.equal(Number(ev.detail.policy_version), vAtStart, "the chain records the exact policy version");
+  const before = await sql("select id, approver_id, status from approvals where record_id = $1 order by id", [t.record]);
+  assert.ok(before.length >= 1, "approvals were opened");
+  const changed = JSON.parse(JSON.stringify((await pol()).tiers)); changed[0].steps = [{ kind: "role", role: "finance", label: "Finance" }];
+  await callAs(wfa.id, "ops_policy_save", ["TRAVEL", "Travel approval", changed, true]);
+  assert.deepEqual(await sql("select id, approver_id, status from approvals where record_id = $1 order by id", [t.record]), before, "editing the policy does not change a running chain");
+  // put the seeded tiers back for later suites (stays Draft: nothing is left approved by this test)
+  await callAs(wfa.id, "ops_policy_save", ["TRAVEL", "Travel approval", p.tiers, true]);
 });

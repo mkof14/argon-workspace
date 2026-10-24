@@ -95,3 +95,48 @@ test("retention removes old copies and the files only they used", async () => {
   const r: any = await runBackup(db, { store, now: far });
   const left = await listManifests(store); assert.ok(left.length < ms.length + 1, `kept ${left.length} of ${ms.length + 1}`); assert.ok(left.some((m) => m.name === r.name));
 });
+
+// P9-R1 (R9, R11): from v26 the backup holds EVERY Workspace table. After wiping all of them, the restore brings each
+// back row for row (checksums per table): people and access, records and document versions, workflows, approvals and
+// policies with their history, CRM capabilities and settings, management, manufacturing tables and audit trails.
+test("every table: a full wipe is restored row for row (workflows, policies, CRM, management, manufacturing, audit)", async () => {
+  const tables: string[] = (await sql("select unnest(public.backup_tables()) t")).map((r: any) => r.t);
+  for (const t of ["records", "profiles", "section_access", "document_versions", "wf_definitions", "wf_instances", "approval_policies", "approval_policies_history",
+    "crm_caps", "crm_settings", "crm_audit", "management_settings", "mfg_settings", "mfg_locations", "mfg_bom_lines", "mfg_stock", "mfg_serials", "mfg_audit", "activity", "comments", "notifications"])
+    assert.ok(tables.includes(t), `${t} is in the backup`);
+  for (const t of ["ai_cache", "rate_limits", "push_subs"]) assert.ok(!tables.includes(t), `${t} is not backed up (cache / counters / device endpoints)`);
+  // synthetic rows in the newer tables so the drill restores more than seeds
+  await sql(`insert into public.mfg_locations(code, name) values ($1, 'Synthetic rack') on conflict do nothing`, [`RK-${run}`.toUpperCase().slice(0, 30)]);
+  await sql("insert into public.crm_caps(user_id, cap, granted_by) values ($1, 'proposal_approver', $1) on conflict do nothing", [owner.id]);
+  const fp = async () => {
+    const out: Record<string, string> = {};
+    for (const t of tables) {
+      if (t === "ops_state") continue; // the backup writes its own run state after collecting the data
+      const r = await sql(`select count(*)::int n, coalesce(md5(string_agg(md5(x::text), ',' order by md5(x::text))), '') h from public.${t} x`);
+      out[t] = `${r[0].n}:${r[0].h}`;
+    }
+    return out;
+  };
+  const b: any = await runBackup(db, { store, now: new Date(Date.now() + 10 * 864e5) });
+  assert.equal(b.verified, true);
+  const before = await fp();
+  const nonEmpty = Object.entries(before).filter(([, v]) => !v.startsWith("0:")).length;
+  assert.ok(nonEmpty >= 12, `at least 12 tables hold rows (${nonEmpty})`);
+  // the disaster: every Workspace table, the files and the sign-in accounts
+  await sql(`truncate ${tables.filter((t) => t !== "ops_state").map((t) => `public.${t}`).join(", ")} cascade`);
+  await sql("delete from storage.objects where bucket_id = 'files'"); fs.rmSync(path.join(ENV.STACK_DIR, "storage", "files"), { recursive: true, force: true });
+  await sql("delete from auth.users");
+  const t1 = Date.now();
+  const file = await store.get(b.name);
+  const res: any = await restoreInto(db, file!, pass, store);
+  evidence.full_restore_ms = Date.now() - t1; evidence.full_restore_tables = Object.keys(res).length;
+  const after = await fp();
+  const diff = Object.keys(before).filter((t) => before[t] !== after[t]);
+  assert.deepEqual(diff, [], `tables restored exactly (differ: ${diff.join(", ")})`);
+  for (const [p, bytes] of Object.entries(files)) { const d = await db.storage.from("files").download(p); assert.ifError(d.error); assert.ok(Buffer.from(await d.data!.arrayBuffer()).equals(bytes), `${p} bytes`); }
+  // the system works after the restore: a person signs in (new password after recovery) and reads by the same rules
+  await db.auth.admin.updateUserById(owner.id, { password: PASSWORD });
+  const { c } = await signIn(owner.email);
+  const r = await c.from("records").select("id").limit(1); assert.equal(r.error, null);
+  fs.writeFileSync(path.join(ENV.STACK_DIR, "p9-restore.json"), JSON.stringify({ tables: tables.length, non_empty: nonEmpty, restore_ms: evidence.full_restore_ms, backup_bytes: b.bytes }, null, 1));
+});

@@ -39,8 +39,33 @@ async function all(db: any, table: string, cols = "*", filter?: (q: any) => any)
   return out;
 }
 
-/** Collects the data. `controlled` = include records marked US persons only (only for a US-person owner or the server). */
+/**
+ * Every Workspace table (v26 backup_meta: all public tables in foreign-key order, with primary keys; caches,
+ * request counters and device push endpoints excepted). null on a database before v26.
+ */
+export async function backupTables(db: any): Promise<{ table: string; pk: string[] }[] | null> {
+  try { const { data, error } = await db.rpc("backup_meta"); if (error || !Array.isArray(data)) return null; return data; } catch { return null; }
+}
+
+/**
+ * Collects the data. From v26 the backup holds EVERY table (workflows, policies, CRM, management, manufacturing,
+ * audit trails …) — format 5, `tables` + `order`. `controlled: false` (a copy for someone who is not a US person)
+ * keeps the older core-table format, because a partial copy of the other tables would not be consistent.
+ */
 export async function collectData(db: any, opts: { controlled: boolean }) {
+  const meta = opts.controlled ? await backupTables(db) : null;
+  if (meta) {
+    const tables: Record<string, any[]> = {};
+    for (const m of meta) tables[m.table] = await all(db, m.table, "*", (q) => m.pk.reduce((qq: any, k: string) => qq.order(k, { ascending: true }), q));
+    const counts: Record<string, number> = {}; for (const [t, rows] of Object.entries(tables)) counts[t] = rows.length;
+    return { format: "agron-workspace-backup", version: 5, created_at: new Date().toISOString(), controlled_included: true, order: meta.map((m) => m.table), counts, tables,
+      // the core lists stay at the top level too, so the download view and older readers keep working
+      records: tables.records || [], comments: tables.comments || [], profiles: tables.profiles || [] };
+  }
+  return collectLegacy(db, opts);
+}
+
+async function collectLegacy(db: any, opts: { controlled: boolean }) {
   const records = await all(db, "records", "*", (q) => (opts.controlled ? q : q.eq("controlled", false)));
   const ids = new Set(records.map((r) => r.id));
   const [comments, activity, faq, rules, approvals, profiles, departments, taxonomy, doc_number_formats, doc_counters, document_versions, document_access_log] = await Promise.all([
@@ -205,7 +230,21 @@ export async function restoreInto(target: any, file: Buffer, pass: string, store
     if (!error) users++; else if (!/already|exists|registered/i.test(error.message)) throw new Error(`user ${p.email}: ${error.message}`);
   }
   done.users = users;
-  for (const t of RESTORE_TABLES) {
+  if (data.tables && Array.isArray(data.order)) {
+    // format 5: every table, in foreign-key order; then the references to rows that arrived later
+    const here = await backupTables(target); if (!here) throw new Error("The target database is older than v26 — apply the migrations up to v26 first");
+    const known = new Set(here.map((m) => m.table)); const order = data.order.filter((t: string) => known.has(t));
+    const missing = data.order.filter((t: string) => !known.has(t)); if (missing.length) step(`not in the target, skipped: ${missing.join(", ")}`);
+    for (const phase of [1, 2]) for (const t of order) {
+      if (phase === 1) step(t);
+      const rows = data.tables[t] || []; let n = 0;
+      for (let i = 0; i < rows.length; i += 500) {
+        const { data: k, error } = await target.rpc("restore_load", { p_table: t, p_rows: rows.slice(i, i + 500), p_phase: phase });
+        if (error) throw new Error(`${t} (phase ${phase}): ${error.message}`); n += Number(k) || 0;
+      }
+      if (phase === 1) done[t] = n;
+    }
+  } else for (const t of RESTORE_TABLES) {
     step(t); const rows = (data as any)[t] || []; let n = 0;
     for (let i = 0; i < rows.length; i += 500) {
       const { data: k, error } = await target.rpc("restore_load", { p_table: t, p_rows: rows.slice(i, i + 500) });
