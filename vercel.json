@@ -8,5 +8,10 @@
       "path": "/api/cron",
       "schedule": "0 10 * * *"
     }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": {
+      "hotfix-v2.33-security": false
+    }
+  }
 }
