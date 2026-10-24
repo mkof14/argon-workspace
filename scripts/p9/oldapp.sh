@@ -12,7 +12,7 @@ OLD=/home/claude/agron-main
 envs() { node -e 'const e=require(process.argv[1]);for(const[k,v] of Object.entries(e))console.log(`${k}=${String(v).replace(/ /g,"_")}`)' "$ROOT/.stack/env.json"; }
 
 echo "== rollback the stack database v26 … v18 =="
-t0=$(ms); for n in 26 25 24 23 22 21 20 19 18; do $PSQL -f supabase/rollback-v$n.sql >/dev/null; done; echo "rollback $(( $(ms) - t0 )) ms"
+if [ -z "${SKIP_ROLLBACK:-}" ]; then t0=$(ms); for n in 26 25 24 23 22 21 20 19 18; do $PSQL -f supabase/rollback-v$n.sql >/dev/null; done; echo "rollback $(( $(ms) - t0 )) ms"; else echo "skipped (database already rolled back)"; fi
 
 echo "== a synthetic owner for the sign-in =="
 node --input-type=module -e '
@@ -29,11 +29,16 @@ echo "== build and start v2.33 (origin/main) =="
 git worktree remove --force "$OLD" >/dev/null 2>&1 || true
 git worktree add --detach "$OLD" origin/main >/dev/null 2>&1
 ln -sfn "$ROOT/node_modules" "$OLD/node_modules"
+# test harness only: v2.33's content security policy allows only *.supabase.co, so the browser could not reach the local
+# stack; the worktree copy allows the stack origin too (no application code is changed)
+STACK_URL=$(node -e 'console.log(require(process.argv[1]).NEXT_PUBLIC_SUPABASE_URL)' "$ROOT/.stack/env.json")
+sed -i "s#connect-src 'self' \${supabase}#connect-src 'self' $STACK_URL \${supabase}#; s#img-src 'self' data: blob:#img-src 'self' data: blob: $STACK_URL#; s#\"upgrade-insecure-requests\",##; s#  \"upgrade-insecure-requests\"##" "$OLD/next.config.mjs"
+grep -c "$STACK_URL" "$OLD/next.config.mjs" >/dev/null || { echo "CSP patch failed"; exit 1; }
 ( cd "$OLD" && grep -o 'VERSION = "[^"]*"' src/components/App.tsx && export $(envs | xargs) NEXT_DIST_DIR=.next-old NEXT_TELEMETRY_DISABLED=1 && npx next build > "$ROOT/.stack/oldapp-build.log" 2>&1 ) || { tail -20 .stack/oldapp-build.log; exit 1; }
 fuser -k 3126/tcp >/dev/null 2>&1 || true
 ( cd "$OLD" && export $(envs | xargs) NEXT_DIST_DIR=.next-old && setsid npx next start -p 3126 -H 127.0.0.1 > "$ROOT/.stack/oldapp.log" 2>&1 < /dev/null & )
 for i in $(seq 1 60); do curl -s -o /dev/null http://127.0.0.1:3126/login && break; sleep 1; done
-APP=http://127.0.0.1:3126 node scripts/p9/smoke-ui.mjs rollback-owner@agron-stack.test old
+APP=http://127.0.0.1:3126 node scripts/p9/smoke-ui.mjs rollback-owner@agron-stack.test v2.33 || echo "OLD APPLICATION SMOKE FAILED"
 
 fuser -k 3126/tcp >/dev/null 2>&1 || true
 echo "== migrate the stack database again v18 … v26 =="
