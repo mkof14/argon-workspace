@@ -18,6 +18,7 @@ begin
 end $$;
 
 -- backup of every table, operations statistics: back to the v21 restore (core tables only)
+drop function if exists public.restore_reset(text);
 drop function if exists public.backup_meta();
 drop function if exists public.backup_tables();
 drop function if exists public.ops_db_stats();

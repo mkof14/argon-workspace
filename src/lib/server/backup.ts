@@ -220,9 +220,15 @@ const RESTORE_TABLES = ["section_access", "departments", "profiles", "taxonomy",
  * (they set a new password through "Forgot password"). Rows are inserted as they were (ids, versions, history),
  * never overwriting anything already there. Files are decrypted from the backup store into the target's Storage.
  */
-export async function restoreInto(target: any, file: Buffer, pass: string, store: Store | null, o: { onStep?: (s: string) => void } = {}) {
+export async function restoreInto(target: any, file: Buffer, pass: string, store: Store | null, o: { onStep?: (s: string) => void; force?: boolean } = {}) {
   const t0 = Date.now(); const step = o.onStep || (() => {});
   const data = unpack(decrypt(file, pass)); const done: Record<string, number> = {};
+  if (data.tables && Array.isArray(data.order)) {
+    // format 5 restores every table into a fresh project: its starting rows give way to the backed-up ones
+    step("reset");
+    const { error } = await target.rpc("restore_reset", { p_confirm: o.force ? "WIPE" : null });
+    if (error) throw new Error(`reset: ${error.message}`);
+  }
   step("users");
   let users = 0;
   for (const p of data.profiles || []) {

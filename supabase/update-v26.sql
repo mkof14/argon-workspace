@@ -129,6 +129,24 @@ end $$;
 revoke all on function public.restore_load(text, jsonb, integer) from public, anon, authenticated;
 grant execute on function public.restore_load(text, jsonb, integer) to service_role;
 
+-- a restore goes into a fresh project: the target's starting rows (seeded departments, catalogues, policies, settings …)
+-- give way to the backed-up ones, so ids and references come back exactly. Refused while the target holds records,
+-- unless the operator confirms with 'WIPE' (scripts/restore.mjs --force).
+create or replace function public.restore_reset(p_confirm text default null) returns integer
+  language plpgsql security definer set search_path = public
+as $$
+declare t text; n integer := 0;
+begin
+  if exists (select 1 from public.records) and coalesce(p_confirm, '') <> 'WIPE' then
+    raise exception 'The target already holds records; a restore goes into an empty project' using errcode = '55000';
+  end if;
+  execute (select 'truncate ' || string_agg(format('public.%I', x), ', ') || ' cascade' from unnest(public.backup_tables()) x);
+  get diagnostics n = row_count;
+  return coalesce(array_length(public.backup_tables(), 1), 0);
+end $$;
+revoke all on function public.restore_reset(text) from public, anon, authenticated;
+grant execute on function public.restore_reset(text) to service_role;
+
 -- 4. operations statistics (monitoring, endurance, support view) --------------------------------------------------
 create or replace function public.ops_db_stats() returns jsonb
   language plpgsql stable security definer set search_path = public
