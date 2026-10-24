@@ -121,7 +121,7 @@ create table if not exists public.acceptance_settings (
 );
 
 -- immutability: evidence, closures, findings, comments and the change log are never changed or deleted
-create or replace function public.acceptance_immutable() returns trigger language plpgsql as $$
+create or replace function public.acceptance_immutable() returns trigger language plpgsql set search_path = public as $$
 begin raise exception 'Acceptance records are append-only (%)', tg_table_name using errcode = '42501'; end $$;
 do $$ declare t text; begin
   foreach t in array array['acceptance_evidence', 'acceptance_owner_action_events', 'acceptance_findings', 'acceptance_comments', 'acceptance_env_changes'] loop
@@ -215,6 +215,11 @@ begin
     values (ck.id, p_status, p_environment, p_identity->>'app_version', p_identity->>'git_sha', nullif(p_identity->>'db_version', '')::int, p_identity->>'migration_hash',
       now(), now(), 'owner attestation', coalesce(nullif(p_ref, ''), 'attestation ' || to_char(now(), 'YYYY-MM-DD HH24:MI')), 'owner', me, p_summary, coalesce(p_metrics, '{}'::jsonb))
     returning acceptance_evidence.id into new_id;
+  -- an attested change of the environment (plan, repository visibility, staging resources) also enters the change log
+  if ck.params ? 'change_category' then
+    insert into public.acceptance_env_changes(environment, category, what, actor, reference, source)
+      values (p_environment, ck.params->>'change_category', left(ck.name || ': ' || coalesce(p_summary, ''), 500), me::text, new_id::text, 'owner attestation');
+  end if;
   return new_id;
 end $$;
 revoke all on function public.acceptance_attest(text, text, text, jsonb, text, jsonb, text) from public, anon;
@@ -425,10 +430,10 @@ insert into public.acceptance_checks(id, phase, name, kind, freshness, envs, gat
   ('P9.POLICIES.REVIEWED', 'P9', 'Business policies reviewed by the owner', 'owner_attestation', 'validation', '{production}', '{production}', true, '{}', true, 70, null),
   ('P9.POLICIES.PRODUCTION', 'P9', 'Business policies owner-approved — production', 'policies', 'live', '{production}', '{production}', true, '{}', false, 71, null),
   ('P9.ACCESS.PRODUCTION', 'P9', 'Access matrix complete, no unresolved conflicts — production', 'access_matrix', 'validation', '{production}', '{production}', true, '{}', true, 72, null),
-  ('P9.STAGING.RESOURCES', 'P9', 'Staging resources decided', 'owner_attestation', 'validation', '{staging}', '{staging}', true, '{}', true, 80, null),
-  ('P9.PLAN.VERCEL', 'P9', 'Vercel plan suitable for production', 'owner_attestation', 'validation', '{production}', '{production}', true, '{}', true, 81, null),
-  ('P9.PLAN.SUPABASE', 'P9', 'Supabase production plan with backups', 'owner_attestation', 'validation', '{production}', '{production}', true, '{}', true, 82, null),
-  ('P9.REPO.PRIVATE', 'P9', 'Repository private', 'owner_attestation', 'validation', '{production}', '{production}', true, '{}', true, 83, null),
+  ('P9.STAGING.RESOURCES', 'P9', 'Staging resources decided', 'owner_attestation', 'validation', '{staging}', '{staging}', true, '{"change_category": "config"}', true, 80, null),
+  ('P9.PLAN.VERCEL', 'P9', 'Vercel plan suitable for production', 'owner_attestation', 'validation', '{production}', '{production}', true, '{"change_category": "plan"}', true, 81, null),
+  ('P9.PLAN.SUPABASE', 'P9', 'Supabase production plan with backups', 'owner_attestation', 'validation', '{production}', '{production}', true, '{"change_category": "plan"}', true, 82, null),
+  ('P9.REPO.PRIVATE', 'P9', 'Repository private', 'owner_attestation', 'validation', '{production}', '{production}', true, '{"change_category": "repo_privacy"}', true, 83, null),
   ('P9.READINESS.REVIEWED', 'P9', 'Production readiness reviewed by the owner', 'owner_attestation', 'validation', '{production}', '{production}', true, '{}', true, 84, null),
   ('P9.PROD.TOUCH', 'P9', 'Production touch probe (deployment, database version)', 'production_touch', 'operational', '{production}', '{}', false, '{}', false, 90, null),
   ('P9.LIVE.AUTHORIZATION', 'P9', 'Owner authorisation of the production deployment', 'owner_authorization', 'release', '{production}', '{live}', true, '{}', true, 95, null),

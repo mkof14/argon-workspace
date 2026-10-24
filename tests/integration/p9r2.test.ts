@@ -62,6 +62,7 @@ test("attestations and owner-action closure: owner only, and only with evidence 
   const notAttestable = await o.rpc("acceptance_attest", { p_check: "P9.REG.FULL", p_status: "PASS", p_environment: "local", p_identity: ident, p_summary: "", p_metrics: { mode: "full_clean" }, p_ref: "x" });
   assert.ok(notAttestable.error, "a regression is measured, never attested");
   const rec = await sql("select recorded_via, recorded_by from public.acceptance_evidence where id = $1", [mine.data]); assert.equal(rec[0].recorded_via, "owner"); assert.equal(rec[0].recorded_by, owner.id);
+  const logged = await sql("select category, source from public.acceptance_env_changes where reference = $1", [String(mine.data)]); assert.equal(logged[0]?.category, "config", "an attested environment change enters the change log");
   // action 3 closes with P9.STAGING.RESOURCES; regression (code) evidence cannot close it
   const code = (await db.rpc("acceptance_record", { p: row({ check_id: "P9.REG.FULL", metrics: { mode: "full_clean" } }) })).data;
   assert.ok((await a.rpc("acceptance_close_action", { p_action: 3, p_evidence: [mine.data], p_note: null })).error, "an administrator cannot close it");

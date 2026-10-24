@@ -90,6 +90,17 @@ export async function recordSnapshot(db: any, live?: Live) {
   if (env === "staging") out.push(await rec(db, { ...base, check_id: "P9.STAGING.DEPLOYED", status: id.db_version === DB_VERSION ? "PASS" : "FAIL", source_ref: `staging app ${id.git_sha.slice(0, 12)} ${at}`,
     summary: id.db_version === DB_VERSION ? "staging app answers with its own database at the expected version" : `database v${id.db_version}, build expects v${DB_VERSION}`, blocker: id.db_version === DB_VERSION ? null : "database version mismatch",
     metrics: { health_status: 200, database: true, db_version: id.db_version, app_env: APP_ENV } }));
+  // configuration changes seen since the last snapshot (names and yes/no only — never a value)
+  const { data: seen0 } = await db.from("acceptance_settings").select("value").eq("key", "observed").maybeSingle();
+  const prev = seen0?.value || null; const nowSeen = { integrations: L.integrations || {}, disable_signup: L.signup?.disable_signup ?? null };
+  if (prev) {
+    const cat = (k: string) => (k.startsWith("backup") ? "backup" : k === "cron_secret" ? "scheduler" : "integration");
+    for (const [k, v] of Object.entries(nowSeen.integrations)) if (prev.integrations?.[k] !== undefined && prev.integrations[k] !== v)
+      await db.from("acceptance_env_changes").insert({ environment: env, category: cat(k), what: `${k} ${v ? "configured" : "removed"}`, source: "system" });
+    if (prev.disable_signup != null && nowSeen.disable_signup != null && prev.disable_signup !== nowSeen.disable_signup)
+      await db.from("acceptance_env_changes").insert({ environment: env, category: "signup", what: nowSeen.disable_signup ? "public sign-up disabled" : "public sign-up enabled", source: "system" });
+  }
+  await db.from("acceptance_settings").upsert({ key: "observed", value: { ...nowSeen, at } });
   // a code deployment of a new release is an environment change
   if (env === "staging" || env === "production") {
     const { data: seen } = await db.from("acceptance_env_changes").select("id").eq("category", "code_deploy").eq("environment", env).eq("reference", id.git_sha).limit(1);
