@@ -7,6 +7,7 @@
 // on the target is recorded with the result, because a timing means nothing without it.
 import fs from "node:fs";
 import { target } from "./target.mjs";
+import { row, emit } from "../acceptance/evidence.mjs";
 
 const T = target(); const RUNS = Number(process.env.RUNS || 20);
 const P = JSON.parse(fs.readFileSync(T.file("personas"), "utf8")).personas;
@@ -50,5 +51,10 @@ const vol = {}; for (const s of ["sales.pipeline", "company.parties", "technical
 for (const t of ["mfg_bom_lines", "mfg_stock", "mfg_serials", "wf_instances", "approvals", "comments"]) { const { count } = await T.admin.from(t).select("*", { count: "exact", head: true }); vol[t] = count; }
 const report = { ref: T.ref, at: new Date().toISOString(), staging_evidence: !T.stack, volume: vol, rows, pass: rows.every((r) => r.skipped || r.pass) };
 fs.writeFileSync(T.file("perf"), JSON.stringify(report, null, 1));
+// acceptance evidence (P9-R2): tier "local" never satisfies the production-grade gate
+const ev = await row("P9.PERF.STAGING", T.stack ? "local" : "staging", { status: report.pass ? "PASS" : "FAIL", source: "scripts/p9/staging-perf.mjs", source_ref: `perf ${report.at}`,
+  summary: `${rows.filter((r) => r.pass).length}/${rows.filter((r) => !r.skipped).length} paths within target${T.stack ? " — LOCAL PERFORMANCE" : ""}`, blocker: report.pass ? null : rows.filter((r) => !r.skipped && !r.pass).map((r) => r.name).join(", "),
+  metrics: { tier: T.stack ? "local" : "staging", runs_per_path: RUNS, concurrency: 1, dataset: vol, rows: rows.map((r) => ({ path: r.name, rpc: r.fn, persona: r.who, class: r.cls, samples: r.runs, p50: r.p50, p95: r.p95, p99: r.p99, errors: r.errors, threshold_ms: r.target_ms, pass: r.pass, skipped: r.skipped })) } }, T.admin);
+console.log(`evidence: ${await emit(ev, { db: T.admin })}`);
 console.log(`${report.pass ? "PASS" : "FAIL"} — volume ${JSON.stringify(vol)}; report .staging/perf-${T.ref}.json${T.stack ? " (local stack: NOT staging evidence)" : ""}`);
 process.exit(report.pass ? 0 : 1);

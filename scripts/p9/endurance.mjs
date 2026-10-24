@@ -15,6 +15,7 @@
 import fs from "node:fs";
 import crypto from "node:crypto";
 import { target } from "./target.mjs";
+import { row, emit } from "../acceptance/evidence.mjs";
 
 const T = target();
 const arg = (k, d) => { const a = process.argv.find((x) => x.startsWith(`--${k}=`)); return a ? a.split("=")[1] : d; };
@@ -83,3 +84,13 @@ const summary = { ref: T.ref, run, minutes, workers: WORKERS, staging_evidence: 
   max_jobs_failed_24h: Math.max(...lines.map((l) => l.jobs_failed_24h || 0)), created_rows_cleaned: created.length, log: out };
 fs.writeFileSync(T.file(`endurance-${run}-summary`), JSON.stringify(summary, null, 1));
 console.log("SUMMARY " + JSON.stringify(summary));
+// acceptance evidence (P9-R2): a run shorter than 24 continuous hours is a TOOL CHECK, never acceptance evidence
+const actual = Math.round((Date.now() - t0) / 60e3); const full = !T.stack && actual >= 1440;
+const healthy = summary.error_rate <= 0.001 && summary.max_repeated_notifications === 0 && Math.max(...lines.map((l) => l.jobs_dead || 0)) === 0 && (summary.p95_last_hour == null || summary.p95_first_hour == null || summary.p95_last_hour <= summary.p95_first_hour * 1.5 + 50);
+const ev = await row("P9.ENDURANCE", T.stack ? "local" : "staging", { status: full ? (healthy ? "PASS" : "FAIL") : "NOT VERIFIED", source: "scripts/p9/endurance.mjs", source_ref: `endurance ${run}`, started_at: new Date(t0).toISOString(),
+  summary: full ? `${actual} min, ${summary.requests} requests, error rate ${summary.error_rate}` : `TOOL CHECK — NOT ACCEPTANCE EVIDENCE (${actual} min)`, blocker: full && !healthy ? "error rate, duplicate notices, dead jobs or latency growth over limits" : null,
+  metrics: { minutes: actual, planned_minutes: minutes, continuous: lines.length >= Math.floor(minutes) - 1, requests: summary.requests, writes: created.length, errors: summary.errors, error_rate: summary.error_rate, retries: 0,
+    duplicate_notifications: summary.max_repeated_notifications, job_failures_24h_max: summary.max_jobs_failed_24h, dead_jobs_max: Math.max(...lines.map((l) => l.jobs_dead || 0)),
+    queue_depth_max: Math.max(...lines.map((l) => Number(l.notifications_pending) || 0)), db_connections_max: summary.max_db_connections, p95_first_hour: summary.p95_first_hour, p95_last_hour: summary.p95_last_hour,
+    p99_max: Math.max(...lines.map((l) => l.p99 || 0)), workers: WORKERS, log: out.split("/").pop() } }, T.admin);
+console.log(`evidence: ${await emit(ev, { db: T.admin })}`);

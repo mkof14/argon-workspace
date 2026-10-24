@@ -16,6 +16,7 @@
 import fs from "node:fs";
 import crypto from "node:crypto";
 import { target } from "./target.mjs";
+import { row, emit } from "../acceptance/evidence.mjs";
 
 const T = target();
 const P = JSON.parse(fs.readFileSync(T.file("personas"), "utf8")).personas;
@@ -137,5 +138,12 @@ await db.from("records").delete().in("id", fixtures.map((f) => f.id));
 
 const report = { ref: T.ref, run, at: new Date().toISOString(), passes: passes.length, findings, probes: PROBES.length, personas: Object.keys(P).length };
 fs.writeFileSync(T.file("security"), JSON.stringify(report, null, 1));
+// acceptance evidence (P9-R2): a local run is recorded as local and never certifies staging
+const grp = (re) => ({ passed: passes.filter((p) => re.test(p)).length, findings: findings.filter((p) => re.test(p)).length });
+const ev = await row("P9.SEC.STAGING", T.stack ? "local" : "staging", { status: findings.length ? "FAIL" : "PASS", source: "scripts/p9/staging-security.mjs", source_ref: `security ${run} ${report.at}`,
+  summary: `${passes.length} checks passed, ${findings.length} finding(s)`, blocker: findings.length ? findings.slice(0, 3).join("; ") : null,
+  metrics: { checks: passes.length, findings: findings.length, probes: PROBES.length, personas: Object.keys(P).length, groups: { direct_known_id: grp(/known (id|path)/i), aggregates: grp(/unchanged|answers do change/i),
+    files: grp(/file|signed link/i), exports: grp(/export/i), assistant: grp(/Assistant/i) }, target: T.stack ? "local stack" : T.ref } }, T.admin);
+console.log(`evidence: ${await emit(ev, { db: T.admin })}`);
 console.log(`${findings.length ? "FAIL" : "PASS"}: ${passes.length} checks passed, ${findings.length} finding(s); report .staging/security-${T.ref}.json`);
 process.exit(findings.length ? 1 : 0);

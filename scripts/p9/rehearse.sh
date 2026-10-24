@@ -5,15 +5,19 @@
 #      read-only (structure only: tables/columns, functions, policies, triggers, indexes).
 #   2. Production-shaped synthetic content: the production record count per section and status, the same data keys,
 #      the same number of controlled records, files, FAQ and history rows — invented values only.
-#   3. Backup (pg_dump, custom format) → v18 … v26, the exact files intended for production, timed one by one →
-#      counts and fingerprints → v26 again (re-runnable) → full rollback v26 … v18, timed → structure compared with
-#      step 1 → restore drill of the step-3 backup into "agron_reh_restore" → v18 … v26 again → compared with step 3.
+#   3. Backup (pg_dump, custom format) → v18 … latest, the exact files intended for production, timed one by one →
+#      counts and fingerprints → latest again (re-runnable) → full rollback latest … v18, timed → structure compared
+#      with step 1 → restore drill of the step-3 backup into "agron_reh_restore" → v18 … latest again → compared.
+#   Acceptance evidence (P9-R2): .stack/evidence/rehearsal-<time>.json, source "synthetic" — a synthetic rehearsal
+#   never proves production-data compatibility. The application smoke tests are not part of this script; they are
+#   recorded as not performed unless OLD_APP_SMOKE / NEW_APP_SMOKE=pass name a smoke run of the same release.
 #   PROD_FP='{"tables":17,...}' bash scripts/p9/rehearse.sh      (the production fingerprint, if known)
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 export PGPASSWORD="${PGPASSWORD:-postgres}"
 PORT="${STACK_PG_PORT:-54329}"; DB=agron_reh
 PSQL="psql -h 127.0.0.1 -p $PORT -U postgres -v ON_ERROR_STOP=1 -qtA"
+LAST=$(ls supabase | sed -n 's/^update-v\([0-9]*\)\.sql$/\1/p' | sort -n | tail -1); STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 OUT="${REHEARSAL_OUT:-.stack/rehearsal}"; mkdir -p "$OUT"; BASE="$OUT/base"; rm -rf "$BASE"; mkdir -p "$BASE"
 ms() { date +%s%3N; }
 fp() { $PSQL -d "$1" -f scripts/p9/fingerprint.sql; }
@@ -45,16 +49,16 @@ echo "== 2. production-shaped synthetic content =="
 $PSQL -d $DB -f scripts/p9/shape.sql >/dev/null
 C_A=$(counts $DB); echo "counts v17: $C_A"
 
-echo "== 3. backup, migrate v18 … v26 =="
+echo "== 3. backup, migrate v18 … v$LAST =="
 t0=$(ms); pg_dump -h 127.0.0.1 -p "$PORT" -U postgres -d $DB -Fc -f "$OUT/before.dump"; echo "backup $(( $(ms) - t0 )) ms, $(stat -c %s "$OUT/before.dump") bytes, sha256 $(sha256sum "$OUT/before.dump" | cut -c1-16)"
 for f in $(ls supabase | sed -n 's/^update-v\([0-9]*\)\.sql$/\1/p' | sort -n | awk '$1>=18{print "supabase/update-v"$1".sql"}'); do echo "  $(sha256sum "$f" | cut -c1-12) $(apply $DB "$f")"; done
-FP_B=$(fp $DB); C_B=$(counts $DB); echo "fingerprint v26: $FP_B"; echo "counts v26: $C_B"
-echo "  re-run: $(apply $DB supabase/update-v26.sql) / $(apply $DB supabase/update-v25.sql)"
+FP_B=$(fp $DB); C_B=$(counts $DB); echo "fingerprint v$LAST: $FP_B"; echo "counts v$LAST: $C_B"
+echo "  re-run: $(apply $DB supabase/update-v$LAST.sql) / $(apply $DB supabase/update-v$((LAST-1)).sql)"
 [ "$(fp $DB)" = "$FP_B" ] && echo "  re-run leaves the structure unchanged" || echo "  RE-RUN CHANGED THE STRUCTURE"
 $PSQL -d $DB -c "select json_build_object('workspace_db_version', public.workspace_db_version(), 'mfg_functions', (select count(*) from pg_proc where pronamespace='public'::regnamespace and proname like 'mfg\_%'))"
 
-echo "== 4. full rollback v26 … v18 =="
-t0=$(ms); for n in 26 25 24 23 22 21 20 19 18; do echo "  $(apply $DB supabase/rollback-v$n.sql)"; done; echo "rollback total $(( $(ms) - t0 )) ms"
+echo "== 4. full rollback v$LAST … v18 =="
+t0=$(ms); for n in $(seq $LAST -1 18); do echo "  $(apply $DB supabase/rollback-v$n.sql)"; done; echo "rollback total $(( $(ms) - t0 )) ms"
 FP_R=$(fp $DB); C_R=$(counts $DB); echo "fingerprint after rollback: $FP_R"; echo "counts after rollback: $C_R"
 node -e 'const a=JSON.parse(process.argv[1]),b=JSON.parse(process.argv[2]);const d=Object.keys(a).filter(k=>String(a[k])!==String(b[k]));console.log(d.length?"after rollback differs from v17 in: "+d.map(k=>k+" "+a[k]+"→"+b[k]).join(", "):"after rollback: structure IDENTICAL to v17")' "$FP_A" "$FP_R"
 node -e 'const a=JSON.parse(process.argv[1]),b=JSON.parse(process.argv[2]);const d=Object.keys(a).filter(k=>String(a[k])!==String(b[k]));console.log(d.length?"content differs from v17 in: "+d.join(", "):"content after rollback IDENTICAL to v17")' "$C_A" "$C_R"
@@ -69,9 +73,25 @@ C_RS=$(counts ${DB}_restore); FP_RS=$(fp ${DB}_restore)
 COLQ="select table_schema||'.'||table_name||'.'||column_name from information_schema.columns where table_schema in ('public','storage','auth') order by 1"
 LOST=$(comm -23 <($PSQL -d ${DB}_restore -c "$COLQ") <($PSQL -d $DB -c "$COLQ") | tr '\n' ' ')
 [ -z "$LOST" ] && echo "after the full rollback every v17 column still exists (nothing the old application uses was dropped)" || echo "COLUMNS LOST BY THE ROLLBACK: $LOST"
-echo "== 6. migrate again v18 … v26 =="
+echo "== 6. migrate again v18 … v$LAST =="
 t0=$(ms); for f in $(ls supabase | sed -n 's/^update-v\([0-9]*\)\.sql$/\1/p' | sort -n | awk '$1>=18{print "supabase/update-v"$1".sql"}'); do apply $DB "$f" >/dev/null; done; echo "re-migration $(( $(ms) - t0 )) ms"
 [ "$(fp $DB)" = "$FP_B" ] && echo "structure after re-migration IDENTICAL to the first migration" || echo "STRUCTURE AFTER RE-MIGRATION DIFFERS: $(fp $DB)"
 C_B2=$(counts $DB); node -e 'const a=JSON.parse(process.argv[1]),b=JSON.parse(process.argv[2]);const d=Object.keys(a).filter(k=>String(a[k])!==String(b[k]));console.log(d.length?"content after re-migration differs in: "+d.join(", "):"content after re-migration IDENTICAL to the first migration")' "$C_B" "$C_B2"
 echo "== stack database (all migrations incl. the current access.sql) for comparison =="
 fp postgres
+echo "== acceptance evidence =="
+FP_RM=$(fp $DB)
+node --input-type=module -e '
+import { row, emit } from "./scripts/acceptance/evidence.mjs";
+const [A,B,R,RS,B2,fa,fb,fr,frs,frm,last,started,lost]=process.argv.slice(1); const j=(x)=>JSON.parse(x);
+const ca=j(A), cb=j(B), cr=j(R), crs=j(RS), cb2=j(B2);
+const m={ source:"synthetic", source_db_version:17, target_db_version:Number(last), migration_files:"v18 … v"+last, source_fingerprint:fa, post_migration_fingerprint:fb,
+  existing_records_identical: ca.records_md5===cb.records_md5, rollback_ok: ca.records_md5===cr.records_md5 && !lost.trim(), rollback_structure_identical: fr===fa, columns_lost_by_rollback: lost.trim() || null, restore_identical: crs.records_md5===ca.records_md5 && frs===fa,
+  remigration_identical: frm===fb && cb2.records_md5===cb.records_md5, old_app_smoke: process.env.OLD_APP_SMOKE==="pass" ? true : null, new_app_smoke: process.env.NEW_APP_SMOKE==="pass" ? true : null,
+  counts_before: ca, counts_after: cb };
+const okData = m.existing_records_identical && m.rollback_ok && m.remigration_identical;
+const r = await row("P9.MIGRATION.SYNTHETIC","local",{ status: okData ? (m.old_app_smoke && m.new_app_smoke ? "PASS" : "NOT VERIFIED") : "FAIL", source:"scripts/p9/rehearse.sh", source_ref:"rehearsal "+started, started_at:started,
+  summary: (okData ? "data and structure identical through migrate, rollback and re-migration" : "DIFFERENCES found") + (m.old_app_smoke && m.new_app_smoke ? "" : "; application smoke tests not performed in this run"),
+  blocker: okData ? null : "synthetic rehearsal found differences", metrics:m });
+console.log("evidence: "+await emit(r,{dir:".stack/evidence"}));
+' "$C_A" "$C_B" "$C_R" "$C_RS" "$C_B2" "$FP_A" "$FP_B" "$FP_R" "$FP_RS" "$FP_RM" "$LAST" "$STARTED" "$LOST"

@@ -10,6 +10,7 @@ import OpsCenter from "./OpsCenter";
 import Automation, { useAuto, L } from "./Automation";
 import SysSettings from "./SysSettings";
 import Quality from "./Quality";
+import AcceptanceEvidence from "./AcceptanceEvidence";
 import { tx, type Lang } from "@/lib/i18n";
 
 const TABS = [
@@ -19,6 +20,7 @@ const TABS = [
   { k: "quality", icon: "check", t: L("Data quality & audit", "Качество данных и аудит", "Якість даних і аудит", "جودة البيانات والتدقيق") },
   { k: "settings", icon: "gear", t: L("Settings", "Настройки", "Налаштування", "الإعدادات") },
   { k: "backup", icon: "server", t: L("Backup", "Резервные копии", "Резервні копії", "النسخ الاحتياطي") },
+  { k: "acceptance", icon: "check", t: L("Acceptance Evidence", "Доказательства приёмки", "Докази приймання", "أدلة القبول") },
 ];
 
 /** Administration → System, in tabs. The tab is kept in the address (?tab=…), so email links open the right place. */
@@ -31,13 +33,14 @@ export default function System() {
   const pending = a.s?.queue.filter((q) => q.status === "pending").length || 0;
   const isOwnerOrAdmin = ["owner", "admin"].includes(me.role);
   return (<div style={{ display: "grid", gap: 16 }}>
-    <div className="tabs card" role="tablist" style={{ ["--dc" as any]: "#5B6CF0" }}>{TABS.filter((x) => !["backup", "ops"].includes(x.k) || isOwnerOrAdmin).map((x) => (
+    <div className="tabs card" role="tablist" style={{ ["--dc" as any]: "#5B6CF0" }}>{TABS.filter((x) => !["backup", "ops", "acceptance"].includes(x.k) || isOwnerOrAdmin).map((x) => (
       <button key={x.k} role="tab" aria-selected={tab === x.k} className={tab === x.k ? "on" : ""} onClick={() => go(x.k)}><Icon n={x.icon} />{tx(x.t, lang as Lang)}{x.k === "auto" && pending > 0 && <span className="chip c-warn" style={{ padding: "0 7px" }}>{pending}</span>}</button>))}</div>
     {tab === "health" && <Health />}
     {tab === "ops" && isOwnerOrAdmin && <OpsCenter />}
     {tab === "auto" && <Automation a={a} />}
     {tab === "quality" && <Quality a={a} />}
     {tab === "settings" && <SysSettings a={a} />}
+    {tab === "acceptance" && isOwnerOrAdmin && <AcceptanceEvidence />}
     {tab === "backup" && <div style={{ display: "grid", gap: 16 }}>{isOwnerOrAdmin && <BackupCenter />}{me.role === "owner" && <FullExport />}</div>}
   </div>);
 }

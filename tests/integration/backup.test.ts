@@ -7,8 +7,8 @@ import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { admin, ENV, makeUser, PASSWORD, signIn, sql, uid } from "./_stack.ts";
-import { runBackup, restoreInto, s3Store, decrypt, listManifests, BackupConfigError } from "../../src/lib/server/backup.ts";
+import { admin, anon, ENV, makeUser, PASSWORD, signIn, sql, uid } from "./_stack.ts";
+import { runBackup, restoreInto, s3Store, decrypt, listManifests, BackupConfigError, postRestoreVerify } from "../../src/lib/server/backup.ts";
 import { s3Config } from "../../src/lib/server/s3.ts";
 import { saveState } from "../../src/lib/server/state.ts";
 
@@ -128,8 +128,13 @@ test("every table: a full wipe is restored row for row (workflows, policies, CRM
   await sql("delete from auth.users");
   const t1 = Date.now();
   const file = await store.get(b.name);
-  const res: any = await restoreInto(db, file!, pass, store);
+  const t0s = new Date().toISOString();
+  const res: any = await restoreInto(db, file!, pass, store, { anon: anon() });
   evidence.full_restore_ms = Date.now() - t1; evidence.full_restore_tables = Object.keys(res).length;
+  // P9-R2 R2-9: the restore paused triggers — every one is enabled again, constraints valid, functions and RLS as in the source
+  const pv = res.post_verify;
+  assert.equal(pv.triggers_ok, true, `triggers (${JSON.stringify(pv.disabled_triggers)})`); assert.equal(pv.constraints_ok, true, `constraints (${JSON.stringify(pv.invalid_constraints)})`);
+  assert.equal(pv.functions_ok, true, "functions as in the source"); assert.equal(pv.rls_ok, true, `RLS (${JSON.stringify(pv.tables_without_rls)})`); assert.equal(pv.rls_probe, true, "an anonymous caller reads nothing");
   const after = await fp();
   const diff = Object.keys(before).filter((t) => before[t] !== after[t]);
   assert.deepEqual(diff, [], `tables restored exactly (differ: ${diff.join(", ")})`);
@@ -139,4 +144,26 @@ test("every table: a full wipe is restored row for row (workflows, policies, CRM
   const { c } = await signIn(owner.email);
   const r = await c.from("records").select("id").limit(1); assert.equal(r.error, null);
   fs.writeFileSync(path.join(ENV.STACK_DIR, "p9-restore.json"), JSON.stringify({ tables: tables.length, non_empty: nonEmpty, restore_ms: evidence.full_restore_ms, backup_bytes: b.bytes }, null, 1));
+  // acceptance evidence of this local drill (informational: a local drill never certifies a hosted restore)
+  if (ENV.ACCEPTANCE_RUN) {
+    const { row } = await import("../../scripts/acceptance/evidence.mjs");
+    const ev = await (row as any)("P9.RESTORE.LOCAL", "local", { status: "PASS", source: "tests/integration/backup.test.ts (every-table drill)", source_ref: `restore drill ${ENV.ACCEPTANCE_RUN}`, started_at: t0s,
+      summary: `${tables.length} tables, ${nonEmpty} non-empty, restored row for row; triggers, constraints, functions and RLS verified`,
+      metrics: { source_backup: b.name, target: "local stack (same database after a full wipe)", duration_ms: evidence.full_restore_ms, tables_expected: tables.length - 1, tables_restored: tables.length - 1 - diff.length,
+        rows_verified: diff.length === 0, files_expected: Object.keys(files).length, files_verified: true, post_verify: pv, regression_run: ENV.ACCEPTANCE_RUN } }, null);
+    fs.mkdirSync(ENV.ACCEPTANCE_EVD, { recursive: true }); fs.writeFileSync(path.join(ENV.ACCEPTANCE_EVD, `${ENV.ACCEPTANCE_RUN}.restore-local.json`), JSON.stringify(ev, null, 1));
+  }
+});
+
+test("post-restore verification: a trigger left disabled, an invalid constraint or a table without RLS fails it", async () => {
+  const { data: src } = await db.rpc("acceptance_integrity");
+  await sql("alter table public.records disable trigger user");
+  try { const v: any = await postRestoreVerify(db, src, anon()); assert.equal(v.triggers_ok, false); assert.ok(v.disabled_triggers.some((x: string) => x.startsWith("records."))); }
+  finally { await sql("alter table public.records enable trigger user"); }
+  await sql("alter table public.faq disable row level security");
+  try { const v: any = await postRestoreVerify(db, src, null); assert.equal(v.rls_ok, false); assert.ok(v.tables_without_rls.includes("faq")); }
+  finally { await sql("alter table public.faq enable row level security"); }
+  // without the source's snapshot (an older backup) nothing is assumed: the comparison is unknown, never true
+  const v: any = await postRestoreVerify(db, null, null); assert.equal(v.functions_ok, null); assert.equal(v.triggers_ok, null);
+  const ok: any = await postRestoreVerify(db, src, anon()); assert.equal(ok.triggers_ok && ok.constraints_ok && ok.functions_ok && ok.rls_ok, true);
 });

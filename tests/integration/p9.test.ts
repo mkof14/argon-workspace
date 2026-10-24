@@ -5,6 +5,7 @@ import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { createServerClient } from "@supabase/ssr";
 import { admin, anon, APP, ENV, makeUser, PASSWORD, pool, signIn as signInFull, sql, uid } from "./_stack.ts";
+import { DB_VERSION } from "../../src/lib/version.ts";
 const signIn = async (email: string) => (await signInFull(email)).c;
 
 const db = admin(); const run = uid();
@@ -27,10 +28,10 @@ before(async () => {
   opp = (await db.from("records").insert({ section: "sales.pipeline", title: `P9 opportunity ${run}`, status: "Qualified", data: { value: 1 }, controlled: false }).select("*").single()).data;
 });
 
-test("database version: v26 reports 26 to signed-in users and the server, not to anonymous callers", async () => {
-  assert.equal((await sql("select public.workspace_db_version() v"))[0].v, 26);
+test("database version: the current version (v26 introduced it) is reported to signed-in users and the server, not to anonymous callers", async () => {
+  assert.equal((await sql("select public.workspace_db_version() v"))[0].v, DB_VERSION);
   const a = await anon().rpc("workspace_db_version"); assert.ok(a.error, "anonymous call refused");
-  const s = await signIn(sales.email); const r = await s.rpc("workspace_db_version"); assert.equal(r.error, null); assert.equal(r.data, 26);
+  const s = await signIn(sales.email); const r = await s.rpc("workspace_db_version"); assert.equal(r.error, null); assert.equal(r.data, DB_VERSION);
 });
 
 test("v26 hardening: anonymous callers cannot run the classification lookup; signed-in users still can", async () => {
@@ -68,15 +69,15 @@ test("health: the public answer has no versions or job details; the authorised a
   assert.equal(pj.ok, true); assert.equal(pj.release, undefined); assert.equal(pj.scheduler, undefined);
   assert.match(pub.headers.get("cache-control") || "", /no-store/);
   const auth = await (await fetch(APP + "/api/health", { headers: { authorization: `Bearer ${ENV.CRON_SECRET}` } })).json();
-  assert.equal(auth.release.db, 26); assert.equal(auth.release.db_expected, 26); assert.equal(auth.release.db_matches, true); assert.match(auth.release.app, /^\d+\.\d+$/);
+  assert.equal(auth.release.db, DB_VERSION); assert.equal(auth.release.db_expected, DB_VERSION); assert.equal(auth.release.db_matches, true); assert.match(auth.release.app, /^\d+\.\d+$/);
   assert.equal(typeof auth.scheduler, "object");
   // support view (R23): storage, operations statistics, integrations as yes/no only
-  assert.equal(auth.storage.ok, true); assert.equal(auth.operations.db_version, 26); assert.equal(typeof auth.operations.connections, "number");
+  assert.equal(auth.storage.ok, true); assert.equal(auth.operations.db_version, DB_VERSION); assert.equal(typeof auth.operations.connections, "number");
   for (const k of ["email", "ai", "calendar", "backup_offsite", "backup_passphrase", "cron_secret"]) assert.equal(typeof auth.integrations[k], "boolean", k);
   assert.equal(auth.release.env, "development");
   const wrong = await (await fetch(APP + "/api/health", { headers: { authorization: "Bearer wrong" } })).json(); assert.equal(wrong.release, undefined);
   const ownerCookie = await cookiesFor(owner.email);
-  const asOwner = await (await fetch(APP + "/api/health", { headers: { cookie: ownerCookie } })).json(); assert.equal(asOwner.release?.db, 26, "owner sees release");
+  const asOwner = await (await fetch(APP + "/api/health", { headers: { cookie: ownerCookie } })).json(); assert.equal(asOwner.release?.db, DB_VERSION, "owner sees release");
   const asSales = await (await fetch(APP + "/api/health", { headers: { cookie: await cookiesFor(sales.email) } })).json(); assert.equal(asSales.release, undefined, "sales does not");
   const body = JSON.stringify(auth); for (const s of [ENV.SUPABASE_SERVICE_ROLE_KEY, ENV.CRON_SECRET, ENV.SMTP_PASS, ENV.BACKUP_PASSPHRASE].filter(Boolean)) assert.ok(!body.includes(s), "no secret in the health answer");
 });

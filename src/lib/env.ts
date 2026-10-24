@@ -77,6 +77,13 @@ export const dbAllowed = () => ENV_DECISION.db;
 export const SUPABASE_URL = ENV_DECISION.db ? process.env.NEXT_PUBLIC_SUPABASE_URL || "" : "";
 export const SUPABASE_ANON = ENV_DECISION.db ? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "" : "";
 export const RELEASE_SHA = (process.env.NEXT_PUBLIC_RELEASE_SHA || "").slice(0, 12);
+/** The full Git SHA of this build (acceptance evidence is bound to it), whether the build had uncommitted changes,
+ *  and the SHA-256 of the migration set it was built with (scripts/acceptance/identity.mjs). */
+export const RELEASE_SHA_FULL = process.env.NEXT_PUBLIC_RELEASE_SHA || "";
+export const RELEASE_DIRTY = process.env.NEXT_PUBLIC_RELEASE_DIRTY === "1";
+export const MIGRATION_HASH = process.env.NEXT_PUBLIC_MIGRATION_HASH || "";
+/** The environment name used in acceptance evidence (a local build is "local"). */
+export const evidenceEnv = (e: AppEnv = APP_ENV) => (e === "development" ? "local" : e);
 export const RELEASE_AT = process.env.NEXT_PUBLIC_RELEASE_AT || "";
 
 /** A server key may be used only with the project it belongs to (keys without a ref are accepted). */

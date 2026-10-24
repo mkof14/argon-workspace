@@ -1,4 +1,5 @@
 /** @type {import('next').NextConfig} */
+import { gitSha, dirty, migrationHash } from "./scripts/acceptance/identity.mjs";
 const supabase = "https://*.supabase.co";
 // a non-Supabase-cloud project URL (the isolated test stack) is allowed too
 const own = (() => { try { const u = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL || ""); return u.hostname.endsWith(".supabase.co") ? "" : u.origin; } catch { return ""; } })();
@@ -34,7 +35,10 @@ const nextConfig = {
   // Release identification and environment (src/lib/env.ts): fixed at build time from Vercel's system variables
   env: {
     NEXT_PUBLIC_DEPLOY_ENV: process.env.VERCEL_ENV || "",
-    NEXT_PUBLIC_RELEASE_SHA: process.env.VERCEL_GIT_COMMIT_SHA || "",
+    // Vercel's commit SHA; a local build (the isolated stack) uses the checkout's SHA and says whether it had uncommitted changes
+    NEXT_PUBLIC_RELEASE_SHA: process.env.VERCEL_GIT_COMMIT_SHA || gitSha(),
+    NEXT_PUBLIC_RELEASE_DIRTY: process.env.VERCEL ? "" : dirty() ? "1" : "",
+    NEXT_PUBLIC_MIGRATION_HASH: migrationHash().hash,
     NEXT_PUBLIC_RELEASE_AT: process.env.VERCEL ? new Date().toISOString() : "",
   },
   // the isolated test stack builds into its own folder, so the demo and production builds are untouched

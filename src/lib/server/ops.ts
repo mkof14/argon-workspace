@@ -9,6 +9,7 @@ import { jobHealth } from "./jobs";
 import { alertAdmins } from "./alerts";
 import { reportError } from "./errors";
 import { s3Config } from "./s3";
+import { recordBackup, recordSnapshot } from "./acceptance";
 import { renderEmail, SITE } from "@/lib/mail";
 import { departmentReport } from "@/lib/reports";
 import { prevMonth, thisMonth } from "@/lib/channels";
@@ -32,6 +33,8 @@ export async function backupJob(db: any, o: { deadline?: number } = {}) {
   try {
     const r: any = await runBackup(db, { deadline: o.deadline });
     if (r.partial) return r; // continues on the next run
+    // acceptance evidence (P9-R2): the job itself records the artifact it produced — never inferred from a plan
+    await recordBackup(db, r).catch(() => null);
     return r;
   } catch (e: any) {
     await alertAdmins(db, { key: `backup-failed|${new Date().toISOString().slice(0, 10)}`, subject: "AGRON Workspace: the backup failed", lines: [String(e?.message || e), e instanceof BackupConfigError ? "Nothing was written. Set the missing setting and the next run makes the backup." : "The scheduler tries again with increasing pauses."] }).catch(() => 0);
@@ -43,6 +46,8 @@ export async function backupJob(db: any, o: { deadline?: number } = {}) {
 export const DOMAINS = ["agron1.com", "stardome.life", "workspace.agron1.com"];
 type Problem = { what: string; detail: string; level: "fail" | "warn" };
 export async function monitorJob(db: any, opts: { alwaysEmail?: boolean } = {}) {
+  // acceptance evidence (P9-R2): the daily snapshot of authoritative state (sign-up, policies, MFA, deployment)
+  await recordSnapshot(db).catch(() => null);
   const systems = await checkSystems(db);
   const scans = await Promise.all(DOMAINS.map(scan));
   const problems: Problem[] = [];

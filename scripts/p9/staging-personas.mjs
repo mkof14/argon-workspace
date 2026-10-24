@@ -8,6 +8,7 @@
 //   --stack   check the tool on the local isolated stack (synthetic addresses @agron-stack.test)
 import fs from "node:fs";
 import crypto from "node:crypto";
+import { row, emit } from "../acceptance/evidence.mjs";
 import { target, PERSONAS } from "./target.mjs";
 
 const T = target();
@@ -33,3 +34,7 @@ for (const p of PERSONAS) {
 }
 fs.writeFileSync(T.file("personas"), JSON.stringify(out, null, 1), { mode: 0o600 });
 console.log(`${PERSONAS.length} personas ready; credentials in .staging/personas-${T.ref}.json (not committed)`);
+// acceptance evidence (P9-R2): how many synthetic personas exist (no names, no passwords)
+const ev = await row("P9.PERSONAS.STAGING", T.stack ? "local" : "staging", { status: "PASS", source: "scripts/p9/staging-personas.mjs", source_ref: `personas ${new Date().toISOString()}`,
+  summary: `${PERSONAS.length} synthetic personas`, metrics: { count: PERSONAS.length, roles: [...new Set(PERSONAS.map((p) => p.role))], synthetic: true } }, T.admin);
+console.log(`evidence: ${await emit(ev, { db: T.admin })}`);

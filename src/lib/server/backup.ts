@@ -58,7 +58,9 @@ export async function collectData(db: any, opts: { controlled: boolean }) {
     const tables: Record<string, any[]> = {};
     for (const m of meta) tables[m.table] = await all(db, m.table, "*", (q) => m.pk.reduce((qq: any, k: string) => qq.order(k, { ascending: true }), q));
     const counts: Record<string, number> = {}; for (const [t, rows] of Object.entries(tables)) counts[t] = rows.length;
-    return { format: "agron-workspace-backup", version: 5, created_at: new Date().toISOString(), controlled_included: true, order: meta.map((m) => m.table), counts, tables,
+    // the source's structure at backup time (v27+): the restore checks the target against it afterwards
+    let integrity: any = null; try { const { data, error } = await db.rpc("acceptance_integrity"); if (!error) integrity = data; } catch {}
+    return { format: "agron-workspace-backup", version: 5, created_at: new Date().toISOString(), controlled_included: true, order: meta.map((m) => m.table), counts, tables, integrity,
       // the core lists stay at the top level too, so the download view and older readers keep working
       records: tables.records || [], comments: tables.comments || [], profiles: tables.profiles || [] };
   }
@@ -220,7 +222,7 @@ const RESTORE_TABLES = ["section_access", "departments", "profiles", "taxonomy",
  * (they set a new password through "Forgot password"). Rows are inserted as they were (ids, versions, history),
  * never overwriting anything already there. Files are decrypted from the backup store into the target's Storage.
  */
-export async function restoreInto(target: any, file: Buffer, pass: string, store: Store | null, o: { onStep?: (s: string) => void; force?: boolean } = {}) {
+export async function restoreInto(target: any, file: Buffer, pass: string, store: Store | null, o: { onStep?: (s: string) => void; force?: boolean; anon?: any } = {}) {
   const t0 = Date.now(); const step = o.onStep || (() => {});
   const data = unpack(decrypt(file, pass)); const done: Record<string, number> = {};
   if (data.tables && Array.isArray(data.order)) {
@@ -266,5 +268,31 @@ export async function restoreInto(target: any, file: Buffer, pass: string, store
     if (error) throw new Error(`file ${f.path}: ${error.message}`); files++; bytes += buf.length;
   }
   done.files = files;
-  return { ...done, bytes, backup_created_at: data.created_at, ms: Date.now() - t0 };
+  const ms = Date.now() - t0;
+  // the restore paused the tables' triggers while loading: prove they, the constraints, the functions and row-level
+  // security are all back exactly as in the source (P9-R2 R2-9)
+  step("verify structure"); const post_verify = await postRestoreVerify(target, data.integrity || null, o.anon || null);
+  return { ...done, bytes, backup_created_at: data.created_at, ms, post_verify };
+}
+
+/**
+ * After a restore: every user trigger enabled, every constraint valid, the same triggers/constraints/functions as the
+ * source had (fingerprints), row-level security on every table with the same number of policies, and — when an
+ * anonymous client is given — an anonymous caller still reads nothing. A check that cannot be made is null, never true.
+ */
+export async function postRestoreVerify(target: any, source: any, anon: any) {
+  const { data: t, error } = await target.rpc("acceptance_integrity");
+  if (error || !t) return { triggers_ok: null, constraints_ok: null, functions_ok: null, rls_ok: null, error: error?.message || "integrity function missing (database before v27)" };
+  // with the source's snapshot a check is true/false; without it (an older backup) it is null — never assumed
+  const fp = (k: string) => (source?.[k]?.fingerprint != null ? source[k].fingerprint === t[k].fingerprint : null);
+  let rls_probe: boolean | null = null;
+  if (anon) { try { const { data } = await anon.from("records").select("id").limit(1); rls_probe = !(data || []).length; } catch { rls_probe = true; } }
+  const triggers_ok = (t.triggers.disabled || []).length ? false : fp("triggers");
+  const constraints_ok = (t.constraints.not_valid || []).length ? false : fp("constraints");
+  const functions_ok = fp("functions");
+  const rls_ok = (t.rls.without_rls || []).length || rls_probe === false ? false : source?.rls?.policies != null ? source.rls.policies === t.rls.policies : null;
+  return { triggers_ok, constraints_ok, functions_ok, rls_ok, rls_probe,
+    disabled_triggers: t.triggers.disabled, invalid_constraints: t.constraints.not_valid, tables_without_rls: t.rls.without_rls,
+    target: { triggers: t.triggers.total, constraints: t.constraints.total, functions: t.functions.total, policies: t.rls.policies, db_version: t.db_version },
+    source: source ? { triggers: source.triggers?.total, constraints: source.constraints?.total, functions: source.functions?.total, policies: source.rls?.policies, db_version: source.db_version } : null };
 }

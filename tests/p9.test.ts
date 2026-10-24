@@ -63,12 +63,12 @@ test("staging e-mail goes only to allowed test domains", () => {
   assert.deepEqual(blockedRecipients("ceo@agron1.com", "staging", "qa@agron1.com"), ["ceo@agron1.com"]);
 });
 
-test("release identification: app version, expected database version and the v26 migration agree", () => {
+test("release identification: app version, expected database version and the latest migration agree", () => {
   assert.match(APP_VERSION, /^\d+\.\d+$/);
   const ups = fs.readdirSync("supabase").filter((f) => /^update-v\d+\.sql$/.test(f)).map((f) => +f.match(/\d+/)![0]);
   assert.equal(DB_VERSION, Math.max(...ups));
-  const v26 = fs.readFileSync("supabase/update-v26.sql", "utf8");
-  assert.match(v26, new RegExp(`select ${DB_VERSION} \\$\\$`));
+  const latest = fs.readFileSync(`supabase/update-v${DB_VERSION}.sql`, "utf8");
+  assert.match(latest, new RegExp(`select ${DB_VERSION} \\$\\$`));
   assert.ok(fs.existsSync(`supabase/rollback-v${DB_VERSION}.sql`));
   const app = fs.readFileSync("src/components/App.tsx", "utf8");
   assert.match(app, /export const VERSION = APP_VERSION;/);
