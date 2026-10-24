@@ -25,9 +25,9 @@ if (error && !/already/i.test(error.message)) { console.error(error.message); pr
 console.log("user ready");'
 $PSQL -c "update public.profiles set role = 'owner', us_person = true where email = 'rollback-owner@agron-stack.test'" >/dev/null
 
-echo "== build and start v2.33 (origin/main) =="
+echo "== build and start ${OLD_REF:-origin/main} (v2.33 line) =="
 git worktree remove --force "$OLD" >/dev/null 2>&1 || true
-git worktree add --detach "$OLD" origin/main >/dev/null 2>&1
+git worktree add --detach "$OLD" "${OLD_REF:-origin/main}" >/dev/null 2>&1
 ln -sfn "$ROOT/node_modules" "$OLD/node_modules"
 # test harness only: v2.33's content security policy allows only *.supabase.co, so the browser could not reach the local
 # stack; the worktree copy allows the stack origin too (no application code is changed)
