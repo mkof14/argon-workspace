@@ -2,7 +2,7 @@
 // (HTTP, sign-in cookie, the person's own JWT → PostgREST → engines), not estimated: p50 / p95 / p99 for My Day
 // (normal: < 1 s), Executive 1inow and What changed (heavy: < 3 s), Ask (deterministic intents) and a state change.
 // This is DEVELOPMENT evidence on a laptop-class container; staging performance is a separate check (P10.PERF.STAGING).
-import { test, before, after } from "node:test";
+import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -64,10 +64,15 @@ test("§64 My Day < 1 s, Executive and changes < 3 s (p95), measured through the
   for (const [n, r] of Object.entries({ ex, ch })) { assert.equal(r.fails, 0, n); assert.ok(r.p95 < 3000, `${n}: p95 ${r.p95} ms ≥ 3 s`); }
 });
 
-// the larger dataset is removed afterwards, so later suites (and their own performance budgets) see the usual stack
-after(async () => {
-  await sql("delete from comments where record_id in (select id from records where title like $1)", [`${tag}%`]).catch(() => null);
-  await sql("delete from records where title like $1", [`${tag}%`]).catch(() => null);
+// the larger dataset is removed afterwards — and checked — so later suites (and their own budgets) see the usual stack
+test("the larger dataset is removed", async () => {
+  await sql("delete from comments where record_id in (select id from records where title like $1)", [`${tag}%`]);
+  await sql("delete from records where title like $1", [`${tag}%`]);
+  // and what the deletion itself produced for a synthetic fixture (trash copies, activity lines), where allowed
+  EV.cleanup_trash = await sql("delete from records_trash where title like $1", [`${tag}%`]).then(() => "removed", (e) => `kept: ${String(e.message).slice(0, 80)}`);
+  EV.cleanup_activity = await sql("delete from activity where detail::text like $1", [`%${tag}%`]).then(() => "removed", (e) => `kept: ${String(e.message).slice(0, 80)}`);
+  const left = (await sql("select count(*)::int n from records where title like $1", [`${tag}%`]))[0].n;
+  EV.cleanup_left = left; assert.equal(left, 0, "no perf records left behind");
 });
 
 test("evidence file", () => {
