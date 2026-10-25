@@ -170,7 +170,7 @@ test("navigation: eight main sections (Phase 5 adds Portfolio, P10 adds 1inow), 
     const { p: m } = await login(erin.email, { viewport: { width: 390, height: 844 }, lang });
     await m.waitForSelector(".tabbar a", { timeout: 15000 });
     assert.equal(await m.locator(".tabbar a").count(), 8);
-    await m.locator(".tabbar a").nth(2).click(); await m.waitForURL(/\/projects/); await m.waitForSelector(".tabs [role=tab]", { timeout: 15000 }); await m.waitForTimeout(400);
+    await m.locator(".tabbar a[href='/projects']").click(); await m.waitForURL(/\/projects/); await m.waitForSelector(".tabs [role=tab]", { timeout: 15000 }); await m.waitForTimeout(400);
     const wide = await m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth); assert.ok(wide <= 1, `${lang}: no sideways scrolling (${wide}px)`);
     if (lang === "ar") assert.equal(await m.evaluate(() => document.documentElement.dir), "rtl");
     if (lang === "en" || lang === "ar") await shot(m, `projects-phone-${lang}`);
