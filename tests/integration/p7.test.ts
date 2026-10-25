@@ -204,6 +204,14 @@ test("Scenario 6 — proposal V1 approved and sent; the value changes → V2; V1
   assert.equal((await get(p1.id)).status, "Internal Review");
   const lv2 = (await svc("select * from approvals where record_id = $1 and status = 'pending' and approver_id = $2", [p1.id, U.mgmt2.id]))[0]; assert.ok(lv2 && lv2.step === 2);
   await call("mgmt2", "wf_approval_decide", [lv2.id, "approved", null]);
+  // v28 policy model (P10 B19): above the high-value threshold (250,000 USD) a third level — Management review
+  const v28 = (await svc("select exists (select 1 from information_schema.columns where table_name = 'approval_policies' and column_name = 'model_version') ok"))[0].ok;
+  if (v28 && (await get(p1.id)).status === "Internal Review") {
+    const lv3 = (await svc("select * from approvals where record_id = $1 and status = 'pending' order by step desc", [p1.id]))[0];
+    assert.ok(lv3 && lv3.step === 3, "the Management review level"); assert.notEqual(lv3.approver_id, U.sales.id, "never the author");
+    const who = Object.keys(U).find((k) => U[k]?.id === lv3.approver_id)!; assert.ok(who, "a known management approver");
+    await call(who, "wf_approval_decide", [lv3.id, "approved", null]);
+  }
   let p = await get(p1.id); assert.equal(p.status, "Approved"); assert.ok(p.data.approved_at);
   let o = await get(opp.id); assert.equal(Number(o.data.approved_value), 2400000);
   await upd("sales", p1.id, { status: "Sent" });
@@ -226,6 +234,10 @@ test("Scenario 6 — proposal V1 approved and sent; the value changes → V2; V1
   if (a2) await fails(call("mgmt", "wf_approval_decide", [a2.id, "approved", null]), /already approved another level/);
   const a3 = (await svc("select * from approvals where record_id = $1 and status = 'pending' and approver_id = $2", [p2.id, U.mgmt2.id]))[0];
   await call("mgmt2", "wf_approval_decide", [a3.id, "approved", null]);
+  if (v28 && (await get(p2.id)).status === "Internal Review") { // v28: the Management review level above 250,000 USD
+    const l3 = (await svc("select * from approvals where record_id = $1 and status = 'pending' order by step desc", [p2.id]))[0]; assert.equal(l3.step, 3);
+    await call(Object.keys(U).find((k) => U[k]?.id === l3.approver_id)!, "wf_approval_decide", [l3.id, "approved", null]);
+  }
   assert.equal((await get(p2.id)).status, "Approved");
   await upd("sales", p2.id, { status: "Sent" });
   o = await get(opp.id); assert.equal(Number(o.data.quoted_value), 2900000);
@@ -529,7 +541,10 @@ test("Scenario 19 — seeded financial and commercial thresholds are marked UNAP
   await call("mgmt", "ops_policy_save", ["PROPOSAL", "Commercial proposal approval", p2.tiers, true]);
   const p3 = (await call("mgmt", "ops_settings_get", [])).policies.find((x: any) => x.code === "PROPOSAL");
   assert.equal(p3.config_status, "Draft", "an edited policy is unapproved again"); assert.equal(p3.version, p2.version + 1);
-  await call("mgmt", "ops_policy_approve", ["PROPOSAL", p3.version]);
+  // v28 (P10 B19): separation of duty — the person who edited this version does not approve it; another approver does
+  const sod = (await svc("select position('Separation of duty' in prosrc) > 0 ok from pg_proc where proname = 'ops_policy_approve'"))[0]?.ok;
+  if (sod) { await fails(call("mgmt", "ops_policy_approve", ["PROPOSAL", p3.version]), /Separation of duty/); await call("owner", "ops_policy_approve", ["PROPOSAL", p3.version]); }
+  else await call("mgmt", "ops_policy_approve", ["PROPOSAL", p3.version]);
   if (v25) await call("owner", "crm_cap_set", [U.mgmt.id, "policy_approver", false]);
   const hist = await svc("select config_status, version from approval_policies_history where policy_code = 'PROPOSAL' order by id");
   assert.ok(hist.some((h: any) => h.config_status === "Superseded"), "the earlier approved version is superseded in the history");

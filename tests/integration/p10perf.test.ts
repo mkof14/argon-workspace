@@ -2,7 +2,7 @@
 // (HTTP, sign-in cookie, the person's own JWT → PostgREST → engines), not estimated: p50 / p95 / p99 for My Day
 // (normal: < 1 s), Executive 1inow and What changed (heavy: < 3 s), Ask (deterministic intents) and a state change.
 // This is DEVELOPMENT evidence on a laptop-class container; staging performance is a separate check (P10.PERF.STAGING).
-import { test, before } from "node:test";
+import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -61,6 +61,12 @@ test("§64 My Day < 1 s, Executive and changes < 3 s (p95), measured through the
   EV.items_in_day = Object.fromEntries(Object.entries(body.counts || {})); EV.server_ms_last = body.ms;
   for (const [n, r] of Object.entries({ day, dayM, ask, st })) { assert.equal(r.fails, 0, n); assert.ok(r.p95 < 1000, `${n}: p95 ${r.p95} ms ≥ 1 s`); }
   for (const [n, r] of Object.entries({ ex, ch })) { assert.equal(r.fails, 0, n); assert.ok(r.p95 < 3000, `${n}: p95 ${r.p95} ms ≥ 3 s`); }
+});
+
+// the larger dataset is removed afterwards, so later suites (and their own performance budgets) see the usual stack
+after(async () => {
+  await sql("delete from comments where record_id in (select id from records where title like $1)", [`${tag}%`]).catch(() => null);
+  await sql("delete from records where title like $1", [`${tag}%`]).catch(() => null);
 });
 
 test("evidence file", () => {

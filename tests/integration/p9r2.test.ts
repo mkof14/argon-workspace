@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { createServerClient } from "@supabase/ssr";
 import { admin, APP, ENV, makeUser, PASSWORD, signIn as signInFull, sql, uid } from "./_stack.ts";
 import { containsSecret } from "../../src/lib/acceptance.ts";
+import { DB_VERSION } from "../../src/lib/version.ts";
 
 const signIn = async (email: string) => (await signInFull(email)).c;
 const db = admin(); const run = uid(); const skipApp = !APP;
@@ -98,7 +99,7 @@ test("Evidence Center: owners and administrators only; history shows superseded 
   const ck = await cookiesFor(owner.email);
   const page = await (await fetch(`${APP}/api/acceptance`, { headers: { cookie: ck } })).json();
   assert.equal(page.readiness.production_live, false); assert.equal(page.readiness.production_ready, false);
-  assert.ok(page.gates.production.unmet.length > 0); assert.equal(page.identity.environment, "local"); assert.equal(page.identity.db_version, 27);
+  assert.ok(page.gates.production.unmet.length > 0); assert.equal(page.identity.environment, "local"); assert.equal(page.identity.db_version, DB_VERSION);
   assert.equal(page.production.backup, "REAL BACKUP: NO");
   const h = await (await fetch(`${APP}/api/acceptance?history=P9.AUDIT`, { headers: { cookie: ck } })).json();
   assert.ok(h.rows.length >= 3 && h.rows.some((r: any) => r.status === "FAIL"), "superseded FAIL still visible");
