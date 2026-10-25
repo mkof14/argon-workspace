@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Phase 9 (B52 steps 5–9) on the isolated stack: roll the stack database back v26 … v18, build and start the CURRENT
-# PRODUCTION application (origin/main, v2.33) against it, sign in and open the main screens, then migrate v18 … v26
+# Phase 9 (B52 steps 5–9) on the isolated stack: roll the stack database back from the latest version to v18, build and start the CURRENT
+# PRODUCTION application (origin/main, v2.33) against it, sign in and open the main screens, then migrate v18 … latest
 # again and check the new build signs in too. Synthetic data only; never production.
 #   bash scripts/p9/oldapp.sh
 set -euo pipefail
@@ -11,8 +11,9 @@ ms() { date +%s%3N; }
 OLD=/home/claude/agron-main
 envs() { node -e 'const e=require(process.argv[1]);for(const[k,v] of Object.entries(e))console.log(`${k}=${String(v).replace(/ /g,"_")}`)' "$ROOT/.stack/env.json"; }
 
-echo "== rollback the stack database v26 … v18 =="
-if [ -z "${SKIP_ROLLBACK:-}" ]; then t0=$(ms); for n in 26 25 24 23 22 21 20 19 18; do $PSQL -f supabase/rollback-v$n.sql >/dev/null; done; echo "rollback $(( $(ms) - t0 )) ms"; else echo "skipped (database already rolled back)"; fi
+LAST=$(ls supabase | sed -n 's/^update-v\([0-9]*\)\.sql$/\1/p' | sort -n | tail -1)
+echo "== rollback the stack database v$LAST … v18 =="
+if [ -z "${SKIP_ROLLBACK:-}" ]; then t0=$(ms); for n in $(seq $LAST -1 18); do $PSQL -f supabase/rollback-v$n.sql >/dev/null; done; echo "rollback $(( $(ms) - t0 )) ms"; else echo "skipped (database already rolled back)"; fi
 
 echo "== a synthetic owner for the sign-in =="
 node --input-type=module -e '
@@ -41,7 +42,7 @@ for i in $(seq 1 60); do curl -s -o /dev/null http://127.0.0.1:3126/login && bre
 APP=http://127.0.0.1:3126 node scripts/p9/smoke-ui.mjs rollback-owner@agron-stack.test v2.33 || echo "OLD APPLICATION SMOKE FAILED"
 
 fuser -k 3126/tcp >/dev/null 2>&1 || true
-echo "== migrate the stack database again v18 … v26 =="
-t0=$(ms); for n in 18 19 20 21 22 23 24 25 26; do $PSQL -f supabase/update-v$n.sql >/dev/null; done; echo "re-migration $(( $(ms) - t0 )) ms"
+echo "== migrate the stack database again v18 … v$LAST =="
+t0=$(ms); for n in $(seq 18 $LAST); do $PSQL -f supabase/update-v$n.sql >/dev/null; done; echo "re-migration $(( $(ms) - t0 )) ms"
 $PSQL -c "select 'workspace_db_version=' || public.workspace_db_version()"
 git worktree remove --force "$OLD" >/dev/null 2>&1 || true

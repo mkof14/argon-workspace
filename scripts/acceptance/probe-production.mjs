@@ -18,7 +18,7 @@ const dr = curl(`https://api.github.com/repos/${REPO}/deployments?environment=Pr
 const heads = Object.fromEntries(execFileSync("git", ["ls-remote", `https://github.com/${REPO}`, "refs/heads/main", "refs/heads/hotfix-v2.33-security"], { encoding: "utf8" }).trim().split("\n").map((l) => l.split("\t").reverse()));
 const latest = Array.isArray(deps) ? deps[0] : null; const after = Array.isArray(deps) ? deps.filter((d) => d.created_at > CYCLE) : [];
 const markers = arg("db-markers") ? JSON.parse(arg("db-markers")) : null;
-const dbv = markers ? (markers.has_v27 ? 27 : markers.has_workspace_db_version ? "26 or later" : markers.has_v18_security_settings ? "18–25" : 17) : null;
+const dbv = markers ? (markers.has_v28 ? 28 : markers.has_v27 ? 27 : markers.has_workspace_db_version ? "26 or later" : markers.has_v18_security_settings ? "18–25" : 17) : null;
 const touched = !latest ? null : after.length > 0 || latest.sha !== BASELINE;
 const hotfix = heads["refs/heads/hotfix-v2.33-security"];
 const m = { touched, cycle_start: CYCLE, baseline_sha: BASELINE, deployment_id: latest?.id ?? null, deployment_created_at: latest?.created_at ?? null, sha: latest?.sha ?? null,
