@@ -403,4 +403,47 @@ do $$ declare f text; d text; begin
   end loop;
 end $$;
 
+
+/* ---------------------------------------------------------------------------------------------
+   4. One read for My Day: the existing engines in ONE transaction (the visibility base each of them builds is
+      built once instead of six times), each isolated — a failing engine reports itself and the rest still answer.
+      Open loops are the person's own (owner) and those of projects they own or manage; company-wide loops stay on
+      the management pages. Every engine keeps its own reading rule: this function adds no access.
+   --------------------------------------------------------------------------------------------- */
+create or replace function public.inow_engines(p_attention integer default 40, p_loops integer default 150) returns jsonb
+  language plpgsql volatile security invoker set search_path = public set jit = off
+as $$
+declare me uuid := auth.uid(); r jsonb := '{}'::jsonb; st jsonb := '{}'::jsonb; t timestamptz; v jsonb;
+begin
+  if me is null or not public.is_active_employee(me) then raise exception 'Not signed in' using errcode = '42501'; end if;
+  t := clock_timestamp();
+  begin v := (select coalesce(jsonb_agg(to_jsonb(a)), '[]') from public.attention_items(least(greatest(p_attention, 1), 100)) a); r := r || jsonb_build_object('attention', v); st := st || jsonb_build_object('attention', jsonb_build_object('ok', true, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int));
+  exception when others then st := st || jsonb_build_object('attention', jsonb_build_object('ok', false, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int)); end;
+  t := clock_timestamp();
+  begin v := (select coalesce(jsonb_agg(to_jsonb(w)), '[]') from public.waiting_for() w); r := r || jsonb_build_object('waiting', v); st := st || jsonb_build_object('waiting', jsonb_build_object('ok', true, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int));
+  exception when others then st := st || jsonb_build_object('waiting', jsonb_build_object('ok', false, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int)); end;
+  t := clock_timestamp();
+  begin
+    v := (select coalesce(jsonb_agg(to_jsonb(l) order by case l.severity when 'critical' then 0 when 'high' then 1 when 'medium' then 2 else 3 end, l.since), '[]') from (
+      select * from public.open_loops(null) l
+       where l.owner_id = me
+          or l.project_id in (select p.id from public.records p where p.section = 'company.projects' and (p.data->>'owner_id' = me::text or p.data->>'manager_id' = me::text))
+       order by case l.severity when 'critical' then 0 when 'high' then 1 when 'medium' then 2 else 3 end, l.since
+       limit least(greatest(p_loops, 1), 500)) l);
+    r := r || jsonb_build_object('open_loops', v); st := st || jsonb_build_object('open_loops', jsonb_build_object('ok', true, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int));
+  exception when others then st := st || jsonb_build_object('open_loops', jsonb_build_object('ok', false, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int)); end;
+  t := clock_timestamp();
+  begin r := r || jsonb_build_object('processes', public.ops_my_processes()); st := st || jsonb_build_object('processes', jsonb_build_object('ok', true, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int));
+  exception when others then st := st || jsonb_build_object('processes', jsonb_build_object('ok', false, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int)); end;
+  t := clock_timestamp();
+  begin r := r || jsonb_build_object('commercial', public.crm_followups('mine')); st := st || jsonb_build_object('commercial', jsonb_build_object('ok', true, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int));
+  exception when others then st := st || jsonb_build_object('commercial', jsonb_build_object('ok', false, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int)); end;
+  t := clock_timestamp();
+  begin r := r || jsonb_build_object('manufacturing', public.mfg_today()); st := st || jsonb_build_object('manufacturing', jsonb_build_object('ok', true, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int));
+  exception when others then st := st || jsonb_build_object('manufacturing', jsonb_build_object('ok', false, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int)); end;
+  return r || jsonb_build_object('status', st);
+end $$;
+revoke all on function public.inow_engines(integer, integer) from public, anon;
+grant execute on function public.inow_engines(integer, integer) to authenticated;
+
 commit;

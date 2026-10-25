@@ -38,15 +38,11 @@ async function timed<T>(status: Record<string, SourceStatus>, name: string, fn: 
 /** All of one person's work items, from every engine, with signals. */
 export async function gatherItems(sb: any, me: Me, now = Date.now()) {
   const status: Record<string, SourceStatus> = {}; const today = localToday(me.timezone); const items: Item[] = [];
-  const [tasks, meetings, procs, attention, waiting, loops, follow, mfg, commitments, states] = await Promise.all([
+  const [tasks, meetings, engines, commitments, states] = await Promise.all([
     timed(status, "tasks", () => sb.from("records").select("id,title,status,data,section,created_by,updated_at").eq("section", "company.tasks").eq("data->>assignee_id", me.id).limit(400)),
     timed(status, "meetings", () => sb.from("records").select("id,title,status,data,section").eq("section", "company.meetings").eq("data->>date", today).limit(50)),
-    timed(status, "processes", () => sb.rpc("ops_my_processes")),
-    timed(status, "attention", () => sb.rpc("attention_items", { p_limit: 40 })),
-    timed(status, "waiting", () => sb.rpc("waiting_for")),
-    timed(status, "open_loops", () => sb.rpc("open_loops")),
-    timed(status, "commercial", () => sb.rpc("crm_followups", { p_scope: "mine" })),
-    timed(status, "manufacturing", () => sb.rpc("mfg_today")),
+    // the six Workspace engines in one transaction (one visibility base instead of six); each reports its own status
+    timed(status, "engines", () => sb.rpc("inow_engines", { p_attention: 40, p_loops: 150 })),
     timed(status, "commitments", async () => {
       await sb.rpc("inow_detect_commitments", { p_days: 14 });
       const { data: cs, error } = await sb.from("inow_commitments").select("*").eq("status", "suggested").order("detected_at", { ascending: false }).limit(30);
@@ -59,6 +55,10 @@ export async function gatherItems(sb: any, me: Me, now = Date.now()) {
     }),
     timed(status, "state", () => sb.from("inow_item_state").select("item_key,pinned,dismissed_at,not_relevant,snooze_until,remind_at")),
   ]);
+  const eng: any = engines || {};
+  if (engines) { delete status.engines; for (const [k, v] of Object.entries((eng.status || {}) as Record<string, any>)) status[k] = v.ok ? { ok: true, ms: v.ms } : { ok: false, ms: v.ms, error: "unavailable" }; }
+  else { const ms = status.engines?.ms ?? 0; delete status.engines; for (const k of ["attention", "waiting", "open_loops", "processes", "commercial", "manufacturing"]) status[k] = { ok: false, ms, error: "unavailable" }; }
+  const procs = eng.processes ?? null, attention = eng.attention ?? null, waiting = eng.waiting ?? null, loops = eng.open_loops ?? null, follow = eng.commercial ?? null, mfg = eng.manufacturing ?? null;
   // tasks assigned to me (open); who is blocked by them
   const open = ((tasks as any[]) || []).filter((t) => isOpenTask(t));
   let blockedBy: Record<string, number> = {};

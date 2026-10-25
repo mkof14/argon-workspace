@@ -59,6 +59,7 @@ test("§64 My Day < 1 s, Executive and changes < 3 s (p95), measured through the
   const st = await measure("state_pin", post(ce, { op: "state", key: "task:perf", pin: true }), Math.ceil(N / 2));
   const body = await (await fetch(`${APP}/api/inow?view=day`, { headers: { cookie: ce } })).json();
   EV.items_in_day = Object.fromEntries(Object.entries(body.counts || {})); EV.server_ms_last = body.ms;
+  EV.sources_ms = Object.fromEntries(Object.entries(body.sources || {}).map(([k, v]: any) => [k, v.ms]));
   for (const [n, r] of Object.entries({ day, dayM, ask, st })) { assert.equal(r.fails, 0, n); assert.ok(r.p95 < 1000, `${n}: p95 ${r.p95} ms ≥ 1 s`); }
   for (const [n, r] of Object.entries({ ex, ch })) { assert.equal(r.fails, 0, n); assert.ok(r.p95 < 3000, `${n}: p95 ${r.p95} ms ≥ 3 s`); }
 });

@@ -205,20 +205,28 @@ function fakeClient(fail: Set<string>) {
   const q: any = new Proxy({}, { get: (_t, k) => (k === "then" ? (res: any) => res({ data: [], error: null }) : k === "maybeSingle" || k === "single" ? () => Promise.resolve({ data: null, error: null }) : () => q) });
   return {
     from: (t: string) => (fail.has(`table:${t}`) ? new Proxy({}, { get: (_x, k) => (k === "then" ? (res: any) => res({ data: null, error: { message: "boom" } }) : () => (fail.has(`table:${t}`) ? { then: (res: any) => res({ data: null, error: { message: "boom" } }), select: () => ({ eq: () => ({ then: (r: any) => r({ data: null, error: { message: "boom" } }) }) }) } : q)) }) : q),
-    rpc: (name: string) => (fail.has(name) ? Promise.reject(new Error("engine down")) : Promise.resolve({ data: name === "crm_followups" || name === "mfg_today" || name === "ops_my_processes" ? {} : [], error: null })),
+    rpc: (name: string) => {
+      if (fail.has(name)) return Promise.reject(new Error("engine down"));
+      if (name === "inow_engines") { // the one-transaction read reports each engine's own status
+        const st: any = {}; for (const k of ["attention", "waiting", "open_loops", "processes", "commercial", "manufacturing"]) st[k] = { ok: !fail.has(k), ms: 1 };
+        return Promise.resolve({ data: { attention: fail.has("attention") ? undefined : [], waiting: [], open_loops: [], processes: {}, commercial: {}, manufacturing: {}, status: st }, error: null });
+      }
+      return Promise.resolve({ data: [], error: null });
+    },
   };
 }
 test("§66 one failing engine marks only its own source unavailable; My Day still builds; nothing internal leaks", async () => {
   const { myDay } = await import("../src/lib/server/inow.ts");
-  for (const f of ["attention_items", "waiting_for", "open_loops", "crm_followups", "mfg_today", "ops_my_processes", "inow_detect_commitments"]) {
+  for (const f of ["attention", "waiting", "open_loops", "commercial", "manufacturing", "processes", "inow_detect_commitments"]) {
     const d: any = await myDay(fakeClient(new Set([f])), { id: "00000000-0000-4000-8000-000000000001", role: "engineering", timezone: "UTC" });
     const bad = Object.entries(d.sources).filter(([, s]: any) => !s.ok);
     assert.ok(bad.length >= 1 && bad.length <= 1, `${f}: exactly one source down (${bad.map(([k]) => k)})`);
     for (const [, s] of bad as any) assert.equal(s.error, "unavailable", "a generic word, never the engine's message");
     assert.ok(Array.isArray(d.now) && Array.isArray(d.today), `${f}: My Day still built`);
   }
-  const all: any = await myDay(fakeClient(new Set(["attention_items", "waiting_for", "open_loops", "crm_followups", "mfg_today", "ops_my_processes", "inow_detect_commitments"])), { id: "00000000-0000-4000-8000-000000000001", role: "engineering", timezone: "UTC" });
+  const all: any = await myDay(fakeClient(new Set(["inow_engines", "inow_detect_commitments"])), { id: "00000000-0000-4000-8000-000000000001", role: "engineering", timezone: "UTC" });
   assert.ok(Array.isArray(all.now), "even with every engine down the page has a shape (and says which parts are unavailable)");
+  assert.deepEqual(Object.entries(all.sources).filter(([, s]: any) => !s.ok).map(([k]) => k).sort(), ["attention", "commercial", "commitments", "manufacturing", "open_loops", "processes", "waiting"]);
 });
 
 test("my own work ranks before company-wide items of the same priority (a busy Workspace never pushes it out of NOW)", () => {
