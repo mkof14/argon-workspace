@@ -77,6 +77,7 @@ begin
     perform set_config('request.jwt.claims', jsonb_build_object('sub', p.id, 'role', 'authenticated', 'aal', 'aal2', 'iat', extract(epoch from now())::bigint + 5)::text, true);
     perform set_config('request.jwt.claim.sub', p.id::text, true);
     execute 'set local role authenticated';
+    if auth.uid() is distinct from p.id then raise exception 'persona switch failed (%)', p.full_name; end if;
     res := p9s1.models();
     execute 'reset role';
     for k, v in select * from jsonb_each(res) loop
@@ -85,7 +86,7 @@ begin
       n := n + 1;
     end loop;
   end loop;
-  perform set_config('request.jwt.claims', '', true);
+  perform set_config('request.jwt.claims', '', true); perform set_config('request.jwt.claim.sub', '', true);
   return n;
 end $$;
 revoke all on all functions in schema p9s1 from public, anon, authenticated;
@@ -102,7 +103,9 @@ begin
   for p in select id, replace(full_name, 'P9 Synthetic ', '') k from public.profiles where full_name like 'P9 Synthetic %' order by full_name loop
     for f in select * from p9s1.fixtures where run = p_run loop
       perform set_config('request.jwt.claims', jsonb_build_object('sub', p.id, 'role', 'authenticated', 'aal', 'aal2', 'iat', extract(epoch from now())::bigint + 5)::text, true);
+      perform set_config('request.jwt.claim.sub', p.id::text, true); -- hosted auth.uid() reads this one first
       execute 'set local role authenticated';
+      if auth.uid() is distinct from p.id then raise exception 'persona switch failed (%)', p.k; end if;
       select exists (select 1 from public.records where id = f.id) into seen;
       select count(*) into cm from public.comments where record_id = f.id;
       select count(*) into fl from storage.objects where bucket_id = 'files' and name like f.section || '/' || f.id || '/%';
@@ -114,7 +117,7 @@ begin
       n := n + 1;
     end loop;
   end loop;
-  perform set_config('request.jwt.claims', '', true);
+  perform set_config('request.jwt.claims', '', true); perform set_config('request.jwt.claim.sub', '', true);
   return n;
 end $$;
 revoke all on function p9s1.direct_check(text) from public, anon, authenticated;
