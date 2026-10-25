@@ -208,7 +208,7 @@ function fakeClient(fail: Set<string>) {
     rpc: (name: string) => {
       if (fail.has(name)) return Promise.reject(new Error("engine down"));
       if (name === "inow_engines") { // the one-transaction read reports each engine's own status
-        const st: any = {}; for (const k of ["attention", "waiting", "open_loops", "processes", "commercial", "manufacturing"]) st[k] = { ok: !fail.has(k), ms: 1 };
+        const st: any = {}; for (const k of ["attention", "waiting", "open_loops", "processes", "commercial", "manufacturing", "dependencies"]) st[k] = { ok: !fail.has(k), ms: 1 };
         return Promise.resolve({ data: { attention: fail.has("attention") ? undefined : [], waiting: [], open_loops: [], processes: {}, commercial: {}, manufacturing: {}, status: st }, error: null });
       }
       return Promise.resolve({ data: [], error: null });
@@ -226,7 +226,7 @@ test("§66 one failing engine marks only its own source unavailable; My Day stil
   }
   const all: any = await myDay(fakeClient(new Set(["inow_engines", "inow_detect_commitments"])), { id: "00000000-0000-4000-8000-000000000001", role: "engineering", timezone: "UTC" });
   assert.ok(Array.isArray(all.now), "even with every engine down the page has a shape (and says which parts are unavailable)");
-  assert.deepEqual(Object.entries(all.sources).filter(([, s]: any) => !s.ok).map(([k]) => k).sort(), ["attention", "commercial", "commitments", "manufacturing", "open_loops", "processes", "waiting"]);
+  assert.deepEqual(Object.entries(all.sources).filter(([, s]: any) => !s.ok).map(([k]) => k).sort(), ["attention", "commercial", "commitments", "dependencies", "manufacturing", "open_loops", "processes", "waiting"]);
 });
 
 test("my own work ranks before company-wide items of the same priority (a busy Workspace never pushes it out of NOW)", () => {

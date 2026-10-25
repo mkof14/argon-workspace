@@ -420,7 +420,7 @@ begin
   begin v := (select coalesce(jsonb_agg(to_jsonb(a)), '[]') from public.attention_items(least(greatest(p_attention, 1), 100)) a); r := r || jsonb_build_object('attention', v); st := st || jsonb_build_object('attention', jsonb_build_object('ok', true, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int));
   exception when others then st := st || jsonb_build_object('attention', jsonb_build_object('ok', false, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int)); end;
   t := clock_timestamp();
-  begin v := (select coalesce(jsonb_agg(to_jsonb(w)), '[]') from public.waiting_for() w); r := r || jsonb_build_object('waiting', v); st := st || jsonb_build_object('waiting', jsonb_build_object('ok', true, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int));
+  begin v := (select coalesce(jsonb_agg(to_jsonb(w) || jsonb_build_object('waiting_kind', case when w.party_type = 'external' then (select x.data->>'waiting_kind' from public.records x where x.id = w.record_id) end)), '[]') from public.waiting_for() w); r := r || jsonb_build_object('waiting', v); st := st || jsonb_build_object('waiting', jsonb_build_object('ok', true, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int));
   exception when others then st := st || jsonb_build_object('waiting', jsonb_build_object('ok', false, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int)); end;
   t := clock_timestamp();
   begin
@@ -441,6 +441,18 @@ begin
   t := clock_timestamp();
   begin r := r || jsonb_build_object('manufacturing', public.mfg_today()); st := st || jsonb_build_object('manufacturing', jsonb_build_object('ok', true, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int));
   exception when others then st := st || jsonb_build_object('manufacturing', jsonb_build_object('ok', false, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int)); end;
+  -- who is blocked by my open tasks (open tasks of other people that name mine in "Blocked by"); row-level security
+  -- applies (invoker), so a dependent task I may not open is not counted
+  t := clock_timestamp();
+  begin
+    v := (select coalesce(jsonb_object_agg(b, n), '{}') from (
+      select d.data->>'blocked_by' b, count(*)::int n from public.records d
+       where d.section = 'company.tasks' and d.data ? 'blocked_by' and coalesce(d.status, '') not in ('Completed', 'Cancelled', 'Done')
+         and d.data->>'assignee_id' is distinct from me::text
+         and d.data->>'blocked_by' in (select m.id::text from public.records m where m.section = 'company.tasks' and m.data->>'assignee_id' = me::text and coalesce(m.status, '') not in ('Completed', 'Cancelled', 'Done'))
+       group by 1) x);
+    r := r || jsonb_build_object('dependents', v); st := st || jsonb_build_object('dependencies', jsonb_build_object('ok', true, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int));
+  exception when others then st := st || jsonb_build_object('dependencies', jsonb_build_object('ok', false, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int)); end;
   return r || jsonb_build_object('status', st);
 end $$;
 revoke all on function public.inow_engines(integer, integer) from public, anon;

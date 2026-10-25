@@ -22,13 +22,6 @@ export function zonedToUtc(date: string, time: string, tz?: string | null): numb
 }
 export const localToday = (tz?: string | null, d = new Date()) => { try { return new Intl.DateTimeFormat("en-CA", { timeZone: tz || "UTC" }).format(d); } catch { return todayIso(d); } };
 
-/** One query per 80 ids (a long id list in one request exceeds the address length the API accepts). */
-async function inChunks(ids: string[], q: (part: string[]) => PromiseLike<any>) {
-  const parts: string[][] = []; for (let i = 0; i < ids.length; i += 80) parts.push(ids.slice(i, i + 80));
-  const res = await Promise.all(parts.map((p) => q(p)));
-  const err = res.find((r: any) => r?.error); if (err) return err;
-  return { data: res.flatMap((r: any) => r?.data || []), error: null };
-}
 async function timed<T>(status: Record<string, SourceStatus>, name: string, fn: () => PromiseLike<T> | Promise<T>): Promise<T | null> {
   const t = Date.now();
   try { const r: any = await fn(); if (r && r.error) throw new Error(r.error.message || String(r.error)); status[name] = { ok: true, ms: Date.now() - t }; return r?.data !== undefined ? r.data : r; }
@@ -57,16 +50,12 @@ export async function gatherItems(sb: any, me: Me, now = Date.now()) {
   ]);
   const eng: any = engines || {};
   if (engines) { delete status.engines; for (const [k, v] of Object.entries((eng.status || {}) as Record<string, any>)) status[k] = v.ok ? { ok: true, ms: v.ms } : { ok: false, ms: v.ms, error: "unavailable" }; }
-  else { const ms = status.engines?.ms ?? 0; delete status.engines; for (const k of ["attention", "waiting", "open_loops", "processes", "commercial", "manufacturing"]) status[k] = { ok: false, ms, error: "unavailable" }; }
+  else { const ms = status.engines?.ms ?? 0; delete status.engines; for (const k of ["attention", "waiting", "open_loops", "processes", "commercial", "manufacturing", "dependencies"]) status[k] = { ok: false, ms, error: "unavailable" }; }
   const procs = eng.processes ?? null, attention = eng.attention ?? null, waiting = eng.waiting ?? null, loops = eng.open_loops ?? null, follow = eng.commercial ?? null, mfg = eng.manufacturing ?? null;
   // tasks assigned to me (open); who is blocked by them
   const open = ((tasks as any[]) || []).filter((t) => isOpenTask(t));
-  let blockedBy: Record<string, number> = {};
-  if (open.length) {
-    const ids = open.map((t) => t.id);
-    const b = await timed(status, "dependencies", () => inChunks(ids, (part) => sb.from("records").select("id,data,status").eq("section", "company.tasks").in("data->>blocked_by", part).limit(500)));
-    for (const x of ((b as any[]) || []).filter((x) => isOpenTask(x) && x.data?.assignee_id !== me.id)) blockedBy[x.data.blocked_by] = (blockedBy[x.data.blocked_by] || 0) + 1;
-  }
+  // who is blocked by my open tasks: counted in the same engine transaction (row-level security applies)
+  const blockedBy: Record<string, number> = (eng.dependents as Record<string, number>) || {};
   for (const t of open) {
     const d = daysTo(t.data?.due, today); const sig: Signal[] = [{ code: "assigned_to_me" }];
     if (d !== null && d < 0) sig.push({ code: "overdue", n: -d }); else if (d === 0) sig.push({ code: "due_today" }); else if (d === 1) sig.push({ code: "due_tomorrow" }); else if (d !== null && d <= 3) sig.push({ code: "due_soon", n: d });
@@ -114,15 +103,9 @@ export async function gatherItems(sb: any, me: Me, now = Date.now()) {
   }
   // Waiting For (v22): "others" = we wait on them; "me" = they wait on me (my debt); "external" = a Waiting task on
   // someone outside — its own waiting kind (Supplier / Customer / Partner) says who, read again with my rights
-  const extIds = ((waiting as any[]) || []).filter((w) => w.party_type === "external" && isUuid(w.record_id)).map((w) => w.record_id);
-  const extKind = new Map<string, string>();
-  if (extIds.length) {
-    const ek = (await timed(status, "waiting_kinds", () => inChunks(extIds, (ids) => sb.from("records").select("id,data").in("id", ids)))) as any[] || [];
-    for (const r of ek) extKind.set(r.id, String(r.data?.waiting_kind || "").toLowerCase());
-  }
   const partyOf = (w: any) => {
     if (w.party_type !== "external") return String(w.party_type || "");
-    const k = extKind.get(w.record_id) || "";
+    const k = String(w.waiting_kind || "").toLowerCase(); // read in the engine transaction, with my rights
     return /supplier|vendor|постав/.test(k) ? "vendor" : /customer|client|клиент|клієнт/.test(k) ? "customer" : /partner|партн/.test(k) ? "partner" : "external";
   };
   for (const w of ((waiting as any[]) || [])) {
