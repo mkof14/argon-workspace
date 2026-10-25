@@ -32,7 +32,9 @@ async function timed<T>(status: Record<string, SourceStatus>, name: string, fn: 
 export async function gatherItems(sb: any, me: Me, now = Date.now()) {
   const status: Record<string, SourceStatus> = {}; const today = localToday(me.timezone); const items: Item[] = [];
   const [tasks, meetings, engines, commitments, states] = await Promise.all([
-    timed(status, "tasks", () => sb.from("records").select("id,title,status,data,section,created_by,updated_at").eq("section", "company.tasks").eq("data->>assignee_id", me.id).limit(400)),
+    // my open tasks, nearest due first (the same 400 the engine counts dependents for)
+    timed(status, "tasks", () => sb.from("records").select("id,title,status,data,section,created_by,updated_at").eq("section", "company.tasks").eq("data->>assignee_id", me.id)
+      .not("status", "in", "(Completed,Cancelled,Done)").order("data->>due", { ascending: true, nullsFirst: false }).limit(400)),
     // today's meetings, and tomorrow's too: one that starts within the hour after midnight is still "soon"
     timed(status, "meetings", () => sb.from("records").select("id,title,status,data,section").eq("section", "company.meetings").in("data->>date", [today, localToday(me.timezone, new Date(now + 864e5))]).limit(80)),
     // the six Workspace engines in one transaction (one visibility base instead of six); each reports its own status

@@ -424,7 +424,9 @@ begin
   begin v := (select coalesce(jsonb_agg(to_jsonb(a)), '[]') from public.attention_items(least(greatest(p_attention, 1), 100)) a); r := r || jsonb_build_object('attention', v); st := st || jsonb_build_object('attention', jsonb_build_object('ok', true, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int));
   exception when others then st := st || jsonb_build_object('attention', jsonb_build_object('ok', false, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int)); end;
   t := clock_timestamp();
-  begin v := (select coalesce(jsonb_agg(to_jsonb(w) || jsonb_build_object('waiting_kind', case when w.party_type = 'external' then (select x.data->>'waiting_kind' from public.records x where x.id = w.record_id) end)), '[]') from public.waiting_for() w); r := r || jsonb_build_object('waiting', v); st := st || jsonb_build_object('waiting', jsonb_build_object('ok', true, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int));
+  -- at most 300 waiting items: what others wait for from me first, then what I wait for, then the team's
+  begin v := (select coalesce(jsonb_agg(to_jsonb(w) || jsonb_build_object('waiting_kind', case when w.party_type = 'external' then (select x.data->>'waiting_kind' from public.records x where x.id = w.record_id) end)), '[]')
+              from (select * from public.waiting_for() w order by case w.bucket when 'me' then 0 when 'others' then 1 when 'external' then 2 else 3 end, w.due nulls last, w.requested_at limit 300) w); r := r || jsonb_build_object('waiting', v); st := st || jsonb_build_object('waiting', jsonb_build_object('ok', true, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int));
   exception when others then st := st || jsonb_build_object('waiting', jsonb_build_object('ok', false, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int)); end;
   t := clock_timestamp();
   begin
@@ -453,7 +455,8 @@ begin
       select d.data->>'blocked_by' b, count(*)::int n from public.records d
        where d.section = 'company.tasks' and d.data ? 'blocked_by' and coalesce(d.status, '') not in ('Completed', 'Cancelled', 'Done')
          and d.data->>'assignee_id' is distinct from me::text
-         and d.data->>'blocked_by' in (select m.id::text from public.records m where m.section = 'company.tasks' and m.data->>'assignee_id' = me::text and coalesce(m.status, '') not in ('Completed', 'Cancelled', 'Done'))
+         and d.data->>'blocked_by' in (select m.id::text from public.records m where m.section = 'company.tasks' and m.data->>'assignee_id' = me::text and coalesce(m.status, '') not in ('Completed', 'Cancelled', 'Done')
+                                        order by m.data->>'due' nulls last limit 400) -- the same 400 tasks My Day lists
        group by 1) x);
     r := r || jsonb_build_object('dependents', v); st := st || jsonb_build_object('dependencies', jsonb_build_object('ok', true, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int));
   exception when others then st := st || jsonb_build_object('dependencies', jsonb_build_object('ok', false, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int)); end;
