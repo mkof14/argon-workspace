@@ -86,7 +86,8 @@ test("API answers are not cacheable; the access log has a request limit", { skip
   const cookie = await cookiesFor(sales.email);
   for (const p of ["/api/health", "/api/fx", "/api/ops"]) { const r = await fetch(APP + p, { headers: { cookie } }); assert.match(r.headers.get("cache-control") || "", /no-store/, p); }
   let limited = 0;
-  for (let i = 0; i < 125; i++) { const r = await fetch(APP + "/api/log", { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ record_id: opp.id }) }); if (r.status === 429) limited++; }
+  // the limiter counts in fixed one-minute windows: 245 calls cannot be split into two windows of ≤ 120 each
+  for (let i = 0; i < 245 && !limited; i++) { const r = await fetch(APP + "/api/log", { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ record_id: opp.id }) }); if (r.status === 429) limited++; }
   assert.ok(limited >= 1, "more than 120 access-log calls a minute are refused");
 });
 
