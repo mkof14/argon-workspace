@@ -145,4 +145,16 @@ do $$ declare f text; d text; begin
   end loop;
 end $$;
 
+
+-- the engineering-change facts back to the v24 set
+do $$ declare d text; i int; j int;
+begin
+  d := pg_get_functiondef('public._wf_facts(uuid, public.records)'::regprocedure);
+  i := position($o$'amount', public._num(r.data->'impact_cost'), 'currency', r.data->>'currency',$o$ in d);
+  if i = 0 then return; end if;
+  j := position($o$o.kind = 'unit' and coalesce(x.status, '') not in ('Planned', 'Delivered', 'Cancelled', 'Scrapped')));$o$ in d);
+  d := left(d, i - 1) || $n$'amount', public._num(r.data->'impact_cost'));$n$ || substr(d, j + length($o$o.kind = 'unit' and coalesce(x.status, '') not in ('Planned', 'Delivered', 'Cancelled', 'Scrapped')));$o$));
+  execute d;
+end $$;
+
 commit;

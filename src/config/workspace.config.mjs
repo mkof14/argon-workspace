@@ -232,6 +232,10 @@ export const DEPARTMENTS = [
           f("impact_inventory", "text", L("Inventory and open purchases", "Склад и открытые закупки", "Склад і відкриті закупівлі", "المخزون والمشتريات المفتوحة")),
           f("impact_tests", "text", L("Tests to repeat", "Повторяемые испытания", "Повторювані випробування", "الاختبارات المطلوب إعادتها")),
           f("impact_certification", "long", L("Certification notes (written by a person)", "Заметки по сертификации (пишет человек)", "Нотатки щодо сертифікації (пише людина)", "ملاحظات الشهادات (يكتبها شخص)")),
+          // the facts the engineering-change policy escalates on (P9-S1 §15) that no other field records
+          f("customer_commitment_affected", "check", L("Affects a customer commitment", "Затрагивает обязательство перед клиентом", "Зачіпає зобов'язання перед клієнтом", "يؤثر في التزام تجاه عميل")),
+          f("controlled_interface_affected", "check", L("Affects a controlled interface", "Затрагивает контролируемый интерфейс", "Зачіпає контрольований інтерфейс", "يؤثر في واجهة مضبوطة")),
+          f("acceptance_criteria_affected", "check", L("Affects acceptance criteria", "Затрагивает критерии приёмки", "Зачіпає критерії приймання", "يؤثر في معايير القبول")),
           AUTO("impact_confirmed_by", "text", "Impact confirmed by", "Влияние подтвердил", "Вплив підтвердив", "أكّد الأثر")],
         columns: ["number", "config", "priority", "owner", "due"] },
       { key: "products", label: L("Products", "Продукты", "Продукти", "المنتجات"),

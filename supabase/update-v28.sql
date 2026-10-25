@@ -236,24 +236,28 @@ begin
     'TRAVEL', jsonb_build_array(
       jsonb_build_object('label', 'Up to 5,000 USD', 'currency', 'USD', 'when', jsonb_build_object('all', jsonb_build_array(usd, '{"field": "facts.amount", "op": "lte", "value": 5000}'::jsonb)), 'mode', 'sequential', 'steps', jsonb_build_array(lead)),
       jsonb_build_object('label', 'Above 5,000 USD, or another currency', 'currency', 'USD', 'mode', 'sequential', 'steps', jsonb_build_array(lead, fin))),
-    -- ECR: Management in parallel when the cost impact is above 10,000 USD, the currency is not USD, or the change
-    -- affects safety, a customer-visible function or a certification
+    -- ECR (owner's definition, P9-S1 §15): Engineering always; Management in parallel as well when the financial
+    -- effect is above 10,000 USD (or in another currency — no conversion), or the change affects safety, an approved
+    -- BOM or configuration, a customer commitment, a controlled interface, acceptance criteria or a released build unit
     'ECR', jsonb_build_array(
-      jsonb_build_object('label', 'Cost above 10,000 USD, another currency, or a safety / customer / certification impact', 'currency', 'USD',
+      jsonb_build_object('label', 'Above 10,000 USD, another currency, or safety / approved BOM-configuration / customer commitment / controlled interface / acceptance criteria / released build unit affected', 'currency', 'USD',
         'when', jsonb_build_object('any', jsonb_build_array('{"field": "facts.amount", "op": "gt", "value": 10000}'::jsonb, jsonb_build_object('not', usd),
-          '{"field": "facts.safety_impact", "op": "eq", "value": true}'::jsonb, '{"field": "facts.customer_impact", "op": "eq", "value": true}'::jsonb, '{"field": "facts.certification_impact", "op": "eq", "value": true}'::jsonb)),
+          '{"field": "facts.safety_impact", "op": "eq", "value": true}'::jsonb, '{"field": "facts.bom_config_affected", "op": "eq", "value": true}'::jsonb,
+          '{"field": "facts.customer_commitment_affected", "op": "eq", "value": true}'::jsonb, '{"field": "facts.controlled_interface_affected", "op": "eq", "value": true}'::jsonb,
+          '{"field": "facts.acceptance_criteria_affected", "op": "eq", "value": true}'::jsonb, '{"field": "facts.build_unit_affected", "op": "eq", "value": true}'::jsonb)),
         'mode', 'parallel', 'steps', jsonb_build_array(englead, mgmt)),
       jsonb_build_object('label', 'Engineering', 'currency', 'USD', 'mode', 'sequential', 'steps', jsonb_build_array(englead))),
-    -- PROPOSAL: the existing high-value threshold (250,000 USD) now also brings a Management review
+    -- PROPOSAL (owner's definition, P9-S1 §15): up to 250,000 USD with a discount up to 10% — Proposal Approver; above
+    -- 250,000 USD or a discount above 10% — plus Pricing Approver; above 1,000,000 USD (or another currency) — plus Management
     'PROPOSAL', jsonb_build_array(
       jsonb_build_object('label', 'Up to 250,000 USD and a discount up to 10%', 'currency', 'USD',
         'when', jsonb_build_object('all', jsonb_build_array(usd, '{"field": "facts.amount", "op": "lte", "value": 250000}'::jsonb, '{"field": "facts.discount", "op": "lte", "value": 10}'::jsonb)),
         'mode', 'sequential', 'steps', '[{"kind": "capability", "cap": "proposal_approver", "label": "Proposal approver"}]'::jsonb),
-      jsonb_build_object('label', 'Up to 250,000 USD with a discount above 10%', 'currency', 'USD',
-        'when', jsonb_build_object('all', jsonb_build_array(usd, '{"field": "facts.amount", "op": "lte", "value": 250000}'::jsonb)),
+      jsonb_build_object('label', 'Above 250,000 USD or a discount above 10% (up to 1,000,000 USD)', 'currency', 'USD',
+        'when', jsonb_build_object('all', jsonb_build_array(usd, '{"field": "facts.amount", "op": "lte", "value": 1000000}'::jsonb)),
         'mode', 'sequential', 'steps', '[{"kind": "capability", "cap": "proposal_approver", "label": "Proposal approver"}, {"kind": "capability", "cap": "pricing_approver", "label": "Pricing approver"}]'::jsonb),
-      jsonb_build_object('label', 'Above 250,000 USD (high value), or another currency — Management review', 'currency', 'USD', 'mode', 'sequential',
-        'steps', '[{"kind": "capability", "cap": "proposal_approver", "label": "Proposal approver"}, {"kind": "capability", "cap": "pricing_approver", "label": "Pricing approver"}, {"kind": "role", "role": "management", "label": "Management review"}]'::jsonb)));
+      jsonb_build_object('label', 'Above 1,000,000 USD, or another currency — Management', 'currency', 'USD', 'mode', 'sequential',
+        'steps', '[{"kind": "capability", "cap": "proposal_approver", "label": "Proposal approver"}, {"kind": "capability", "cap": "pricing_approver", "label": "Pricing approver"}, {"kind": "role", "role": "management", "label": "Management"}]'::jsonb)));
   -- an approved policy (none today) keeps its approval and its tiers; a new model reaches it only through an edit
   for p in select * from public.approval_policies where model_version < 2 and config_status <> 'Approved' loop
     t := coalesce(model->p.code, p.tiers);
@@ -457,5 +461,29 @@ begin
 end $$;
 revoke all on function public.inow_engines(integer, integer) from public, anon;
 grant execute on function public.inow_engines(integer, integer) to authenticated;
+
+
+/* ---------------------------------------------------------------------------------------------
+   5. The facts an engineering change gives its approval policy (defect found in P9-S1: the ECR policy named facts the
+      workflow never supplied, so its escalation could not fire). From the ECR itself and from its CONFIRMED impact
+      objects: safety (Impact = Safety), an approved BOM / configuration affected, a customer commitment, a controlled
+      interface, acceptance criteria (or a test procedure) affected, a released build unit affected, the currency.
+   --------------------------------------------------------------------------------------------- */
+do $$ declare d text; old text := $o$f := f || jsonb_build_object('impact_complete', coalesce(r.data->>'impact_confirmed_at', '') <> '', 'amount', public._num(r.data->'impact_cost'));$o$;
+  new text := $n$f := f || jsonb_build_object('impact_complete', coalesce(r.data->>'impact_confirmed_at', '') <> '', 'amount', public._num(r.data->'impact_cost'), 'currency', r.data->>'currency',
+      'safety_impact', coalesce(r.data->>'impact', '') = 'Safety' or coalesce(r.data->>'safety_impact', '') = 'true',
+      'bom_config_affected', coalesce(r.data->>'impact_bom', '') <> '' or coalesce(r.data->>'impact_configs', '') <> ''
+        or exists (select 1 from public.mfg_ecr_objects o join public.records x on x.id = o.object_id where o.ecr_id = r.id and o.confirmed_at is not null and o.kind in ('bom', 'configuration') and coalesce(x.status, '') in ('Approved', 'Released', 'Active', 'Effective', 'Current')),
+      'customer_commitment_affected', coalesce(r.data->>'customer_commitment_affected', '') = 'true',
+      'controlled_interface_affected', coalesce(r.data->>'controlled_interface_affected', '') = 'true'
+        or exists (select 1 from public.mfg_ecr_objects o join public.records x on x.id = o.object_id where o.ecr_id = r.id and o.confirmed_at is not null and x.controlled),
+      'acceptance_criteria_affected', coalesce(r.data->>'acceptance_criteria_affected', '') = 'true'
+        or exists (select 1 from public.mfg_ecr_objects o where o.ecr_id = r.id and o.confirmed_at is not null and o.kind = 'test_procedure'),
+      'build_unit_affected', exists (select 1 from public.mfg_ecr_objects o join public.records x on x.id = o.object_id where o.ecr_id = r.id and o.confirmed_at is not null and o.kind = 'unit' and coalesce(x.status, '') not in ('Planned', 'Delivered', 'Cancelled', 'Scrapped')));$n$;
+begin
+  if to_regclass('public.mfg_ecr_objects') is null then return; end if;
+  d := pg_get_functiondef('public._wf_facts(uuid, public.records)'::regprocedure);
+  if position(old in d) > 0 then execute replace(d, old, new); end if;
+end $$;
 
 commit;

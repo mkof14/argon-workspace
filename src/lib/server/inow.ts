@@ -33,7 +33,8 @@ export async function gatherItems(sb: any, me: Me, now = Date.now()) {
   const status: Record<string, SourceStatus> = {}; const today = localToday(me.timezone); const items: Item[] = [];
   const [tasks, meetings, engines, commitments, states] = await Promise.all([
     timed(status, "tasks", () => sb.from("records").select("id,title,status,data,section,created_by,updated_at").eq("section", "company.tasks").eq("data->>assignee_id", me.id).limit(400)),
-    timed(status, "meetings", () => sb.from("records").select("id,title,status,data,section").eq("section", "company.meetings").eq("data->>date", today).limit(50)),
+    // today's meetings, and tomorrow's too: one that starts within the hour after midnight is still "soon"
+    timed(status, "meetings", () => sb.from("records").select("id,title,status,data,section").eq("section", "company.meetings").in("data->>date", [today, localToday(me.timezone, new Date(now + 864e5))]).limit(80)),
     // the six Workspace engines in one transaction (one visibility base instead of six); each reports its own status
     timed(status, "engines", () => sb.rpc("inow_engines", { p_attention: 40, p_loops: 150 })),
     timed(status, "commitments", async () => {
@@ -73,7 +74,9 @@ export async function gatherItems(sb: any, me: Me, now = Date.now()) {
     const at = m.data?.time ? `${m.data.date}T${String(m.data.time).slice(0, 5)}` : null;
     const startUtc = at ? zonedToUtc(m.data.date, String(m.data.time).slice(0, 5), m.data?.timezone || me.timezone) : null;
     const mins = startUtc !== null ? Math.round((startUtc - now) / 6e4) : null;
-    const sig: Signal[] = [mins !== null && mins >= -30 && mins <= 60 ? { code: "meeting_soon", n: Math.max(0, mins) } : { code: "meeting_today" }];
+    const soon = mins !== null && mins >= -30 && mins <= 60;
+    if (m.data?.date !== today && !soon) continue; // tomorrow's meetings only when they start within the hour
+    const sig: Signal[] = [soon ? { code: "meeting_soon", n: Math.max(0, mins!) } : { code: "meeting_today" }];
     items.push({ mine: true, key: `meeting:${m.id}`, src: "meeting", kind: "meeting", title: m.title, link: href(m.section, m.id), record_id: m.id, section: m.section, at, due: m.data?.date,
       project: m.data?.project_ref ? { id: m.data.project_ref, title: m.data.project_ref_title || "" } : null, signals: sig });
   }

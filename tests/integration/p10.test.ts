@@ -53,14 +53,14 @@ before(async () => {
   U.owner = await makeUser(`p10fo-${run}@agron-stack.test`, "owner", { us: true, name: `${tag} Olga Owner` });
   U.adm = await makeUser(`p10fa-${run}@agron-stack.test`, "admin", { us: true, name: `${tag} Adam Admin` });
   for (const k of Object.keys(U)) C[k] = (await signIn(U[k].email)).c;
-  const hhmm = new Date(Date.now() + 30 * 60e3).toISOString().slice(11, 16); // a meeting in 30 minutes (UTC)
+  const soon = new Date(Date.now() + 30 * 60e3); const hhmm = soon.toISOString().slice(11, 16), mday = soon.toISOString().slice(0, 10); // in 30 minutes (UTC), also across midnight
   R.project = await ins("company.projects", "Sprinter integration", "Active", { owner_id: U.mgmt.id });
   R.overdue = await ins("company.tasks", "Finish harness drawing", "In Progress", { assignee_id: U.eng.id, due: D(-2), project_ref: R.project.id, priority: "Normal" }, U.mgmt.id);
   R.today = await ins("company.tasks", "Send test report to customer", "In Progress", { assignee_id: U.eng.id, due: D(0), priority: "High" }, U.mgmt.id);
   R.later = await ins("company.tasks", "Tidy the lab inventory", "New", { assignee_id: U.eng.id, due: D(9) }, U.eng.id);
   R.dep = await ins("company.tasks", "Assemble the harness", "To Do", { assignee_id: U.mgmt2.id, blocked_by: R.overdue.id, due: D(2) }, U.mgmt.id);
   R.wait = await ins("company.tasks", "Connector samples from vendor", "Waiting", { assignee_id: U.eng.id, waiting_kind: "Supplier", waiting_on: `${tag} Vendor Q`, due: D(-1) }, U.eng.id);
-  R.meeting = await ins("company.meetings", "Sprinter design review", "Planned", { date: D(0), time: hhmm, timezone: "UTC", organizer_id: U.mgmt.id, participants_ids: [U.eng.id, U.mgmt.id], project_ref: R.project.id, agenda: "Harness and connector status" }, U.mgmt.id);
+  R.meeting = await ins("company.meetings", "Sprinter design review", "Planned", { date: mday, time: hhmm, timezone: "UTC", organizer_id: U.mgmt.id, participants_ids: [U.eng.id, U.mgmt.id], project_ref: R.project.id, agenda: "Harness and connector status" }, U.mgmt.id);
   R.opp = await ins("sales.pipeline", "IDEX demonstrator — Gulf customer", "Negotiation", { owner_id: U.sales.id, value: 400000, currency: "USD", next_action: "Send revised quote", next_action_due: D(-2) }, U.sales.id);
 });
 
@@ -70,7 +70,7 @@ test("§61.1 employee morning: NOW holds the overdue work, the meeting in 30 min
   const ov = find(d, R.overdue.id); const mt = find(d, R.meeting.id); const td = find(d, R.today.id);
   assert.ok(ov && mt && td, "overdue task, meeting and today's task are in My Day");
   assert.ok(d.now.some((r: any) => r.record_id === R.overdue.id), "overdue + blocks others → NOW");
-  assert.ok(d.now.some((r: any) => r.record_id === R.meeting.id), "meeting in 30 min → NOW");
+  assert.ok(d.now.some((r: any) => r.record_id === R.meeting.id), `meeting in 30 min → NOW (now: ${JSON.stringify(d.now.map((r: any) => [r.title, r.priority, r.mine, r.signals.map((s: any) => s.code + (s.n ?? ""))]))}; meeting: ${JSON.stringify(mt.signals)})`);
   assert.ok(ov.signals.some((s: any) => s.code === "overdue") && ov.signals.some((s: any) => s.code === "blocks_others"), why(ov));
   assert.ok(mt.signals.some((s: any) => s.code === "meeting_soon" && s.n <= 35), why(mt));
   assert.ok(td.priority === "HIGH", `due today + high priority → HIGH (${why(td)})`);
@@ -167,21 +167,54 @@ test("B19 USD thresholds: another currency goes to the highest tier; no currency
   EV.policy.usd = true;
 });
 
-test("B19 ECR escalation: Management in parallel above 10,000 USD, in another currency, or with a safety / customer / certification impact", async () => {
+test("B19 ECR (owner's definition): Engineering always; Management too above 10,000 USD, in another currency, or when safety / approved BOM-configuration / customer commitment / controlled interface / acceptance criteria / released build unit is affected", async () => {
   assert.equal((await tier("ECR", { amount: 5000, currency: "USD" })).l, "Engineering");
-  for (const f of [{ amount: 15000, currency: "USD" }, { amount: 100, currency: "EUR" }, { amount: 100, currency: "USD", safety_impact: true }, { amount: 100, currency: "USD", customer_impact: true }, { amount: 100, currency: "USD", certification_impact: true }]) {
+  assert.equal((await tier("ECR", { amount: 10000 })).l, "Engineering", "exactly 10,000 USD stays with Engineering");
+  for (const f of [{ amount: 15000, currency: "USD" }, { amount: 100, currency: "EUR" }, { amount: 100, safety_impact: true }, { amount: 100, bom_config_affected: true }, { amount: 100, customer_commitment_affected: true },
+                   { amount: 100, controlled_interface_affected: true }, { amount: 100, acceptance_criteria_affected: true }, { amount: 100, build_unit_affected: true }]) {
     const t = await tier("ECR", f); assert.match(t.l, /safety/, JSON.stringify(f)); assert.equal(t.m, "parallel"); assert.ok(t.s.some((s: any) => s.role === "management"), JSON.stringify(f));
+    assert.ok(t.s.some((s: any) => /Engineering/.test(s.label)), "Engineering is always part of it");
   }
   EV.policy.ecr = true;
 });
 
-test("B19 PROPOSAL: Management review above the high-value threshold (250,000 USD) or in another currency", async () => {
-  assert.match((await tier("PROPOSAL", { amount: 200000, currency: "USD", discount: 5 })).l, /discount up to 10%/);
-  assert.match((await tier("PROPOSAL", { amount: 200000, currency: "USD", discount: 15 })).l, /discount above 10%/);
-  for (const f of [{ amount: 300000, currency: "USD", discount: 0 }, { amount: 100000, currency: "EUR", discount: 0 }]) {
-    const t = await tier("PROPOSAL", f); assert.match(t.l, /Management review/); assert.ok(t.s.some((s: any) => s.label === "Management review"));
-  }
-  EV.policy.proposal = { threshold_usd: 250000 };
+test("B19 ECR facts come from the real change record (the escalation can actually fire in a workflow)", async () => {
+  const facts = async (data: any) => (await sql("select public._wf_facts(null, r) f from records r where r.id = $1", [(await ins("technical.changes", `ECR ${uid()}`, "Requested", data)).id]))[0].f;
+  const pick = async (data: any) => tier("ECR", await facts(data));
+  assert.equal((await pick({ impact: "Cost", impact_cost: 900 })).l, "Engineering");
+  assert.match((await pick({ impact: "Safety", impact_cost: 900 })).l, /safety/, "Impact = Safety escalates");
+  assert.match((await pick({ impact: "Cost", impact_cost: 25000 })).l, /safety/, "cost above 10,000 USD escalates");
+  assert.match((await pick({ impact: "Cost", impact_cost: 900, impact_bom: "C20 harness" })).l, /safety/, "an affected BOM escalates");
+  for (const k of ["customer_commitment_affected", "controlled_interface_affected", "acceptance_criteria_affected"]) assert.match((await pick({ impact: "Cost", impact_cost: 900, [k]: true })).l, /safety/, k);
+  const f = await facts({ impact: "Schedule" }); for (const k of ["safety_impact", "bom_config_affected", "customer_commitment_affected", "controlled_interface_affected", "acceptance_criteria_affected", "build_unit_affected"]) assert.equal(f[k], false, k);
+  EV.policy.ecr_facts = true;
+});
+
+test("B19 PROPOSAL (owner's definition): Proposal Approver; plus Pricing above 250,000 USD or a discount above 10%; plus Management above 1,000,000 USD or in another currency", async () => {
+  const p = async (f: any) => (await tier("PROPOSAL", f)).s.map((s: any) => s.label);
+  assert.deepEqual(await p({ amount: 200000, currency: "USD", discount: 5 }), ["Proposal approver"]);
+  assert.deepEqual(await p({ amount: 250000, currency: "USD", discount: 10 }), ["Proposal approver"], "the limits themselves stay in the lower level");
+  assert.deepEqual(await p({ amount: 200000, currency: "USD", discount: 15 }), ["Proposal approver", "Pricing approver"]);
+  assert.deepEqual(await p({ amount: 300000, currency: "USD", discount: 0 }), ["Proposal approver", "Pricing approver"]);
+  assert.deepEqual(await p({ amount: 1000000, currency: "USD", discount: 0 }), ["Proposal approver", "Pricing approver"]);
+  assert.deepEqual(await p({ amount: 1000001, currency: "USD", discount: 0 }), ["Proposal approver", "Pricing approver", "Management"]);
+  assert.deepEqual(await p({ amount: 100000, currency: "EUR", discount: 0 }), ["Proposal approver", "Pricing approver", "Management"], "no silent conversion");
+  EV.policy.proposal = { pricing_above_usd: 250000, management_above_usd: 1000000 };
+});
+
+test("B19 the other seven definitions", async () => {
+  const labels = async (code: string, f: any) => (await tier(code, f)).s.map((s: any) => s.label);
+  assert.deepEqual(await labels("PURCHASE", { amount: 5000 }), ["Department lead"]);
+  assert.deepEqual(await labels("PURCHASE", { amount: 25000 }), ["Department lead", "Finance"]);
+  assert.deepEqual(await labels("PURCHASE", { amount: 25001 }), ["Department lead", "Finance", "Management"]);
+  assert.deepEqual(await labels("PAYMENT", { amount: 10000 }), ["Finance"]);
+  assert.deepEqual(await labels("PAYMENT", { amount: 10001 }), ["Finance", "Management"]);
+  assert.deepEqual(await labels("TRAVEL", { amount: 5000 }), ["Department lead"]);
+  assert.deepEqual(await labels("TRAVEL", { amount: 5001 }), ["Department lead", "Finance"]);
+  assert.deepEqual(await labels("CONTRACT", {}), ["Legal", "Management"]);
+  assert.deepEqual(await labels("BOM", {}), ["Engineering (BOM Approver)", "Manufacturing (Build Manager)"]);
+  assert.deepEqual(await labels("CONFIG", {}), ["Engineering (BOM Approver)", "Manufacturing (Build Manager)"]);
+  assert.deepEqual(await labels("TESTPROC", {}), ["Test Approver"]);
 });
 
 test("B19 separation of duty: the editor of a version does not approve it; an owner's own approval is recorded; System Administrators never approve", async () => {
