@@ -80,6 +80,10 @@ test("hallucinated ids: a made-up proposal, task or record id is refused (never 
   assert.equal(((await start(ctx("mgr"), "not-a-uuid", { confirm: true })) as any).status, 404);
   const p = await plan(ctx("mgr"), "Mark task done", "assistant");
   const r = await start(ctx("mgr"), p.id, { confirm: true, taskId: "00000000-0000-4000-8000-00000000beef" }); assert.equal(r.ok, false); assert.equal((r as any).status, 400);
+  // a proposal that resolved its task does not accept a different task id at confirmation (never silently ignored)
+  const q = await plan(ctx("mgr"), `Complete task ${tag} Calibrate torque bench`, "assistant"); assert.equal(q.status, "proposed", q.question);
+  const w = await start(ctx("mgr"), q.id, { confirm: true, taskId: "00000000-0000-4000-8000-00000000beef" }); assert.equal(w.ok, false); assert.equal((w as any).status, 400);
+  await cancel(ctx("mgr"), q.id);
   mark("hallucinated_id");
 });
 

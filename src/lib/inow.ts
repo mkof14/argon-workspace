@@ -25,6 +25,7 @@ export type Item = {
   record_id?: string | null; section?: string | null; project?: { id: string; title: string } | null; owner_id?: string | null;
   due?: string | null; at?: string | null; since?: string | null; status?: string | null;
   signals: Signal[]; controlled?: boolean;
+  /** my own work (assigned to me, my meeting, my approval, my follow-up, an item I own) — ranks before company-wide items of the same priority */ mine?: boolean;
   waiting?: { on?: string | null; party?: string | null; age_days?: number | null; last_activity?: string | null; escalation?: string | null; expected?: string | null } | null;
   /** REQUIRED next step: defined by a workflow/approval/control (never by a guess) */ required_next?: string | null;
   /** a SUGGESTED next action text from a deterministic engine (open loops, attention) — shown as a suggestion */ hint?: string | null;
@@ -96,7 +97,7 @@ export function rankItem(it: Item, st?: State): Ranked {
 const strongest = (r: Ranked) => Math.min(...r.reasons.map((x) => rank(x.code)), 99);
 /** Deterministic order: pinned, priority, strongest reason, earliest time, oldest waiting, title (for stability). */
 export function compare(a: Ranked, b: Ranked) {
-  return Number(b.pinned) - Number(a.pinned) || PORDER[a.priority] - PORDER[b.priority] || strongest(a) - strongest(b)
+  return Number(b.pinned) - Number(a.pinned) || PORDER[a.priority] - PORDER[b.priority] || Number(!!b.mine) - Number(!!a.mine) || strongest(a) - strongest(b)
     || String(a.at || a.due || "9999").localeCompare(String(b.at || b.due || "9999")) || String(a.since || "9999").localeCompare(String(b.since || "9999"))
     || a.title.localeCompare(b.title) || a.key.localeCompare(b.key);
 }
@@ -124,7 +125,7 @@ export function dedupe(items: Item[]): Item[] {
     if (!cur) { out.set(k, { ...it, signals: [...it.signals] }); continue; }
     const keep = srcRank.indexOf(cur.src) <= srcRank.indexOf(it.src) ? cur : it, other = keep === cur ? it : cur;
     const sig = [...keep.signals]; for (const s of other.signals) if (!sig.some((x) => x.code === s.code)) sig.push(s);
-    out.set(k, { ...keep, signals: sig, controlled: keep.controlled || other.controlled, waiting: keep.waiting || other.waiting, required_next: keep.required_next || other.required_next, hint: keep.hint || other.hint, due: keep.due || other.due, evidence: keep.evidence || other.evidence });
+    out.set(k, { ...keep, signals: sig, controlled: keep.controlled || other.controlled, mine: keep.mine || other.mine, waiting: keep.waiting || other.waiting, required_next: keep.required_next || other.required_next, hint: keep.hint || other.hint, due: keep.due || other.due, evidence: keep.evidence || other.evidence });
   }
   return [...out.values()];
 }

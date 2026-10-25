@@ -153,6 +153,8 @@ export async function start(c: Ctx, id: string, o: { confirm?: boolean; personId
   // a proposal is a preview of a moment: after 12 hours it is stale and is asked again (never carried out late)
   if (a.created_at && Date.now() - Date.parse(a.created_at) > 12 * 36e5) { await stamp(c, id, { status: "cancelled", error: "stale proposal" }); return { ok: false, status: 409, stale: true, error: T(c.lang, "This proposal is more than 12 hours old — ask again.", "Этому предложению больше 12 часов — повторите запрос.") }; }
   const it = a.interpreted || {};
+  // a choice sent for a proposal that asked nothing is never ignored silently: it is refused (the yes must match the preview)
+  if (a.status === "proposed" && ((o.taskId && o.taskId !== it.resolved?.task?.id) || (o.personId && o.personId !== it.resolved?.person?.id))) return { ok: false, status: 400, error: T(c.lang, "That choice does not match the preview — ask again.", "Выбор не совпадает с предпросмотром — повторите запрос.") };
   // a clarification answered by choosing an option (person or task) — re-checked under the person's rights
   if (a.status === "needs_clarification") {
     if (o.personId) { const list = await people(c); const p = list.find((x: any) => x.id === o.personId); if (!p) return { ok: false, status: 400, error: "Unknown person" }; it.resolved = { ...it.resolved, person: { id: p.id, name: nameOf(p) } }; }

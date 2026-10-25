@@ -135,7 +135,7 @@ export function parseCommand(raw: string, today: string): Parsed {
     return out({ intent: "change_due_date", risk: "material", slots: { task, date: d?.date }, missing: [...(task ? [] : ["task" as const]), ...(d ? [] : ["date" as const])] });
   }
   if (COMPLETE.test(s)) {
-    const task = cleanTitle(text.replace(/^\s*(complete|finish|close|mark)\s+(the\s+)?(task\s+)?/i, "").replace(/\s+(as\s+)?(done|complete|completed)\s*$/i, "")
+    const task = cleanTitle(text.replace(/^\s*(complete|finish|close|mark)\s+(the\s+)?(task\s+)?/i, "").replace(/(^|\s+)(as\s+)?(done|complete|completed)\s*$/i, "")
       .replace(/^\s*(закрой|заверши|отметь)\s+(задачу\s+)?/i, "").replace(/\s+(как\s+)?(выполненн?ую?|готов[ау]ю?)\s*$/i, "").replace(/^\s*(закрий|заверши|познач)\s+(завдання\s+)?/i, "")
       .replace(/^задача\s+/i, "").replace(/\s+(выполнена|готова)$/i, "")) || undefined;
     return out({ intent: "complete_task", risk: "material", slots: { task }, missing: task ? [] : ["task"] });

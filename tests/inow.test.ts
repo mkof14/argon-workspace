@@ -220,3 +220,13 @@ test("§66 one failing engine marks only its own source unavailable; My Day stil
   const all: any = await myDay(fakeClient(new Set(["attention_items", "waiting_for", "open_loops", "crm_followups", "mfg_today", "ops_my_processes", "inow_detect_commitments"])), { id: "00000000-0000-4000-8000-000000000001", role: "engineering", timezone: "UTC" });
   assert.ok(Array.isArray(all.now), "even with every engine down the page has a shape (and says which parts are unavailable)");
 });
+
+test("my own work ranks before company-wide items of the same priority (a busy Workspace never pushes it out of NOW)", () => {
+  const company = Array.from({ length: 8 }, (_, i) => it(`co${i}`, { src: "attention", mine: false, signals: [{ code: "critical" }] }));
+  const mine = it("mine", { mine: true, signals: [{ code: "overdue", n: 1 }] });
+  const d = buildMyDay([...company, mine], [], { now: NOW, today: TODAY });
+  assert.equal(d.now[0].key, "mine"); assert.equal(d.now.length, 5);
+  const low = it("mylow", { mine: true, signals: [{ code: "due_soon" }] });
+  const d2 = buildMyDay([...company, low], [], { now: NOW, today: TODAY });
+  assert.ok(!d2.now.some((r) => r.key === "mylow"), "priority still comes first: a LOW item of mine does not jump into NOW");
+});

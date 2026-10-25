@@ -74,7 +74,7 @@ export async function gatherItems(sb: any, me: Me, now = Date.now()) {
     if (blockedBy[t.id]) sig.push({ code: "blocks_others", n: blockedBy[t.id], text: blockedBy[t.id] === 1 ? "1 task" : `${blockedBy[t.id]} tasks` });
     if (isUuid(t.data?.blocked_by)) sig.push({ code: "blocked" });
     if (t.status === "Waiting") sig.push({ code: "waiting_on_person", text: "", n: Math.max(0, -(daysTo(String(t.updated_at).slice(0, 10), today) ?? 0)) });
-    items.push({ key: `task:${t.id}`, src: "task", kind: "task", title: t.title, link: href(t.section, t.id), record_id: t.id, section: t.section, due: t.data?.due || null, status: t.status,
+    items.push({ mine: true, key: `task:${t.id}`, src: "task", kind: "task", title: t.title, link: href(t.section, t.id), record_id: t.id, section: t.section, due: t.data?.due || null, status: t.status,
       project: t.data?.project_ref ? { id: t.data.project_ref, title: t.data.project_ref_title || "" } : null, signals: sig });
   }
   // meetings today where I take part
@@ -85,7 +85,7 @@ export async function gatherItems(sb: any, me: Me, now = Date.now()) {
     const startUtc = at ? zonedToUtc(m.data.date, String(m.data.time).slice(0, 5), m.data?.timezone || me.timezone) : null;
     const mins = startUtc !== null ? Math.round((startUtc - now) / 6e4) : null;
     const sig: Signal[] = [mins !== null && mins >= -30 && mins <= 60 ? { code: "meeting_soon", n: Math.max(0, mins) } : { code: "meeting_today" }];
-    items.push({ key: `meeting:${m.id}`, src: "meeting", kind: "meeting", title: m.title, link: href(m.section, m.id), record_id: m.id, section: m.section, at, due: m.data?.date,
+    items.push({ mine: true, key: `meeting:${m.id}`, src: "meeting", kind: "meeting", title: m.title, link: href(m.section, m.id), record_id: m.id, section: m.section, at, due: m.data?.date,
       project: m.data?.project_ref ? { id: m.data.project_ref, title: m.data.project_ref_title || "" } : null, signals: sig });
   }
   // approvals and workflow steps waiting for me: controlled — they are decided only on their own screen
@@ -95,7 +95,7 @@ export async function gatherItems(sb: any, me: Me, now = Date.now()) {
     if (approval) sig.push({ code: "approval_waiting", n: x.due ? Math.max(0, 72 - Math.round((Date.parse(x.due) - now) / 36e5)) : 0 });
     else sig.push({ code: "decision_waiting" });
     if (x.due && Date.parse(x.due) < now) sig.push({ code: "sla_overdue" }); else if (x.due && String(x.due).slice(0, 10) === today) sig.push({ code: "due_today" });
-    items.push({ key: `${approval ? "approval" : "workflow"}:${x.record_id}:${x.run_id || ""}`, src: approval ? "approval" : "workflow", kind: approval ? "approval" : "step", title: x.title, link: href(x.section, x.record_id),
+    items.push({ mine: true, key: `${approval ? "approval" : "workflow"}:${x.record_id}:${x.run_id || ""}`, src: approval ? "approval" : "workflow", kind: approval ? "approval" : "step", title: x.title, link: href(x.section, x.record_id),
       record_id: x.record_id, section: x.section, due: x.due ? String(x.due).slice(0, 10) : null, controlled: true, required_next: x.reason || null, signals: sig });
   }
   // Attention (v22 engine): only what this person may open, with the engine's own reasons and next action
@@ -109,7 +109,7 @@ export async function gatherItems(sb: any, me: Me, now = Date.now()) {
     if (/decision/.test(k)) sig.push({ code: "decision_waiting" });
     if (/project/.test(k) && ["critical", "high"].includes(a.severity)) sig.push({ code: "project_at_risk" });
     if (!sig.length) sig.push({ code: a.severity === "high" ? "priority_high" : "stalled", n: Math.round(hoursSince(a.since, now) / 24) });
-    items.push({ key: `attention:${a.item_key}`, src: "attention", kind: k, title: a.title, link: a.link || href(a.section, a.record_id), record_id: a.record_id, section: a.section, since: a.since,
+    items.push({ mine: !!a.owner_id && a.owner_id === me.id, key: `attention:${a.item_key}`, src: "attention", kind: k, title: a.title, link: a.link || href(a.section, a.record_id), record_id: a.record_id, section: a.section, since: a.since,
       project: a.project_id ? { id: a.project_id, title: a.project_title || "" } : null, owner_id: a.owner_id, hint: a.next_action || null, signals: sig });
   }
   // Waiting For (v22): "others" = we wait on them; "me" = they wait on me (my debt); "external" = a Waiting task on
@@ -134,14 +134,14 @@ export async function gatherItems(sb: any, me: Me, now = Date.now()) {
     else sig.push({ code: "waiting_on_person", n: age, text: w.party_name || "" });
     if (w.escalation === "due" || w.escalation === "escalate") sig.push({ code: "escalation_due" });
     if (w.due) { const d = daysTo(String(w.due), today); if (d !== null && d < 0) sig.push({ code: "overdue", n: -d }); else if (d === 0) sig.push({ code: "due_today" }); }
-    items.push({ key: `waiting:${w.item_key}`, src: w.bucket === "me" ? "attention" : "waiting", kind: w.kind, title: w.title, link: w.link || href(w.section, w.record_id), record_id: w.record_id, section: w.section,
+    items.push({ mine: true, key: `waiting:${w.item_key}`, src: w.bucket === "me" ? "attention" : "waiting", kind: w.kind, title: w.title, link: w.link || href(w.section, w.record_id), record_id: w.record_id, section: w.section,
       since: w.requested_at, due: w.due, project: w.project_id ? { id: w.project_id, title: w.project_title || "" } : null, signals: sig,
       waiting: { on: w.party_name, party: party || null, age_days: age, last_activity: w.last_activity, escalation: w.escalation, expected: w.due } });
   }
   // Open loops (v22): started or promised work without a conclusion
   for (const l of ((loops as any[]) || [])) {
     const sig: Signal[] = [{ code: "stalled", n: Number(l.age_days || 0) }]; if (l.severity === "high" || l.severity === "critical") sig.push({ code: "priority_high" });
-    items.push({ key: `loop:${l.loop_key}`, src: "loop", kind: l.kind, title: l.title, link: l.link || href(l.section, l.record_id), record_id: l.record_id, section: l.section, since: l.since,
+    items.push({ mine: !!l.owner_id && l.owner_id === me.id, key: `loop:${l.loop_key}`, src: "loop", kind: l.kind, title: l.title, link: l.link || href(l.section, l.record_id), record_id: l.record_id, section: l.section, since: l.since,
       project: l.project_id ? { id: l.project_id, title: l.project_title || "" } : null, owner_id: l.owner_id, hint: l.next_action || null, signals: sig });
   }
   // commercial follow-ups (P7) due for me
@@ -151,29 +151,29 @@ export async function gatherItems(sb: any, me: Me, now = Date.now()) {
     if (d !== null && d < 0) sig.push({ code: "overdue", n: -d }); else if (d === 0) sig.push({ code: "due_today" });
     if (!due) sig.push({ code: "no_followup", n: o.last_at ? Math.round(hoursSince(o.last_at, now) / 24) : 0 });
     if (o.waiting_for) sig.push({ code: "customer_waiting", n: o.last_at ? Math.round(hoursSince(o.last_at, now) / 24) : 0 });
-    items.push({ key: `followup:${o.id}`, src: "followup", kind: "opportunity", title: `${o.number ? o.number + " " : ""}${o.title}${o.party ? " — " + o.party : ""}`, link: href("sales.pipeline", o.id), record_id: o.id, section: "sales.pipeline", due,
+    items.push({ mine: true, key: `followup:${o.id}`, src: "followup", kind: "opportunity", title: `${o.number ? o.number + " " : ""}${o.title}${o.party ? " — " + o.party : ""}`, link: href("sales.pipeline", o.id), record_id: o.id, section: "sales.pipeline", due,
       required_next: o.next_action || null, signals: sig });
   }
   for (const l of (f.leads || []) as any[]) {
     const d = daysTo(l.follow_up, today); const sig: Signal[] = [{ code: "commercial_followup" }];
     if (d !== null && d < 0) sig.push({ code: "no_followup", n: -d }); else if (d === 0) sig.push({ code: "due_today" });
-    items.push({ key: `lead:${l.id}`, src: "lead", kind: "lead", title: l.title + (l.organization ? ` — ${l.organization}` : ""), link: href("marketing.leads", l.id), record_id: l.id, section: "marketing.leads", due: l.follow_up || null, signals: sig });
+    items.push({ mine: true, key: `lead:${l.id}`, src: "lead", kind: "lead", title: l.title + (l.organization ? ` — ${l.organization}` : ""), link: href("marketing.leads", l.id), record_id: l.id, section: "marketing.leads", due: l.follow_up || null, signals: sig });
   }
   // shop floor (P8): my work orders and my blocked build units
   const g: any = mfg || {};
   for (const w of (g.work || []) as any[]) {
     const sig: Signal[] = [{ code: "assigned_to_me" }, { code: "manufacturing_impact" }]; if (w.status === "Blocked") sig.push({ code: "blocked" });
     const d = daysTo(w.planned, today); if (d !== null && d < 0) sig.push({ code: "overdue", n: -d }); else if (d === 0) sig.push({ code: "due_today" });
-    items.push({ key: `wo:${w.id}`, src: "work_order", kind: "work_order", title: `${w.number || ""} ${w.title}`.trim(), link: href("operations.work_orders", w.id), record_id: w.id, section: "operations.work_orders", due: w.planned || null, status: w.status, signals: sig });
+    items.push({ mine: true, key: `wo:${w.id}`, src: "work_order", kind: "work_order", title: `${w.number || ""} ${w.title}`.trim(), link: href("operations.work_orders", w.id), record_id: w.id, section: "operations.work_orders", due: w.planned || null, status: w.status, signals: sig });
   }
   for (const u of (g.my_units_blocked || []) as any[])
-    items.push({ key: `unit:${u.id}`, src: "unit", kind: "build_unit", title: `${u.number} — ${(u.reasons || [])[0] || "blocked"}`, link: href("operations.builds", u.id), record_id: u.id, section: "operations.builds",
+    items.push({ mine: true, key: `unit:${u.id}`, src: "unit", kind: "build_unit", title: `${u.number} — ${(u.reasons || [])[0] || "blocked"}`, link: href("operations.builds", u.id), record_id: u.id, section: "operations.builds",
       status: u.status, required_next: (u.reasons || [])[0] ? `Clear: ${(u.reasons || [])[0]}` : null, signals: [{ code: "build_blocked", text: u.number }, { code: "manufacturing_impact" }] });
   // commitments detected in my own comments: suggestions with evidence until I confirm them
   for (const c of ((commitments as any[]) || [])) {
     const sig: Signal[] = [{ code: "promised" }]; const d = c.due ? daysTo(c.due, today) : null;
     if (d !== null && d < 0) sig.push({ code: "overdue", n: -d }); else if (d === 0) sig.push({ code: "due_today" }); else if (d === 1) sig.push({ code: "due_tomorrow" });
-    items.push({ key: `commitment:${c.id}`, src: "commitment", kind: "commitment", title: c.excerpt.slice(0, 120), link: href(c.source_section, c.record_id), record_id: null, section: null, due: c.due,
+    items.push({ mine: true, key: `commitment:${c.id}`, src: "commitment", kind: "commitment", title: c.excerpt.slice(0, 120), link: href(c.source_section, c.record_id), record_id: null, section: null, due: c.due,
       since: c.detected_at, evidence: { excerpt: c.excerpt, confidence: c.confidence, source_link: href(c.source_section, c.record_id) }, signals: sig });
   }
   return { items, states: ((states as any[]) || []) as State[], status, today };

@@ -150,10 +150,10 @@ test("the daily workflow from a new account to the management dashboard", { skip
   evidence.workflow = { project: P.id, task: T0.id, document: D.id, history: seq };
 });
 
-test("navigation: seven main sections (Phase 5 adds Portfolio), two clicks to anything, permissions, phone width, four languages", { skip }, async () => {
+test("navigation: eight main sections (Phase 5 adds Portfolio, P10 adds 1inow), two clicks to anything, permissions, phone width, four languages", { skip }, async () => {
   const { p } = await login(erin.email); await p.waitForSelector(".rail .nav-item.primary");
   const labels = await p.locator(".rail .nav-item.primary span").allInnerTexts();
-  assert.deepEqual(labels, ["Today", "Messages", "Projects", "Portfolio", "Documents", "Calendar", "Assistant"]);
+  assert.deepEqual(labels, ["Today", "1inow", "Messages", "Projects", "Portfolio", "Documents", "Calendar", "Assistant"]);
   for (const [href, sel] of [["/messages", ".threads"], ["/projects", ".tabs"], ["/portfolio", ".dhero"], ["/documents", ".sec-hero"], ["/calendar", ".month"], ["/assistant", ".sec-hero"], ["/", ".today-hero"]] as const) {
     const t0 = Date.now(); await p.click(`.rail a.nav-item[href='${href}']`); await p.waitForSelector(sel, { timeout: 15000 }); time("navigation", Date.now() - t0);
     assert.equal(await p.locator(`.rail a.nav-item[href='${href}']`).getAttribute("aria-current"), "page", `${href} marked as current`);
@@ -169,7 +169,7 @@ test("navigation: seven main sections (Phase 5 adds Portfolio), two clicks to an
   for (const lang of ["en", "ru", "uk", "ar"]) {
     const { p: m } = await login(erin.email, { viewport: { width: 390, height: 844 }, lang });
     await m.waitForSelector(".tabbar a", { timeout: 15000 });
-    assert.equal(await m.locator(".tabbar a").count(), 7);
+    assert.equal(await m.locator(".tabbar a").count(), 8);
     await m.locator(".tabbar a").nth(2).click(); await m.waitForURL(/\/projects/); await m.waitForSelector(".tabs [role=tab]", { timeout: 15000 }); await m.waitForTimeout(400);
     const wide = await m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth); assert.ok(wide <= 1, `${lang}: no sideways scrolling (${wide}px)`);
     if (lang === "ar") assert.equal(await m.evaluate(() => document.documentElement.dir), "rtl");
