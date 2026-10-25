@@ -10,7 +10,7 @@ import { useApp } from "./App";
 import { Proposal, useSpeech } from "./VoiceInbox";
 import { voiceApi } from "@/lib/safeAction";
 import { explain, type Ranked, type Suggest } from "@/lib/inow";
-import { say, type T4 } from "@/lib/mgmt";
+import { NEXT_ACTION, changeText, loopText, say, type T4 } from "@/lib/mgmt";
 
 const L = (en: string, ru: string, uk: string, ar: string): T4 => ({ en, ru, uk, ar });
 type Lg = "en" | "ru" | "uk" | "ar";
@@ -35,9 +35,10 @@ const ACT: Record<string, T4> = {
 const PRI: Record<string, string> = { HIGH: "c-bad", MEDIUM: "c-warn", LOW: "" };
 const PRI_T: Record<string, T4> = { HIGH: L("High", "Высокий", "Високий", "عالٍ"), MEDIUM: L("Medium", "Средний", "Середній", "متوسط"), LOW: L("Low", "Низкий", "Низький", "منخفض") };
 const SRC_T: Record<string, T4> = {
-  my_tasks: L("my tasks", "мои задачи", "мої задачі", "مهامي"), dependents: L("dependencies", "зависимости", "залежності", "التبعيات"), meetings: L("meetings", "встречи", "зустрічі", "الاجتماعات"), processes: L("approvals & processes", "согласования и процессы", "погодження та процеси", "الموافقات والعمليات"),
-  attention: L("attention", "внимание", "увага", "الانتباه"), waiting: L("waiting for", "ожидание", "очікування", "الانتظار"), open_loops: L("open loops", "незакрытые вопросы", "незакриті питання", "الحلقات المفتوحة"), commercial: L("commercial", "коммерция", "комерція", "التجاري"),
+  tasks: L("my tasks", "мои задачи", "мої задачі", "مهامي"), dependencies: L("dependencies", "зависимости", "залежності", "التبعيات"), meetings: L("meetings", "встречи", "зустрічі", "الاجتماعات"), processes: L("approvals & processes", "согласования и процессы", "погодження та процеси", "الموافقات والعمليات"),
+  attention: L("attention", "внимание", "увага", "الانتباه"), waiting: L("waiting for", "ожидание", "очікування", "الانتظار"), waiting_kinds: L("waiting for", "ожидание", "очікування", "الانتظار"), open_loops: L("open loops", "незакрытые вопросы", "незакриті питання", "الحلقات المفتوحة"), commercial: L("commercial", "коммерция", "комерція", "التجاري"),
   manufacturing: L("manufacturing", "производство", "виробництво", "التصنيع"), commitments: L("commitments", "обещания", "обіцянки", "الالتزامات"), state: L("personal state", "личные настройки", "особисті налаштування", "الحالة الشخصية"),
+  exec: L("company overview", "обзор компании", "огляд компанії", "نظرة الشركة"), operations: L("operations", "операции", "операції", "العمليات"), changes: L("changes", "изменения", "зміни", "التغييرات"), mine: L("my items", "мои записи", "мої записи", "عناصري"),
 };
 
 async function inow(body?: any, view?: string) {
@@ -148,6 +149,7 @@ function ItemRow({ r, l, onAct, onDismissCommitment }: { r: Ranked; l: Lg; onAct
       <div style={{ minWidth: 0, flex: 1 }}>
         <Link href={r.link} className="inow-title">{r.title}</Link>
         <div className="faint inow-why">{r.reasons.map((s) => explain(s, l)).join(" · ")}</div>
+        {!r.required_next && r.hint && <div className="inow-why"><span className="chip">{T(L("Suggested", "Предложение", "Пропозиція", "مقترح"))}</span> {say(NEXT_ACTION[r.hint], lang) || r.hint}</div>}
         {r.required_next && <div className="inow-req"><b>{T(L("Required next step", "Обязательный следующий шаг", "Обов'язковий наступний крок", "الخطوة التالية المطلوبة"))}:</b> {r.required_next}</div>}
         {r.evidence && <div className="inow-evd faint">“{r.evidence.excerpt}” · {T(L("confidence", "уверенность", "впевненість", "الثقة"))}: {r.evidence.confidence} · <Link href={r.evidence.source_link}>{T(L("source", "источник", "джерело", "المصدر"))}</Link></div>}
       </div>
@@ -175,7 +177,7 @@ function NextCard({ next, l, onAct }: { next: any[]; l: Lg; onAct: (r: Ranked, s
     <ul className="inow-list">{next.slice(0, 4).map((n) => <li key={n.item.key} className="inow-item">
       <Link href={n.item.link} className="inow-title">{n.item.title}</Link>
       {n.required ? <div className="inow-req"><span className="chip c-bad">{T(L("Required", "Обязательно", "Обов'язково", "مطلوب"))}</span> {n.required}</div>
-        : n.suggested.length > 0 && <div className="chipbar" style={{ marginTop: 4 }}><span className="chip">{T(L("Suggested", "Предложение", "Пропозиція", "مقترح"))}</span>{n.suggested.map((s: Suggest) => <button key={s.id} onClick={() => onAct(n.item, s)}>{T(ACT[s.label] || ACT.open)}</button>)}</div>}
+        : (n.hint || n.suggested.length > 0) && <div className="chipbar" style={{ marginTop: 4 }}><span className="chip">{T(L("Suggested", "Предложение", "Пропозиція", "مقترح"))}</span>{n.hint && <span className="faint">{say(NEXT_ACTION[n.hint], lang) || n.hint}</span>}{n.suggested.map((s: Suggest) => <button key={s.id} onClick={() => onAct(n.item, s)}>{T(ACT[s.label] || ACT.open)}</button>)}</div>}
       <div className="faint inow-why">{n.item.reasons.slice(0, 2).map((s: any) => explain(s, l)).join(" · ")}</div>
     </li>)}</ul>
   </section>;
@@ -288,7 +290,7 @@ function Changes() {
     {!d ? <div className="faint" style={{ padding: 16 }}>…</div> : d.error ? <div className="faint" style={{ padding: 16 }}>{d.error}</div> : (d.items || []).length === 0 ? <div className="faint" style={{ padding: 16 }}>{T(L("Nothing changed that concerns you.", "Ничего важного для вас не изменилось.", "Нічого важливого для вас не змінилося.", "لم يتغير ما يخصّك."))}</div>
       : <ul className="inow-list">{d.items.map((c: any, i: number) => <li key={i} className="inow-item" data-relevance={c.relevance}>
         <Link href={c.link || "#"} className="inow-title">{c.title}</Link>
-        <div className="faint inow-why">{c.relevance === 0 ? T(L("yours", "ваше", "ваше", "لك")) : c.relevance === 1 ? T(L("your project", "ваш проект", "ваш проєкт", "مشروعك")) : T(L("company", "компания", "компанія", "الشركة"))} · {String(c.kind).replace(/_/g, " ")} · {String(c.at || "").slice(0, 16).replace("T", " ")}{c.by ? ` · ${c.by}` : ""}</div>
+        <div className="faint inow-why">{c.relevance === 0 ? T(L("yours", "ваше", "ваше", "لك")) : c.relevance === 1 ? T(L("your project", "ваш проект", "ваш проєкт", "مشروعك")) : T(L("company", "компания", "компанія", "الشركة"))} · {changeText(c, lang) || String(c.kind).replace(/_/g, " ")} · {String(c.at || "").slice(0, 16).replace("T", " ")}{c.by ? ` · ${c.by}` : ""}</div>
       </li>)}</ul>}
   </section>;
 }
@@ -315,7 +317,7 @@ function MeetingBrief({ id, onClose }: { id: string; onClose: () => void }) {
   const { lang } = useApp(); const T = (x: T4, v?: any) => say(x, lang, v);
   const [d, setD] = useState<any>(null);
   useEffect(() => { inow(undefined, `meeting&id=${encodeURIComponent(id)}`).then(setD); }, [id]);
-  const sec = (title: T4, rows: any[]) => rows?.length ? <div><b>{T(title)}</b><ul className="inow-list">{rows.map((x: any, i: number) => <li key={i} className="inow-item">{x.link ? <Link href={x.link}>{x.title}</Link> : x.title || x.name}{(x.next_action || x.kind) && <span className="faint"> · {x.next_action || String(x.kind).replace(/_/g, " ")}</span>}</li>)}</ul></div> : null;
+  const sec = (title: T4, rows: any[]) => rows?.length ? <div><b>{T(title)}</b><ul className="inow-list">{rows.map((x: any, i: number) => <li key={i} className="inow-item">{x.link ? <Link href={x.link}>{x.title}</Link> : x.title || x.name}{x.loop_key ? <span className="faint"> · {loopText(x, lang)}{x.next_action ? ` → ${say(NEXT_ACTION[x.next_action], lang) || x.next_action}` : ""}</span> : x.kind ? <span className="faint"> · {changeText(x, lang) || String(x.kind).replace(/_/g, " ")}</span> : null}</li>)}</ul></div> : null;
   return <section className="card" data-view="meeting-brief">
     <div className="card-h"><h2><Icon n="calendar" />{T(L("Meeting brief", "Бриф встречи", "Бриф зустрічі", "ملخص الاجتماع"))}</h2><button className="btn ghost sm" style={{ marginInlineStart: "auto" }} onClick={onClose} aria-label="close"><Icon n="x" /></button></div>
     <div style={{ padding: "0 16px 14px", display: "grid", gap: 8 }}>

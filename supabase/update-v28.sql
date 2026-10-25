@@ -112,7 +112,7 @@ grant update (status, decided_at) on public.inow_commitments to authenticated;
 create or replace function public.inow_commitments_guard() returns trigger language plpgsql set search_path = public as $$
 begin
   if old.status <> 'suggested' and new.status is distinct from old.status and current_user = 'authenticated' then
-    raise exception 'This commitment was already handled' using errcode = '40001';
+    raise exception 'This commitment was already handled' using errcode = '55000'; -- not 40001: that one is retried by the API layer
   end if;
   return new;
 end $$;
@@ -254,15 +254,14 @@ begin
         'mode', 'sequential', 'steps', '[{"kind": "capability", "cap": "proposal_approver", "label": "Proposal approver"}, {"kind": "capability", "cap": "pricing_approver", "label": "Pricing approver"}]'::jsonb),
       jsonb_build_object('label', 'Above 250,000 USD (high value), or another currency — Management review', 'currency', 'USD', 'mode', 'sequential',
         'steps', '[{"kind": "capability", "cap": "proposal_approver", "label": "Proposal approver"}, {"kind": "capability", "cap": "pricing_approver", "label": "Pricing approver"}, {"kind": "role", "role": "management", "label": "Management review"}]'::jsonb)));
-  for p in select * from public.approval_policies where model_version < 2 loop
+  -- an approved policy (none today) keeps its approval and its tiers; a new model reaches it only through an edit
+  for p in select * from public.approval_policies where model_version < 2 and config_status <> 'Approved' loop
     t := coalesce(model->p.code, p.tiers);
     insert into public.approval_policies_history(policy_code, changed_by, before, after, config_status, version)
       values (p.code, null, to_jsonb(p), jsonb_build_object('tiers', t, 'note', 'policy model v2 (USD thresholds, ECR / PROPOSAL escalation, separation of duty) — READY FOR OWNER APPROVAL'), 'Draft', p.version + 1);
     update public.approval_policies set tiers = t, version = version + 1, config_status = 'Draft', ready_for_approval = true, model_version = 2, updated_at = now(), updated_by = null,
       approved_by = null, approved_at = null, approved_version = null, self_approved = false
-     where code = p.code and config_status <> 'Approved';
-    -- an approved policy (none today) keeps its approval; its new model goes in only through an owner's edit
-    update public.approval_policies set model_version = 2 where code = p.code and config_status = 'Approved';
+     where code = p.code;
   end loop;
 end $$;
 
@@ -278,7 +277,9 @@ begin
   if me is null or not public._policy_approver(me) then
     raise exception 'Only the Owner or a Policy Approver confirms a business authority policy as AGRON policy (a Workflow Admin builds processes but does not approve authority)' using errcode = '42501';
   end if;
-  if pol.version <> p_version then raise exception 'The policy changed since you opened it (version %); review it again', pol.version using errcode = '40001'; end if;
+  -- a System Administrator never approves business authority, even with a capability granted before the role changed
+  if rl = 'admin' then raise exception 'A System Administrator does not approve business policies (separation of duty)' using errcode = '42501'; end if;
+  if pol.version <> p_version then raise exception 'The policy changed since you opened it (version %); review it again', pol.version using errcode = '55000'; end if;
   if pol.config_status = 'Approved' then return jsonb_build_object('ok', true, 'status', 'Approved', 'note', 'Already approved'); end if;
   self := pol.updated_by is not null and pol.updated_by = me;
   if self and rl <> 'owner' then raise exception 'Separation of duty: the person who edited this version cannot approve it' using errcode = '42501'; end if;
@@ -387,5 +388,19 @@ grant execute on function public.acceptance_live() to service_role;
 insert into public.acceptance_env_changes(environment, category, what, source)
   select public.acceptance_env(), 'db_migration', 'database migrated to v28 (1inow layer, policy model v2 — READY FOR OWNER APPROVAL)', 'migration'
    where not exists (select 1 from public.acceptance_env_changes where category = 'db_migration' and what like 'database migrated to v28%');
+
+
+/* ---------------------------------------------------------------------------------------------
+   "Changed by someone else" errors: 55000 instead of 40001. The API layer treats 40001 (serialization failure) as
+   retryable and repeats the call, so a stale-version save or approval never returned (found by the P10 tests).
+   The message and the rule stay the same; only the code changes. Reversed by the rollback.
+   --------------------------------------------------------------------------------------------- */
+do $$ declare f text; d text; begin
+  foreach f in array array['public.crm_settings_save(jsonb, integer)', 'public.ops_settings_save(jsonb, integer)', 'public.mfg_settings_save(jsonb, integer)'] loop
+    if to_regprocedure(f) is null then continue; end if;
+    d := pg_get_functiondef(to_regprocedure(f));
+    if position('errcode = ''40001''' in d) > 0 then execute replace(d, 'errcode = ''40001''', 'errcode = ''55000'''); end if;
+  end loop;
+end $$;
 
 commit;

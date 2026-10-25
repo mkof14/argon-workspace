@@ -21,7 +21,7 @@ export type Op = { op: "insert"; row: Record<string, any> } | { op: "update"; id
 export async function applyOps(db: any, ops: Op[]) {
   if (!ops.length) return [];
   const { data, error } = await db.rpc("records_apply", { p_ops: ops });
-  if (error) { if (/conflict/i.test(error.message) || error.code === "40001") throw new Conflict(error.message); throw new Error(error.message); }
+  if (error) { if (/conflict/i.test(error.message) || error.code === "40001" || error.code === "55000") throw new Conflict(error.message); throw new Error(error.message); }
   return data as { op: string; id: string }[];
 }
 /** Runs a multi-record step; if a record moved meanwhile, reads again and recomputes (up to 3 times). */

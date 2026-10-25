@@ -26,12 +26,14 @@ export type Item = {
   due?: string | null; at?: string | null; since?: string | null; status?: string | null;
   signals: Signal[]; controlled?: boolean;
   waiting?: { on?: string | null; party?: string | null; age_days?: number | null; last_activity?: string | null; escalation?: string | null; expected?: string | null } | null;
-  required_next?: string | null; evidence?: { excerpt: string; confidence: "high" | "medium" | "low"; source_link: string } | null;
+  /** REQUIRED next step: defined by a workflow/approval/control (never by a guess) */ required_next?: string | null;
+  /** a SUGGESTED next action text from a deterministic engine (open loops, attention) — shown as a suggestion */ hint?: string | null;
+  evidence?: { excerpt: string; confidence: "high" | "medium" | "low"; source_link: string } | null;
 };
 export type State = { item_key: string; pinned?: boolean; dismissed_at?: string | null; not_relevant?: boolean; snooze_until?: string | null; remind_at?: string | null };
 export type Ranked = Item & { priority: Priority; reasons: Signal[]; pinned: boolean; suggested: Suggest[]; hidden_reason?: string };
 export type Section = "now" | "today" | "attention" | "waiting" | "decisions" | "loops" | "next";
-export type MyDay = { now: Ranked[]; today: Ranked[]; attention: Ranked[]; waiting: Ranked[]; decisions: Ranked[]; loops: Ranked[]; next: { item: Ranked; required?: string | null; suggested: Suggest[] }[]; hidden: number; counts: Record<string, number> };
+export type MyDay = { now: Ranked[]; today: Ranked[]; attention: Ranked[]; waiting: Ranked[]; decisions: Ranked[]; loops: Ranked[]; next: { item: Ranked; required?: string | null; hint?: string | null; suggested: Suggest[] }[]; hidden: number; counts: Record<string, number> };
 
 // strength of each signal: decides HIGH / MEDIUM and the order of reasons (fixed, documented, tested)
 const HIGH: SignalCode[] = ["meeting_soon", "critical", "blocks_others", "build_blocked", "overdue", "approval_waiting", "customer_waiting", "escalation_due", "sla_overdue", "reminder_due"];
@@ -122,7 +124,7 @@ export function dedupe(items: Item[]): Item[] {
     if (!cur) { out.set(k, { ...it, signals: [...it.signals] }); continue; }
     const keep = srcRank.indexOf(cur.src) <= srcRank.indexOf(it.src) ? cur : it, other = keep === cur ? it : cur;
     const sig = [...keep.signals]; for (const s of other.signals) if (!sig.some((x) => x.code === s.code)) sig.push(s);
-    out.set(k, { ...keep, signals: sig, controlled: keep.controlled || other.controlled, waiting: keep.waiting || other.waiting, required_next: keep.required_next || other.required_next, due: keep.due || other.due, evidence: keep.evidence || other.evidence });
+    out.set(k, { ...keep, signals: sig, controlled: keep.controlled || other.controlled, waiting: keep.waiting || other.waiting, required_next: keep.required_next || other.required_next, hint: keep.hint || other.hint, due: keep.due || other.due, evidence: keep.evidence || other.evidence });
   }
   return [...out.values()];
 }
@@ -150,7 +152,7 @@ export function buildMyDay(items: Item[], states: State[], o: { now: number; tod
   const sec: Record<Exclude<Section, "now" | "next">, Ranked[]> = { today: [], attention: [], waiting: [], decisions: [], loops: [] };
   for (const r of ranked) { if (inNow.has(r.key)) continue; (sec[sectionOf(r, o.today) as keyof typeof sec] ||= []).push(r); }
   const next = [...now, ...sec.decisions, ...sec.today, ...sec.attention, ...sec.waiting].slice(0, 6)
-    .map((item) => ({ item, required: item.required_next || null, suggested: item.required_next ? [] : item.suggested.filter((s) => !["open", "pin", "snooze", "dismiss"].includes(s.kind)).slice(0, 2) }));
+    .map((item) => ({ item, required: item.required_next || null, hint: item.required_next ? null : item.hint || null, suggested: item.required_next ? [] : item.suggested.filter((s) => !["open", "pin", "snooze", "dismiss"].includes(s.kind)).slice(0, 2) }));
   const counts = { now: now.length, today: sec.today.length, attention: sec.attention.length, waiting: sec.waiting.length, decisions: sec.decisions.length, loops: sec.loops.length };
   return { now, today: sec.today.slice(0, per), attention: sec.attention.slice(0, per), waiting: sec.waiting.slice(0, per), decisions: sec.decisions.slice(0, per), loops: sec.loops.slice(0, per), next, hidden, counts };
 }

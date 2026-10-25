@@ -60,7 +60,7 @@ test("§59.1–6 a US-persons-only task, dependency, meeting, opportunity, build
   // hidden: US-persons-only records that name the non-US people directly
   C.hTask = await ins("company.tasks", "SECRET overdue engine test plan", "In Progress", { assignee_id: U.empNon.id, due: D(-3), priority: "High" }, true);
   C.hTaskM = await ins("company.tasks", "SECRET mgmt review", "In Progress", { assignee_id: U.mgmtNon.id, due: D(-1), priority: "High" }, true);
-  C.hDep = await ins("company.tasks", "SECRET dependent step", "To Do", { assignee_id: U.empUS.id, blocked_by: [C.visTask.id], due: D(1) }, true);
+  C.hDep = await ins("company.tasks", "SECRET dependent step", "To Do", { assignee_id: U.empUS.id, blocked_by: C.visTask.id, due: D(1) }, true);
   C.hMeet = await ins("company.meetings", "SECRET Atlas-Hidden briefing", "Planned", { date: D(0), time: "23:30", timezone: "UTC", organizer_id: U.mgmtUS.id, participants_ids: [U.empNon.id, U.mgmtNon.id, U.empUS.id] }, true);
   C.hOpp = await ins("sales.pipeline", "SECRET Atlas-Hidden opportunity", "Negotiation", { owner_id: U.mgmtNon.id, value: 9000000, currency: "USD", next_action: "call", next_action_due: D(-2) }, true);
   C.hBuild = await ins("operations.builds", `SECRET ${BN} unit`, "Blocked", { number: BN, blocked: true, blocked_reason: "SECRET part" }, true);
@@ -77,6 +77,11 @@ test("§59.1–6 a US-persons-only task, dependency, meeting, opportunity, build
   assert.ok(JSON.stringify(us).includes(`${tag} SECRET dependent step`), "the US assignee sees the US-only task");
   const usm = norm(await myDay(C.mgmtUS, me("mgmtUS")));
   assert.ok(JSON.stringify(usm).includes("Atlas-Hidden briefing"), "the US organiser sees the US-only meeting");
+  // positive control for the dependency signal: a VISIBLE dependent does add "blocks others" to the same task
+  const vd = await ins("company.tasks", "Visible dependent step", "To Do", { assignee_id: U.empUS.id, blocked_by: C.visTask.id, due: D(1) });
+  const dd = await myDay(C.empNon, me("empNon")); const mine = [...dd.now, ...dd.today, ...dd.attention].find((r) => r.record_id === C.visTask.id);
+  assert.ok(mine && mine.signals.some((x) => x.code === "blocks_others"), "a visible dependent is counted");
+  await sql("delete from records where id = $1", [vd.id]);
   EV.tests.invariance = { users: ["empNon", "mgmtNon"], hidden_records: 7, identical: true, positive_control: true };
 });
 

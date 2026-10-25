@@ -134,4 +134,14 @@ as $$ select 27 $$;
 revoke all on function public.workspace_db_version() from public, anon;
 grant execute on function public.workspace_db_version() to authenticated, service_role;
 
+
+-- the stale-version error code back to 40001 (v27 behaviour)
+do $$ declare f text; d text; begin
+  foreach f in array array['public.crm_settings_save(jsonb, integer)', 'public.ops_settings_save(jsonb, integer)', 'public.mfg_settings_save(jsonb, integer)'] loop
+    if to_regprocedure(f) is null then continue; end if;
+    d := pg_get_functiondef(to_regprocedure(f));
+    if position('errcode = ''55000''' in d) > 0 then execute replace(d, 'errcode = ''55000''', 'errcode = ''40001'''); end if;
+  end loop;
+end $$;
+
 commit;

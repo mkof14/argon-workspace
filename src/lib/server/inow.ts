@@ -103,11 +103,23 @@ export async function gatherItems(sb: any, me: Me, now = Date.now()) {
     if (/project/.test(k) && ["critical", "high"].includes(a.severity)) sig.push({ code: "project_at_risk" });
     if (!sig.length) sig.push({ code: a.severity === "high" ? "priority_high" : "stalled", n: Math.round(hoursSince(a.since, now) / 24) });
     items.push({ key: `attention:${a.item_key}`, src: "attention", kind: k, title: a.title, link: a.link || href(a.section, a.record_id), record_id: a.record_id, section: a.section, since: a.since,
-      project: a.project_id ? { id: a.project_id, title: a.project_title || "" } : null, owner_id: a.owner_id, required_next: a.next_action || null, signals: sig });
+      project: a.project_id ? { id: a.project_id, title: a.project_title || "" } : null, owner_id: a.owner_id, hint: a.next_action || null, signals: sig });
   }
-  // Waiting For (v22): "others" = we wait on them; "me" = they wait on me (my debt)
+  // Waiting For (v22): "others" = we wait on them; "me" = they wait on me (my debt); "external" = a Waiting task on
+  // someone outside — its own waiting kind (Supplier / Customer / Partner) says who, read again with my rights
+  const extIds = ((waiting as any[]) || []).filter((w) => w.party_type === "external" && isUuid(w.record_id)).map((w) => w.record_id);
+  const extKind = new Map<string, string>();
+  if (extIds.length) {
+    const ek = (await timed(status, "waiting_kinds", () => sb.from("records").select("id,data").in("id", extIds))) as any[] || [];
+    for (const r of ek) extKind.set(r.id, String(r.data?.waiting_kind || "").toLowerCase());
+  }
+  const partyOf = (w: any) => {
+    if (w.party_type !== "external") return String(w.party_type || "");
+    const k = extKind.get(w.record_id) || "";
+    return /supplier|vendor|постав/.test(k) ? "vendor" : /customer|client|клиент|клієнт/.test(k) ? "customer" : /partner|партн/.test(k) ? "partner" : "external";
+  };
   for (const w of ((waiting as any[]) || [])) {
-    const party = String(w.party_type || ""); const age = Number(w.age_days || 0); const sig: Signal[] = [];
+    const party = partyOf(w); const age = Number(w.age_days || 0); const sig: Signal[] = [];
     if (w.bucket === "me") { sig.push({ code: "blocks_others", text: w.party_name || "" }); if (party === "customer") sig.push({ code: "customer_waiting", n: age }); }
     else if (party === "customer" || party === "client") sig.push({ code: "customer_waiting", n: age });
     else if (party === "vendor" || party === "supplier") sig.push({ code: "vendor_waiting", n: age });
@@ -123,7 +135,7 @@ export async function gatherItems(sb: any, me: Me, now = Date.now()) {
   for (const l of ((loops as any[]) || [])) {
     const sig: Signal[] = [{ code: "stalled", n: Number(l.age_days || 0) }]; if (l.severity === "high" || l.severity === "critical") sig.push({ code: "priority_high" });
     items.push({ key: `loop:${l.loop_key}`, src: "loop", kind: l.kind, title: l.title, link: l.link || href(l.section, l.record_id), record_id: l.record_id, section: l.section, since: l.since,
-      project: l.project_id ? { id: l.project_id, title: l.project_title || "" } : null, owner_id: l.owner_id, required_next: l.next_action || null, signals: sig });
+      project: l.project_id ? { id: l.project_id, title: l.project_title || "" } : null, owner_id: l.owner_id, hint: l.next_action || null, signals: sig });
   }
   // commercial follow-ups (P7) due for me
   const f: any = follow || {};
@@ -209,6 +221,8 @@ export async function meetingBrief(sb: any, me: Me, meetingId: string) {
   if (error || !m || m.section !== "company.meetings") return null; // a meeting the person may not open does not exist for them
   const pid = isUuid(m.data?.project_ref) ? m.data.project_ref : null;
   const status: Record<string, SourceStatus> = {};
+  // the project's name is read with my rights too (a project I may not open stays unnamed)
+  const ptitle = pid && !m.data?.project_ref_title ? (((await timed(status, "project", () => sb.from("records").select("title").eq("id", pid).maybeSingle())) as any)?.title || "") : "";
   const [loops, waiting, chg, docs, people] = await Promise.all([
     pid ? timed(status, "open_loops", () => sb.rpc("open_loops", { p_project: pid })) : Promise.resolve([]),
     timed(status, "waiting", () => sb.rpc("waiting_for")),
@@ -217,7 +231,7 @@ export async function meetingBrief(sb: any, me: Me, meetingId: string) {
     timed(status, "people", () => sb.from("profiles").select("id,full_name").in("id", [m.data?.organizer_id, ...(m.data?.participants_ids || [])].filter(isUuid))),
   ]);
   return {
-    meeting: { id: m.id, title: m.title, date: m.data?.date, time: m.data?.time, agenda: m.data?.agenda || null, status: m.status, project: pid ? { id: pid, title: m.data?.project_ref_title || "" } : null },
+    meeting: { id: m.id, title: m.title, date: m.data?.date, time: m.data?.time, agenda: m.data?.agenda || null, status: m.status, project: pid ? { id: pid, title: m.data?.project_ref_title || ptitle || "" } : null },
     participants: ((people as any[]) || []).map((p) => ({ id: p.id, name: p.full_name })),
     open_actions: ((loops as any[]) || []).slice(0, 10),
     waiting: ((waiting as any[]) || []).filter((w) => !pid || w.project_id === pid).slice(0, 8),
