@@ -1526,3 +1526,23 @@ tr.grp td b{margin-inline-end:6px}
 .crm aside.drawer{overflow-y:auto;overscroll-behavior:contain}
 .crm aside.drawer section{display:grid;gap:6px}
 @media (max-width:640px){.crm aside.drawer{width:100%;max-width:100%}.crm [data-capture] input,.crm [data-capture] select,.crm [data-capture] textarea{font-size:16px;min-height:44px}}
+
+/* 1inow · My Day (P10) — mobile first; one column on phones, two on wide screens */
+.inow{display:grid;gap:14px}
+.inow-head .card-h h1{display:flex;gap:8px;align-items:center}
+.inow-grid{display:grid;gap:14px;grid-template-columns:1fr}
+@media (min-width:900px){.inow-grid{grid-template-columns:1fr 1fr}.inow-grid .inow-now{grid-column:1/-1}}
+.inow-list{list-style:none;margin:0;padding:0 16px 12px;display:grid;gap:8px}
+.inow-item{border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:var(--surface);min-width:0}
+.inow-item[data-priority="HIGH"]{border-inline-start:3px solid var(--bad)}
+.inow-item[data-priority="MEDIUM"]{border-inline-start:3px solid var(--warn,#d99a00)}
+.inow-title{font-weight:650;color:var(--ink);text-decoration:none;overflow-wrap:anywhere}
+.inow-title:hover{text-decoration:underline}
+.inow-why{font-size:13px;margin-top:2px;overflow-wrap:anywhere}
+.inow-req{font-size:13px;margin-top:4px}
+.inow-evd{font-size:12px;margin-top:4px;font-style:italic}
+.inow-answer,.inow-ai{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:grid;gap:6px;background:var(--surface)}
+.inow-answer .inow-list{padding:0}
+.inow-next .inow-list{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.inow .seg{flex-wrap:wrap}
+@media (max-width:600px){.inow-head .card-h h1{font-size:18px}.inow .seg button{padding:6px 9px}}

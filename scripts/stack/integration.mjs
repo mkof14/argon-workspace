@@ -38,7 +38,7 @@ function evidence(status, extra = {}) {
   let c = {}; try { c = JSON.parse(fs.readFileSync(counts, "utf8")); } catch {}
   let dbv = null; try { dbv = Number(sql("select public.workspace_db_version()").trim()) || null; } catch {}
   const finished = new Date();
-  const m = { mode, scope: mode === "full_clean" ? ["P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9", "P9-R2"] : only, suites_run: suites.map((f) => path.basename(f, ".test.ts")),
+  const m = { mode, scope: mode === "full_clean" ? ["P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9", "P9-R2", "P10-1INOW"] : only, suites_run: suites.map((f) => path.basename(f, ".test.ts")),
     env_recreated: true, reruns: 0, rerun_of: process.env.RERUN_OF || null, fresh_build: !process.env.SKIP_BUILD, dirty: ident.dirty, duration_s: Math.round((finished - started) / 1000), ...c, ...extra };
   const ok = status === "PASS";
   const row = { check_id: "P9.REG.FULL", status, environment: "local", app_version: ident.app_version, git_sha: ident.git_sha, db_version: dbv, migration_hash: ident.migration_hash,
@@ -50,7 +50,7 @@ function evidence(status, extra = {}) {
 }
 try {
   await up();
-  const needApp = suites.some((s) => /\/(api|e2e|docapi|e2e4|p4accept|p5|e2e5|e2e6|e2e7|e2e8|p9|p9r2)\.test\.ts$/.test(s));
+  const needApp = suites.some((s) => /\/(api|e2e|docapi|e2e4|p4accept|p5|e2e5|e2e6|e2e7|e2e8|p9|p9r2|p10|p10sec|p10act|p10perf)\.test\.ts$/.test(s));
   if (needApp) {
     if (!process.env.SKIP_BUILD) { log("build"); const b = spawnSync("npx", ["next", "build"], { cwd: ROOT, env, stdio: "inherit" }); if (b.status) throw new Error("build failed"); }
     try { await fetch(APP); throw new Error(`port ${PORT} is already in use — stop the old app first`); } catch (e) { if (/already in use/.test(e.message)) throw e; }

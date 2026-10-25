@@ -10,6 +10,7 @@ import { LANGS, Lang, loadUiLang, t, tx } from "@/lib/i18n";
 import { installErrorReporting } from "@/lib/errors";
 import { loadLearnLang } from "@/config/l2";
 import { DEMO, Profile, Rule, accessFor, isExternal, store, Access } from "@/lib/store";
+import { useInowHome } from "./useInowHome";
 import dynamic from "next/dynamic";
 import Dashboard from "./Dashboard";
 import { MfaGate } from "./MfaSetup";
@@ -30,6 +31,7 @@ const Reports = dynamic(() => import("./Reports"), { ssr: false });
 const Templates = dynamic(() => import("./Templates"), { ssr: false });
 const DeptHub = dynamic(() => import("./DeptHub"), { ssr: false });
 const Today = dynamic(() => import("./Today"), { ssr: false });
+const InowMyDay = dynamic(() => import("./InowMyDay"), { ssr: false });
 const Search = dynamic(() => import("./Search"), { ssr: false });
 const Footer = dynamic(() => import("./Footer"), { ssr: false });
 const Bell = dynamic(() => import("./Notices").then((m) => m.Bell), { ssr: false });
@@ -190,6 +192,7 @@ export default function App({ slug }: { slug: string[] }) {
   const access = useMemo(() => accessFor(me?.role || "pending", rules), [me?.role, rules]);
 
   // fail closed: production or staging with unsafe or ambiguous database settings shows this, never demo data
+  const inowHome = useInowHome(!!me && !isExternal(me.role) && me.role !== "pending" && !(me as any).disabled && !DEMO);
   if (ENV_REFUSED && APP_ENV !== "preview") return <div className="login"><div className="box" role="alert"><h2 style={{ margin: 0 }}>Workspace</h2><p style={{ margin: 0 }}>{(REFUSED_TEXT as any)[lang] || REFUSED_TEXT.en}</p></div></div>;
   if (!loaded || !me) return <div className="login"><div className="faint">…</div></div>;
 
@@ -220,13 +223,13 @@ export default function App({ slug }: { slug: string[] }) {
   };
   const ext = isExternal(me.role);
   const PRIMARY: [string, string, string, string][] = ext ? [["/", "", "grid", t("overview", lang)], ["/messages", "messages", "send", N.messages], ["/reports", "reports", "pie", t("reports", lang)]]
-    : [["/", "", "sun", N.today], ["/messages", "messages", "send", N.messages], ["/projects", "projects", "layers", N.projects], ["/portfolio", "portfolio", "grid", N.portfolio], ["/documents", "documents", "file", N.documents], ["/calendar", "calendar", "calendar", N.calendar], ["/assistant", "assistant", "spark", N.assistant]];
+    : [["/", "", "sun", N.today], ["/inow", "inow", "spark", "1inow"], ["/messages", "messages", "send", N.messages], ["/projects", "projects", "layers", N.projects], ["/portfolio", "portfolio", "grid", N.portfolio], ["/documents", "documents", "file", N.documents], ["/calendar", "calendar", "calendar", N.calendar], ["/assistant", "assistant", "spark", N.assistant]];
   const mfgOk = access.read.has("operations.builds");
   const shopOk = access.read.has("operations.work_orders");
   const crmOk = ["sales.pipeline", "marketing.leads", "company.parties", "company.contacts"].some((s) => access.read.has(s));
-  const isOn = (r: string) => (r === "" ? !route || route === "today" : route === r || route.startsWith(r + "/"));
+  const isOn = (r: string) => (r === "" ? (!route && inowHome !== "inow") || route === "today" : r === "inow" ? route === "inow" || (!route && inowHome === "inow" && !ext) : route === r || route.startsWith(r + "/"));
   const special: Record<string, [string, string]> = { trash: [t("workspace", lang), t("trash", lang)], today: [t("workspace", lang), tx({ en: "Today", ru: "Сегодня", uk: "Сьогодні", ar: "اليوم" }, lang)], stardome: [t("workspace", lang), t("sd_title", lang)], projects: [t("workspace", lang), tx({ en: "Projects", ru: "Проекты", uk: "Проєкти", ar: "المشاريع" }, lang)], decide: [t("workspace", lang), tx({ en: "Decisions", ru: "Решения", uk: "Рішення", ar: "القرارات" }, lang)], "admin/users": [t("admin", lang), t("users", lang)], "admin/roles": [t("admin", lang), t("roles", lang)], "admin/system": [t("admin", lang), t("sys_title", lang)], me: [t("workspace", lang), t("my_profile", lang)], learn: [t("workspace", lang), t("learn", lang)], guide: [t("workspace", lang), tx({ en: "User guide", ru: "Руководство", uk: "Посібник", ar: "دليل المستخدم" }, lang)], reports: [t("workspace", lang), t("reports", lang)], templates: [t("workspace", lang), t("templates", lang)], ask: [t("workspace", lang), t("ask_docs", lang)],
-    messages: [t("workspace", lang), N.messages], documents: [t("workspace", lang), N.documents], calendar: [t("workspace", lang), N.calendar], assistant: [t("workspace", lang), N.assistant],
+    inow: [t("workspace", lang), "1inow · " + tx({ en: "My Day", ru: "Мой день", uk: "Мій день", ar: "يومي" }, lang)], messages: [t("workspace", lang), N.messages], documents: [t("workspace", lang), N.documents], calendar: [t("workspace", lang), N.calendar], assistant: [t("workspace", lang), N.assistant],
     portfolio: [t("workspace", lang), N.portfolio], ops: [N.company, N.ops], crm: [N.company, N.crm], mfg: [N.company, N.mfg], build: [N.mfg, N.build], control: [t("workspace", lang), tx({ en: "What needs attention", ru: "Что требует внимания", uk: "Що потребує уваги", ar: "ما يحتاج انتباهًا" }, lang)], team: [N.company, tx({ en: "Team status", ru: "Статус команды", uk: "Статус команди", ar: "حالة الفريق" }, lang)],
     people: [N.company, N.people], management: [N.company, N.management], "company-overview": [N.company, t("overview", lang)], knowledge: [N.company, tx({ en: "Knowledge", ru: "Знания", uk: "Знання", ar: "المعرفة" }, lang)], decisions: [N.company, tx({ en: "Decision log", ru: "Журнал решений", uk: "Журнал рішень", ar: "سجل القرارات" }, lang)], notifications: [t("workspace", lang), t("notifications", lang)] };
   if (route.startsWith("projects/")) special[route] = [tx({ en: "Projects", ru: "Проекты", uk: "Проєкти", ar: "المشاريع" }, lang), tx({ en: "Project", ru: "Проект", uk: "Проєкт", ar: "مشروع" }, lang)];
@@ -242,7 +245,8 @@ export default function App({ slug }: { slug: string[] }) {
   const goBack = () => { if (navStack.current.length > 1) router.back(); else router.push("/"); };
 
   let body: React.ReactNode;
-  if (!route) body = ext ? <Dashboard depts={depts} /> : <Today />;
+  if (!route) body = ext ? <Dashboard depts={depts} /> : inowHome === "inow" ? <InowMyDay /> : <Today />;
+  else if (route === "inow" && !ext) body = <InowMyDay />;
   else if (route === "company-overview" && !ext) body = <Dashboard depts={depts} />;
   else if (route === "messages") body = <Messages />;
   else if (route === "documents" && !ext) body = <Documents />;

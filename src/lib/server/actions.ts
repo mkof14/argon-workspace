@@ -61,7 +61,11 @@ export async function plan(c: Ctx, text: string, source: "voice" | "voice_inbox"
   }
   if (p.slots.task && !question && ["assign_task", "change_due_date", "complete_task"].includes(p.intent)) {
     const found = await findTask(c, p.slots.task);
-    if (found.length === 1) resolved.task = { id: found[0].id, title: found[0].title, data: found[0].data, status: found[0].status };
+    if (found.length === 1) {
+      // the version the person is shown in the preview: if the task changes before the yes, the yes no longer applies
+      const v = await recOf(c, found[0].id);
+      resolved.task = { id: found[0].id, title: found[0].title, data: v?.data ?? found[0].data, status: v?.status ?? found[0].status, version: v?.version };
+    }
     else if (!found.length) ask(T(c.lang, `No open task “${p.slots.task}” that you can open.`, `Нет открытой задачи «${p.slots.task}», доступной вам.`));
     else ask(T(c.lang, "Which task?", "Какую задачу?"), found.slice(0, 6).map((x: any) => ({ id: x.id, label: x.title })));
   }
@@ -127,6 +131,7 @@ async function buildOps(c: Ctx, a: any, it: any): Promise<Op[]> {
   if (["assign_task", "change_due_date", "complete_task"].includes(a.intent)) {
     const cur = await recOf(c, it.resolved?.task?.id || "");
     if (!cur || cur.section !== "company.tasks") throw new Error(T(c.lang, "Task not found", "Задача не найдена"));
+    if (it.resolved?.task?.version != null && cur.version !== it.resolved.task.version) throw new Error(T(c.lang, "The task changed after you saw the preview — nothing was done. Review it and ask again.", "Задача изменилась после предпросмотра — ничего не сделано. Проверьте и повторите."));
     const patch: any = {}; let status = cur.status;
     if (a.intent === "assign_task") { patch.assignee_id = it.resolved.person.id; patch.assignee = it.resolved.person.name; }
     if (a.intent === "change_due_date") patch.due = it.slots.date;
@@ -145,11 +150,13 @@ export async function start(c: Ctx, id: string, o: { confirm?: boolean; personId
   if (!a) return { ok: false, status: 404, error: "Not found" };
   if (a.risk === "controlled" || a.status === "rejected") return { ok: false, status: 403, error: T(c.lang, "This action is not done here — use the record's approval or settings.", "Это действие здесь не выполняется — используйте согласование или настройки записи.") };
   if (!["proposed", "needs_clarification"].includes(a.status)) return { ok: false, status: 409, error: `Already ${a.status}` };
+  // a proposal is a preview of a moment: after 12 hours it is stale and is asked again (never carried out late)
+  if (a.created_at && Date.now() - Date.parse(a.created_at) > 12 * 36e5) { await stamp(c, id, { status: "cancelled", error: "stale proposal" }); return { ok: false, status: 409, stale: true, error: T(c.lang, "This proposal is more than 12 hours old — ask again.", "Этому предложению больше 12 часов — повторите запрос.") }; }
   const it = a.interpreted || {};
   // a clarification answered by choosing an option (person or task) — re-checked under the person's rights
   if (a.status === "needs_clarification") {
     if (o.personId) { const list = await people(c); const p = list.find((x: any) => x.id === o.personId); if (!p) return { ok: false, status: 400, error: "Unknown person" }; it.resolved = { ...it.resolved, person: { id: p.id, name: nameOf(p) } }; }
-    if (o.taskId) { const t = await recOf(c, String(o.taskId)); if (!t || t.section !== "company.tasks") return { ok: false, status: 400, error: "Unknown task" }; it.resolved = { ...it.resolved, task: { id: t.id, title: t.title, data: t.data, status: t.status } }; }
+    if (o.taskId) { const t = await recOf(c, String(o.taskId)); if (!t || t.section !== "company.tasks") return { ok: false, status: 400, error: "Unknown task" }; it.resolved = { ...it.resolved, task: { id: t.id, title: t.title, data: t.data, status: t.status, version: t.version } }; }
     const stillMissing = (it.intent === "assign_task" && (!it.resolved?.person || !it.resolved?.task)) || (["change_due_date", "complete_task"].includes(it.intent) && !it.resolved?.task)
       || (it.intent === "change_due_date" && !it.slots?.date) || (it.intent === "create_task" && it.slots?.person && !it.resolved?.person) || (["create_task", "create_reminder", "note"].includes(it.intent) && !it.slots?.title);
     if (stillMissing || ["unknown", "command_plan"].includes(it.intent) || a.intent === "command_plan") return { ok: false, status: 409, error: a.question || T(c.lang, "Needs clarification", "Нужно уточнение") };
@@ -162,7 +169,10 @@ export async function start(c: Ctx, id: string, o: { confirm?: boolean; personId
   try { ops = await buildOps(c, a, it); }
   catch (e: any) { await stamp(c, id, { status: "failed", error: String(e?.message || e).slice(0, 500), interpreted: it, risk: a.risk }); return { ok: false, status: 409, error: String(e?.message || e) }; }
   const now = new Date().toISOString();
-  await stamp(c, id, { status: "confirmed", confirmed_at: now, interpreted: { ...it, planned: ops }, risk: a.risk });
+  // claim the proposal atomically: of two confirmations (a double tap, a retry, a second tab) exactly one proceeds
+  const { data: claimed } = await c.admin.from("action_audit").update({ status: "confirmed", confirmed_at: now, interpreted: { ...it, planned: ops }, risk: a.risk })
+    .eq("id", id).eq("user_id", c.me.id).in("status", ["proposed", "needs_clarification"]).select("id");
+  if (!claimed?.length) return { ok: false, status: 409, error: T(c.lang, "Already confirmed — it is being carried out once.", "Уже подтверждено — выполняется один раз."), duplicate: true };
   if (!ops.length) { await stamp(c, id, { status: "executed", executed_at: now, result: { note: it.slots?.title || null } }); return { ok: true, ops: [], note: true, undoable: false }; }
   return { ok: true, ops };
 }

@@ -59,10 +59,12 @@ export default function Search({ onClose, initial = "", voice = false }: { onClo
   const hits = useMemo<Hit[]>(() => {
     const s = q.trim(); const out: Hit[] = [];
     const pages: [string, string, string, string][] = [["/", "stardome", t("overview", lang), ""], ["/reports", "pie", t("reports", lang), t("reports_sub", lang)], ["/templates", "file", t("templates", lang), t("tpl_sub", lang)], ["/guide", "book", tx({ en: "User guide", ru: "Руководство пользователя", uk: "Посібник користувача", ar: "دليل المستخدم" }, lang), ""], ["/decide", "check", tx({ en: "Decisions", ru: "Решения", uk: "Рішення", ar: "القرارات" }, lang), ""], ["/projects", "layers", tx({ en: "Projects", ru: "Проекты", uk: "Проєкти", ar: "المشاريع" }, lang), ""], ["/learn", "lifebuoy", t("learn", lang), ""], ["/me", "user", t("my_profile", lang), ""]];
+    if (!isExternal(me.role)) pages.unshift(["/inow", "spark", "1inow · " + tx({ en: "My Day", ru: "Мой день", uk: "Мій день", ar: "يومي" }, lang), tx({ en: "What needs you now, and why", ru: "Что нужно вам сейчас и почему", uk: "Що потрібно вам зараз і чому", ar: "ما يحتاجك الآن ولماذا" }, lang)]);
     if (["owner", "admin"].includes(me.role)) pages.push(["/admin/users", "users", t("users", lang), ""], ["/admin/roles", "key", t("roles", lang), ""]);
     const acts: Hit[] = [];
     if (access.write.has("company.tasks")) acts.push({ id: "a-task", group: "act", icon: "bell", title: t("new_reminder", lang), sub: s || undefined, go: () => go(`/company/tasks?new=1`) });
     if (access.read.has("mail.templates")) acts.push({ id: "a-mail", group: "act", icon: "mail", title: t("write_email", lang), go: () => { onClose(); openMail({}); } });
+    if (!isExternal(me.role)) acts.push({ id: "a-inow", group: "act", icon: "spark", title: tx({ en: "Ask 1inow", ru: "Спросить 1inow", uk: "Запитати 1inow", ar: "اسأل 1inow" }, lang), sub: s || undefined, go: () => { try { if (s) sessionStorage.setItem("inow_ask", s); } catch {} go("/inow"); } });
     acts.push({ id: "a-brief", group: "act", icon: "trend", title: t("exec_brief", lang), go: () => go("/reports") });
     if (!s) {
       pages.forEach(([h, i, l, sub]) => out.push({ id: h, group: "page", icon: i, title: l, sub, go: () => go(h) }));

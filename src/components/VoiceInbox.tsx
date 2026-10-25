@@ -21,7 +21,7 @@ const ST: Record<string, [string, T4]> = {
 const RISK: Record<string, [string, T4]> = { read: ["c-info", L("Read only", "Только чтение", "Лише читання", "قراءة فقط")], low: ["c-ok", L("Low-risk change", "Небольшое изменение", "Невелика зміна", "تغيير منخفض الخطورة")],
   material: ["c-warn", L("Material change — needs your yes", "Существенное изменение — нужно ваше «да»", "Суттєва зміна — потрібне ваше «так»", "تغيير جوهري — يحتاج موافقتك")], controlled: ["c-bad", L("Controlled — not done here", "Контролируемое — здесь не выполняется", "Контрольоване — тут не виконується", "مضبوط — لا يُنفذ هنا")] };
 
-function useSpeech(lang: string, onText: (t: string) => void) {
+export function useSpeech(lang: string, onText: (t: string) => void) {
   const [on, setOn] = useState(false); const rec = useRef<any>(null);
   const SR = typeof window !== "undefined" ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition : null;
   const start = () => {
@@ -35,7 +35,7 @@ function useSpeech(lang: string, onText: (t: string) => void) {
 }
 
 /** One proposal: what was understood, its risk, the question when something is missing, confirm / cancel / undo. */
-function Proposal({ p, onDone }: { p: any; onDone?: (r: any) => void }) {
+export function Proposal({ p, onDone }: { p: any; onDone?: (r: any) => void }) {
   const { lang, toast, reload } = useApp(); const T = (x: T4, v?: any) => say(x, lang, v); const router = useRouter();
   const [state, setState] = useState<"ready" | "busy" | "done" | "cancelled" | "undone">(p.status === "rejected" ? "cancelled" : "ready"); const [res, setRes] = useState<any>(null);
   const go = async (o: { personId?: string; taskId?: string } = {}) => {
