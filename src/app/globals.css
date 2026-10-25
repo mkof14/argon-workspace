@@ -1546,3 +1546,9 @@ tr.grp td b{margin-inline-end:6px}
 .inow-next .inow-list{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
 .inow .seg{flex-wrap:wrap}
 @media (max-width:600px){.inow-head .card-h h1{font-size:18px}.inow .seg button{padding:6px 9px}}
+.inow svg{width:16px;height:16px;flex:none;vertical-align:-3px}
+.inow .card-h h1 svg{width:22px;height:22px;color:var(--accent)}
+.inow .card-h h1{white-space:nowrap}
+.inow .card-h h2{display:flex;gap:8px;align-items:center}
+.inow .card-h h2 svg{width:18px;height:18px;color:var(--accent)}
+.inow-status{padding:10px 16px;display:flex;gap:8px;align-items:center;font-size:14px}

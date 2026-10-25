@@ -22,6 +22,13 @@ export function zonedToUtc(date: string, time: string, tz?: string | null): numb
 }
 export const localToday = (tz?: string | null, d = new Date()) => { try { return new Intl.DateTimeFormat("en-CA", { timeZone: tz || "UTC" }).format(d); } catch { return todayIso(d); } };
 
+/** One query per 80 ids (a long id list in one request exceeds the address length the API accepts). */
+async function inChunks(ids: string[], q: (part: string[]) => PromiseLike<any>) {
+  const parts: string[][] = []; for (let i = 0; i < ids.length; i += 80) parts.push(ids.slice(i, i + 80));
+  const res = await Promise.all(parts.map((p) => q(p)));
+  const err = res.find((r: any) => r?.error); if (err) return err;
+  return { data: res.flatMap((r: any) => r?.data || []), error: null };
+}
 async function timed<T>(status: Record<string, SourceStatus>, name: string, fn: () => PromiseLike<T> | Promise<T>): Promise<T | null> {
   const t = Date.now();
   try { const r: any = await fn(); if (r && r.error) throw new Error(r.error.message || String(r.error)); status[name] = { ok: true, ms: Date.now() - t }; return r?.data !== undefined ? r.data : r; }
@@ -57,7 +64,7 @@ export async function gatherItems(sb: any, me: Me, now = Date.now()) {
   let blockedBy: Record<string, number> = {};
   if (open.length) {
     const ids = open.map((t) => t.id);
-    const b = await timed(status, "dependencies", () => sb.from("records").select("id,data,status").eq("section", "company.tasks").in("data->>blocked_by", ids).limit(500));
+    const b = await timed(status, "dependencies", () => inChunks(ids, (part) => sb.from("records").select("id,data,status").eq("section", "company.tasks").in("data->>blocked_by", part).limit(500)));
     for (const x of ((b as any[]) || []).filter((x) => isOpenTask(x) && x.data?.assignee_id !== me.id)) blockedBy[x.data.blocked_by] = (blockedBy[x.data.blocked_by] || 0) + 1;
   }
   for (const t of open) {
@@ -110,7 +117,7 @@ export async function gatherItems(sb: any, me: Me, now = Date.now()) {
   const extIds = ((waiting as any[]) || []).filter((w) => w.party_type === "external" && isUuid(w.record_id)).map((w) => w.record_id);
   const extKind = new Map<string, string>();
   if (extIds.length) {
-    const ek = (await timed(status, "waiting_kinds", () => sb.from("records").select("id,data").in("id", extIds))) as any[] || [];
+    const ek = (await timed(status, "waiting_kinds", () => inChunks(extIds, (ids) => sb.from("records").select("id,data").in("id", ids)))) as any[] || [];
     for (const r of ek) extKind.set(r.id, String(r.data?.waiting_kind || "").toLowerCase());
   }
   const partyOf = (w: any) => {

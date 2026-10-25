@@ -5,6 +5,7 @@
 // Nothing here owns a business object: every line links to the Workspace record it came from.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import Icon from "./Icon";
 import { useApp } from "./App";
 import { Proposal, useSpeech } from "./VoiceInbox";
@@ -51,7 +52,7 @@ type Tab = "day" | "exec" | "changes" | "eod" | "settings";
 
 /** 1inow · My Day page (route /inow; also the home page when the person or the organisation chose it). */
 export default function InowMyDay() {
-  const { lang, me, toast } = useApp(); const l = lg(lang); const T = (x: T4, v?: any) => say(x, lang, v);
+  const { lang, me, toast } = useApp(); const l = lg(lang); const T = (x: T4, v?: any) => say(x, lang, v); const router = useRouter();
   const [tab, setTab] = useState<Tab>("day");
   const [day, setDay] = useState<any>(null); const [err, setErr] = useState(""); const [undo, setUndo] = useState<any>(null);
   const [brief, setBrief] = useState<string | null>(null); const [proposal, setProposal] = useState<any>(null);
@@ -84,6 +85,7 @@ export default function InowMyDay() {
       case "dismiss": return setState(r.key, { not_relevant: true });
       case "pin": return setState(r.key, { pin: !r.pinned });
       case "brief": return setBrief(r.record_id || null);
+      case "blockers": case "open": return router.push(r.link);
       case "confirm_commitment": {
         const c = await inow({ op: "commitment", id: r.key.replace(/^commitment:/, ""), decision: "confirm", lang });
         if (c.error) toast(c.error, true); else { setProposal(c.proposal); window.scrollTo({ top: 0, behavior: "smooth" }); load(); } return;
@@ -95,6 +97,11 @@ export default function InowMyDay() {
   const execOk = !!day?.executive_available;
   const unavailable = useMemo(() => Object.entries(day?.sources || {}).filter(([, v]: any) => !v.ok).map(([k]) => SRC_T[k] ? T(SRC_T[k]) : k), [day, lang]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const sectionCard = (s: (typeof SECTIONS)[number]) => <section key={s.key} className={`card inow-sec inow-${s.key}`} data-section={s.key}>
+    <div className="card-h"><h2><Icon n={s.icon} />{T(s.label)} <span className="chip">{day.counts?.[s.key] ?? 0}</span></h2></div>
+    {(day[s.key] || []).length === 0 ? <div className="faint" style={{ padding: "0 16px 14px" }}>{T(s.empty)}</div>
+      : <ul className="inow-list">{(day[s.key] as Ranked[]).map((r) => <ItemRow key={r.key} r={r} l={l} onAct={act} onDismissCommitment={dismissCommitment} />)}</ul>}
+  </section>;
   return <div className="inow" data-inow>
     <section className="card inow-head">
       <div className="card-h" style={{ flexWrap: "wrap", gap: 8 }}>
@@ -117,14 +124,11 @@ export default function InowMyDay() {
       {!day && !err && <div className="card empty">…</div>}
       {day?.disabled && <div className="card empty">{T(L("1inow is switched off for this Workspace.", "1inow выключен для этого Workspace.", "1inow вимкнено для цього Workspace.", "1inow متوقف في مساحة العمل هذه."))}</div>}
       {day && !day.disabled && <>
-        {unavailable.length > 0 && <div className="card" role="status" style={{ padding: "10px 16px" }}><Icon n="info" /> {T(L("Temporarily unavailable: {x}. Everything else is current.", "Временно недоступно: {x}. Остальное актуально.", "Тимчасово недоступно: {x}. Решта актуальна.", "غير متاح مؤقتًا: {x}. كل ما عداه محدّث."), { x: unavailable.join(", ") })}</div>}
+        {unavailable.length > 0 && <div className="card inow-status" role="status"><Icon n="info" /> {T(L("Temporarily unavailable: {x}. Everything else is current.", "Временно недоступно: {x}. Остальное актуально.", "Тимчасово недоступно: {x}. Решта актуальна.", "غير متاح مؤقتًا: {x}. كل ما عداه محدّث."), { x: unavailable.join(", ") })}</div>}
+        {SECTIONS.filter((s) => s.key === "now").map((s) => sectionCard(s))}
         <NextCard next={day.next || []} l={l} onAct={act} />
         <div className="inow-grid">
-          {SECTIONS.map((s) => <section key={s.key} className={`card inow-sec inow-${s.key}`} data-section={s.key}>
-            <div className="card-h"><h2><Icon n={s.icon} />{T(s.label)} <span className="chip">{day.counts?.[s.key] ?? 0}</span></h2></div>
-            {(day[s.key] || []).length === 0 ? <div className="faint" style={{ padding: "0 16px 14px" }}>{T(s.empty)}</div>
-              : <ul className="inow-list">{(day[s.key] as Ranked[]).map((r) => <ItemRow key={r.key} r={r} l={l} onAct={act} onDismissCommitment={dismissCommitment} />)}</ul>}
-          </section>)}
+          {SECTIONS.filter((s) => s.key !== "now").map((s) => sectionCard(s))}
         </div>
         <p className="faint" style={{ fontSize: 12, textAlign: "center" }}>
           {day.hidden > 0 && <>{T(L("{n} snoozed or dismissed by you.", "{n} отложено или скрыто вами.", "{n} відкладено або приховано вами.", "{n} مؤجّلة أو مخفية من قبلك."), { n: day.hidden })} </>}
