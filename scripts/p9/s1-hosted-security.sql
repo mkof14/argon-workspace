@@ -121,3 +121,45 @@ begin
   return n;
 end $$;
 revoke all on function p9s1.direct_check(text) from public, anon, authenticated;
+
+-- staging performance at the database layer: p_n cold measurements per model AS the persona (the engines' per-transaction
+-- caches are discarded before each one, as a single API request starts cold). Database execution time only — not the
+-- hosted HTTP time, which needs the staging application reachable with its service key.
+--   select p9s1.perf_run('<run>', 'mgmt-us', 30);  then percentiles from p9s1.perf
+create table if not exists p9s1.perf (run text, persona text, model text, iter int, ms numeric, err text, at timestamptz default now());
+create or replace function p9s1.perf_run(p_run text, p_persona text, p_n int) returns integer language plpgsql as $f$
+declare pid uuid; q record; i int; t0 timestamptz; n int := 0; v jsonb;
+begin
+  select id into pid from public.profiles where full_name = 'P9 Synthetic ' || p_persona;
+  if pid is null then raise exception 'no persona %', p_persona; end if;
+  for i in 1..p_n loop
+    for q in select * from (values
+      ('my_day', $q$select public.inow_engines(100, 500)$q$),
+      ('attention', $q$select coalesce(jsonb_agg(to_jsonb(a)), '[]') from public.attention_items(200) a$q$),
+      ('waiting', $q$select coalesce(jsonb_agg(to_jsonb(a)), '[]') from public.waiting_for() a$q$),
+      ('open_loops', $q$select coalesce(jsonb_agg(to_jsonb(a)), '[]') from public.open_loops(null) a$q$),
+      ('executive', $q$select to_jsonb(public.exec_overview())$q$),
+      ('project_dashboard', $q$select to_jsonb(public.portfolio_overview())$q$),
+      ('commercial_dashboard', $q$select to_jsonb(public.crm_overview('{}'))$q$),
+      ('manufacturing_dashboard', $q$select to_jsonb(public.mfg_exec())$q$),
+      ('global_search', $q$select coalesce(jsonb_agg(to_jsonb(s)), '[]') from public.corp_search(p_q => 'P9PERF', p_limit => 50) s$q$)
+    ) x(m, sql) loop
+      execute 'discard temp';
+      perform set_config('request.jwt.claims', jsonb_build_object('sub', pid, 'role', 'authenticated')::text, true);
+      perform set_config('request.jwt.claim.sub', pid::text, true);
+      execute 'set local role authenticated';
+      t0 := clock_timestamp();
+      begin
+        execute q.sql into v;
+        execute 'reset role';
+        insert into p9s1.perf(run, persona, model, iter, ms) values (p_run, p_persona, q.m, i, extract(epoch from clock_timestamp() - t0) * 1000);
+      exception when others then
+        execute 'reset role';
+        insert into p9s1.perf(run, persona, model, iter, err) values (p_run, p_persona, q.m, i, sqlstate || ' ' || left(sqlerrm, 80));
+      end;
+      n := n + 1;
+    end loop;
+  end loop;
+  return n;
+end $f$;
+revoke all on function p9s1.perf_run(text, text, int) from public, anon, authenticated;
