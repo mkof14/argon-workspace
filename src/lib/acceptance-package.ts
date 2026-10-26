@@ -62,8 +62,13 @@ export function buildPackage(inp: PackageInput) {
       note: "the application mitigation does not equal PUBLIC SIGNUP CLOSED" },
     policies: { environment: inp.identity.environment, total: pol.length, approved: pol.filter((p) => p.status === "Approved").length, owner_approved: pol.filter((p) => p.owner_approved).length,
       pending: pol.filter((p) => p.status !== "Approved").map((p) => p.code), threshold_currency: [...new Set(pol.map((p) => p.currency || "not specified"))],
+      ready_for_owner_approval: pol.filter((p) => p.status !== "Approved" && p.ready_for_approval === true).length,
+      model_version: [...new Set(pol.map((p) => (p.model_version != null ? String(p.model_version) : "not specified")))],
+      // separation of duty, from the live capability state and the recorded capability-separation check
+      separation_of_duty: { conflicts: a.conflicts || [], self_approved: pol.filter((p) => p.self_approved === true).map((p) => p.code), check: brief(R("P9.SEC.CAPS")) },
       policy_approvers: a.authorities?.policy_approvers ?? null, list: pol.map((p) => ({ code: p.code, version: p.version, status: p.status, seeded_default: p.seeded, owner_approved: p.owner_approved,
-        approved_by: p.approved_by, approved_at: p.approved_at, currency: p.currency || "not specified", chain: p.chain, label: p.status === "Approved" ? "APPROVED" : "UNAPPROVED DEFAULT CONFIGURATION" })),
+        approved_by: p.approved_by, approved_at: p.approved_at, currency: p.currency || "not specified", chain: p.chain, model_version: p.model_version ?? null, ready_for_approval: p.ready_for_approval ?? null,
+        label: p.status === "Approved" ? "APPROVED" : p.ready_for_approval ? "READY FOR OWNER APPROVAL" : "UNAPPROVED DEFAULT CONFIGURATION" })),
       gate: brief(R("P9.POLICIES.PRODUCTION")) },
     access: { environment: inp.identity.environment, ...a, matrix: brief(R("P9.ACCESS.PRODUCTION")) },
     staging: { deployed: brief(R("P9.STAGING.DEPLOYED")), personas: brief(R("P9.PERSONAS.STAGING")), security: brief(R("P9.SEC.STAGING")), performance: brief(R("P9.PERF.STAGING")),
@@ -133,6 +138,11 @@ export function renderMarkdown(p: any): string {
   h("7. Policies");
   li("Approved / total", `${p.policies.approved} / ${p.policies.total} (owner-approved ${p.policies.owner_approved}) in ${p.policies.environment}`); li("Pending policies", p.policies.pending.join(", ") || "none");
   li("Threshold currency", p.policies.threshold_currency.join(", ")); li("Policy approver status", p.policies.policy_approvers != null ? `${p.policies.policy_approvers} Policy Approver(s) besides owners` : "unknown"); li("Production gate", st(p.policies.gate));
+  li("Policy model version", p.policies.model_version.join(", ")); li("Ready for owner approval", `${p.policies.ready_for_owner_approval} / ${p.policies.total}`);
+  const sod = p.policies.separation_of_duty;
+  li("Separation of duty", `${sod.conflicts.length ? sod.conflicts.map((c: any) => `${c.rule}: ${c.accounts}`).join("; ") : "no conflicting capability holders"}; self-approved policies: ${sod.self_approved.join(", ") || "none"}; capability-separation check: ${st(sod.check)}`);
+  L.push("", "| Policy | Version | Model | Status | Currency | Approval chain (tier: steps) |", "|---|---|---|---|---|---|");
+  for (const x of p.policies.list) L.push(`| ${x.code} | ${x.version} | ${x.model_version ?? "—"} | ${x.label} | ${x.currency} | ${(x.chain || []).map((t: any) => `${t.tier}: ${(t.steps || []).join(t.mode === "parallel" ? " + " : " → ")}`).join("; ").replace(/\|/g, "/") || "—"} |`);
   h("8. Users / Access");
   li("Access matrix complete", st(p.access.matrix)); li(`MFA coverage (${p.access.environment})`, `${p.access.privileged_with_mfa ?? "?"} of ${p.access.requiring_mfa ?? "?"} owners/administrators enrolled; required: ${yn(p.access.mfa_required)}`);
   li("Unresolved conflicts", (p.access.conflicts || []).length ? p.access.conflicts.map((c: any) => `${c.rule}: ${c.accounts}`).join("; ") : "none"); li("Accounts", `${p.access.active ?? "?"} active, ${p.access.disabled ?? "?"} disabled, ${p.access.owners ?? "?"} owners, ${p.access.admins ?? "?"} admins, ${p.access.controlled_data_users ?? "?"} controlled-data users`);

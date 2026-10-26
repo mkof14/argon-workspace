@@ -188,3 +188,20 @@ test("the Markdown package has exactly the 15 sections of R2-24", () => {
   assert.match(p.md, /^# AGRON WORKSPACE — ACCEPTANCE PACKAGE/);
   assert.match(p.md, /PRODUCTION READY: NO/);
 });
+test("the package reports the policy model: version, readiness, currency, chains and separation of duty — and approves nothing", () => {
+  const P = (code: string, chain: any[]) => ({ code, name: code, version: 3, status: "Draft", active: true, seeded: true, approved_by: null, approved_at: null, approved_version: null, owner_approved: false,
+    currency: "USD", chain, ready_for_approval: true, model_version: 2, self_approved: false });
+  const live = { at: "x", policies: [
+    P("ECR", [{ tier: "Escalated", mode: "parallel", steps: ["Engineering lead", "Management"] }, { tier: "Standard", mode: "sequential", steps: ["Engineering lead"] }]),
+    P("PROPOSAL", [{ tier: "≤ $250k", mode: "sequential", steps: ["Proposal Approver"] }, { tier: "> $1M", mode: "sequential", steps: ["Proposal Approver", "Pricing Approver", "Management"] }])],
+    access: { conflicts: [] } };
+  const p = buildPackage({ identity: ID, checks: [REG], evidence: [goodReg()], live, actions: [], events: [], findings: [], changes: [], now: NOW });
+  assert.equal(p.json.policies.approved, 0); assert.equal(p.json.policies.ready_for_owner_approval, 2);
+  assert.deepEqual(p.json.policies.model_version, ["2"]); assert.deepEqual(p.json.policies.threshold_currency, ["USD"]);
+  assert.deepEqual(p.json.policies.separation_of_duty.conflicts, []); assert.deepEqual(p.json.policies.separation_of_duty.self_approved, []);
+  assert.ok(p.json.policies.list.every((x: any) => x.label === "READY FOR OWNER APPROVAL"));
+  assert.match(p.md, /Policy model version:\*\* 2/); assert.match(p.md, /Ready for owner approval:\*\* 2 \/ 2/);
+  assert.match(p.md, /\| ECR \| 3 \| 2 \| READY FOR OWNER APPROVAL \| USD \| Escalated: Engineering lead \+ Management; Standard: Engineering lead \|/);
+  assert.match(p.md, /> \$1M: Proposal Approver → Pricing Approver → Management/);
+  assert.match(p.md, /Separation of duty:\*\* no conflicting capability holders; self-approved policies: none/);
+});

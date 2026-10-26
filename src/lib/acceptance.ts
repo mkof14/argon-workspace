@@ -37,7 +37,7 @@ export type ActionEvent = { id: number; action_id: number; event: "closed" | "re
 export type Finding = { seq: number; finding_id: string; severity: "P0" | "P1" | "P2" | "P3"; description: string; state: "open" | "fixed" | "mitigated" | "accepted"; owner: string; blocking_gate: "none" | Gate; recorded_at: string; source: string };
 export type Live = {
   at: string; environment?: string; db_version?: number | null;
-  policies?: { code: string; name: string; version: number; status: string; active: boolean; seeded: boolean; approved_by: string | null; approved_at: string | null; approved_version: number | null; owner_approved: boolean; currency: string | null; chain: any }[];
+  policies?: { code: string; name: string; version: number; status: string; active: boolean; seeded: boolean; approved_by: string | null; approved_at: string | null; approved_version: number | null; owner_approved: boolean; currency: string | null; chain: any; ready_for_approval?: boolean | null; model_version?: number | null; self_approved?: boolean | null }[];
   access?: Record<string, any>; backup?: { state: any; last_job: any; last_success: string | null }; integrity?: any;
   signup?: { disable_signup: boolean | null; at: string; error?: string }; integrations?: Record<string, boolean>;
 };
