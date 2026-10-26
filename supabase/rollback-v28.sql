@@ -113,6 +113,7 @@ alter table public.approval_policies drop column if exists currency;
 
 -- 2. 1inow layer
 drop function if exists public.inow_engines(integer, integer);
+drop function if exists public.inow_dependents(integer);
 drop function if exists public.inow_detect_commitments(integer);
 drop function if exists public.inow_touch(uuid);
 drop function if exists public.inow_metric(text, integer);

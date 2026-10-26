@@ -414,6 +414,26 @@ end $$;
       Open loops are the person's own (owner) and those of projects they own or manage; company-wide loops stay on
       the management pages. Every engine keeps its own reading rule: this function adds no access.
    --------------------------------------------------------------------------------------------- */
+-- the dependents of my open tasks, from my visible working set (pg_temp.mgmt_v, built by _mgmt_base for this viewer and
+-- statement — tested equal to row-level security); only counts, keyed by my own task ids
+create or replace function public.inow_dependents(p_limit integer default 400) returns jsonb
+  language plpgsql security definer set search_path = public set jit = off
+as $$
+declare me uuid := auth.uid(); v jsonb;
+begin
+  if me is null or not public.is_active_employee(me) or not public.session_ok() then raise exception 'Not signed in' using errcode = '42501'; end if;
+  perform public._mgmt_base(me);
+  select coalesce(jsonb_object_agg(b::text, n), '{}') into v from (
+    select d.m_blocked_by b, count(*)::int n from pg_temp.mgmt_v d
+     where d.section = 'company.tasks' and coalesce(d.status, '') not in ('Completed', 'Cancelled', 'Done') and d.m_assignee is distinct from me
+       and d.m_blocked_by in (select m.id from pg_temp.mgmt_v m where m.section = 'company.tasks' and m.m_assignee = me and coalesce(m.status, '') not in ('Completed', 'Cancelled', 'Done')
+                              order by m.m_due nulls last limit least(greatest(p_limit, 1), 1000))
+     group by 1) x;
+  return v;
+end $$;
+revoke all on function public.inow_dependents(integer) from public, anon;
+grant execute on function public.inow_dependents(integer) to authenticated;
+
 create or replace function public.inow_engines(p_attention integer default 40, p_loops integer default 150) returns jsonb
   language plpgsql volatile security invoker set search_path = public set jit = off
 as $$
@@ -447,18 +467,11 @@ begin
   t := clock_timestamp();
   begin r := r || jsonb_build_object('manufacturing', public.mfg_today()); st := st || jsonb_build_object('manufacturing', jsonb_build_object('ok', true, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int));
   exception when others then st := st || jsonb_build_object('manufacturing', jsonb_build_object('ok', false, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int)); end;
-  -- who is blocked by my open tasks (open tasks of other people that name mine in "Blocked by"); row-level security
-  -- applies (invoker), so a dependent task I may not open is not counted
+  -- who is blocked by my open tasks (open tasks of other people that name mine in "Blocked by"), counted in the visible
+  -- working set the engines above already built for me (the same rule as row-level security, without re-checking every row)
   t := clock_timestamp();
   begin
-    v := (select coalesce(jsonb_object_agg(b, n), '{}') from (
-      select d.data->>'blocked_by' b, count(*)::int n from public.records d
-       where d.section = 'company.tasks' and d.data ? 'blocked_by' and coalesce(d.status, '') not in ('Completed', 'Cancelled', 'Done')
-         and d.data->>'assignee_id' is distinct from me::text
-         and d.data->>'blocked_by' in (select m.id::text from public.records m where m.section = 'company.tasks' and m.data->>'assignee_id' = me::text and coalesce(m.status, '') not in ('Completed', 'Cancelled', 'Done')
-                                        order by m.data->>'due' nulls last limit 400) -- the same 400 tasks My Day lists
-       group by 1) x);
-    r := r || jsonb_build_object('dependents', v); st := st || jsonb_build_object('dependencies', jsonb_build_object('ok', true, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int));
+    r := r || jsonb_build_object('dependents', public.inow_dependents(400)); st := st || jsonb_build_object('dependencies', jsonb_build_object('ok', true, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int));
   exception when others then st := st || jsonb_build_object('dependencies', jsonb_build_object('ok', false, 'ms', (extract(epoch from clock_timestamp() - t) * 1000)::int)); end;
   return r || jsonb_build_object('status', st);
 end $$;
